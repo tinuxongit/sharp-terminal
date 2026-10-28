@@ -18,7 +18,7 @@ cd "$REPO_DIR"
 echo "Building sharp (optimize=$OPTIMIZE)..."
 zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize="$OPTIMIZE"
 
-for resource in bin/sharp.exe bin/conpty.dll bin/OpenConsole.exe share/terminfo/ghostty.terminfo share/licenses/conpty/LICENSE.txt; do
+for resource in bin/sharp.exe bin/conpty.dll bin/OpenConsole.exe share/terminfo/ghostty.terminfo share/licenses/conpty/LICENSE.txt share/licenses/sharp/LICENSE.txt; do
     if [ ! -f "zig-out/$resource" ]; then
         echo "ERROR: Incomplete Windows build — zig-out/$resource not found" >&2
         exit 1
@@ -42,9 +42,11 @@ for binary in sharp.exe conpty.dll OpenConsole.exe; do
     cp "zig-out/bin/$binary" "$STAGE_DIR/"
     echo "  $binary"
 done
-mkdir -p "$STAGE_DIR/share/licenses/conpty"
-cp zig-out/share/licenses/conpty/LICENSE.txt "$STAGE_DIR/share/licenses/conpty/"
-echo "  share/licenses/conpty/LICENSE.txt"
+for license in conpty sharp; do
+    mkdir -p "$STAGE_DIR/share/licenses/$license"
+    cp "zig-out/share/licenses/$license/LICENSE.txt" "$STAGE_DIR/share/licenses/$license/"
+    echo "  share/licenses/$license/LICENSE.txt"
+done
 
 # Copy share resources (themes, shell-integration)
 if [ -d zig-out/share/ghostty ]; then

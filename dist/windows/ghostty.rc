@@ -39,7 +39,7 @@ BEGIN
             VALUE "FileDescription",  "Sharp terminal emulator"
             VALUE "FileVersion",      "1.3.0.0"
             VALUE "InternalName",     "sharp"
-            VALUE "LegalCopyright",   "Original work copyright Mitchell Hashimoto. Windows port additions copyright Shiwei Song. MIT License."
+            VALUE "LegalCopyright",   "MIT License. See share\\licenses\\sharp\\LICENSE.txt."
             VALUE "OriginalFilename", "sharp.exe"
             VALUE "ProductName",      "Sharp"
             VALUE "ProductVersion",   "1.3.0.0"

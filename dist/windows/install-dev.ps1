@@ -15,7 +15,8 @@ if ($InstallRoot.StartsWith('\\')) {
 
 $requiredFiles = @(
     'bin\sharp.exe', 'bin\conpty.dll', 'bin\OpenConsole.exe',
-    'share\terminfo\ghostty.terminfo', 'share\licenses\conpty\LICENSE.txt'
+    'share\terminfo\ghostty.terminfo', 'share\licenses\conpty\LICENSE.txt',
+    'share\licenses\sharp\LICENSE.txt'
 )
 $resourceDirs = @('share\ghostty\themes', 'share\ghostty\shell-integration')
 foreach ($relativePath in $requiredFiles) {

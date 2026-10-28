@@ -96,6 +96,11 @@ pub fn install(self: *const Ghostty) void {
             b.path("dist/windows/conpty-LICENSE.txt"),
             "share/licenses/conpty/LICENSE.txt",
         ).step);
+        // MIT requires the copyright notice in every copy of the program.
+        b.getInstallStep().dependOn(&b.addInstallFile(
+            b.path("LICENSE"),
+            "share/licenses/sharp/LICENSE.txt",
+        ).step);
     }
 }
 
