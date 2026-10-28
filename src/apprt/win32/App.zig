@@ -6,7 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const apprt = @import("../../apprt.zig");
 const configpkg = @import("../../config.zig");
-const Config = configpkg.Config;
+pub const Config = configpkg.Config;
 const CoreApp = @import("../../App.zig");
 const internal_os = @import("../../os/main.zig");
 const global = @import("../../global.zig");
@@ -20,17 +20,16 @@ const canvas = @import("canvas.zig");
 const profiles = @import("profiles.zig");
 const session = @import("session.zig");
 const servers = @import("servers.zig");
-const SplitTree = @import("../../datastruct/split_tree.zig").SplitTree;
 const w32 = @import("win32.zig");
 const brand = @import("brand.zig");
 const UntrustedUrl = @import("UntrustedUrl.zig");
 const wide_string = @import("wide_string.zig");
 
-const OpenUrlRequest = struct {
+pub const OpenUrlRequest = struct {
     kind: apprt.action.OpenUrl.Kind,
     url: []u8,
 
-    fn deinit(self: *OpenUrlRequest, alloc: Allocator) void {
+    pub fn deinit(self: *OpenUrlRequest, alloc: Allocator) void {
         alloc.free(self.url);
         alloc.destroy(self);
     }
@@ -39,12 +38,11 @@ const OpenUrlRequest = struct {
 const input = @import("../../input.zig");
 const find_bar = @import("find_bar.zig");
 const command_palette = @import("command_palette.zig");
-const ime = @import("ime.zig");
-const win32_input = @import("win32_input.zig");
-const clipboard = @import("clipboard.zig");
 const workspace = @import("workspace.zig");
 const tab_rename = @import("tab_rename.zig");
-const splits = @import("splits.zig");
+const actions = @import("actions.zig");
+const pane_messages = @import("pane_messages.zig");
+const global_hotkey = @import("global_hotkey.zig");
 
 comptime {
     // Exports the exe's load configuration; nothing references it.
@@ -66,7 +64,7 @@ const WM_APP_WAKEUP: u32 = w32.WM_APP + 1;
 
 /// The core holds the renderer lock during open_url, and ShellExecuteW pumps
 /// messages whose handlers take that lock, so the URL is opened later.
-const WM_APP_OPEN_URL: u32 = w32.WM_APP + 4;
+pub const WM_APP_OPEN_URL: u32 = w32.WM_APP + 4;
 
 /// Timer ID for the quit-after-last-window-closed delay.
 const QUIT_TIMER_ID: usize = 1;
@@ -221,7 +219,7 @@ pub fn init(
     const tc = w32.WNDCLASSEXW{
         .cbSize = @sizeOf(w32.WNDCLASSEXW),
         .style = w32.CS_OWNDC,
-        .lpfnWndProc = &surfaceWndProc,
+        .lpfnWndProc = &pane_messages.surfaceWndProc,
         .cbClsExtra = 0,
         .cbWndExtra = 0,
         .hInstance = hinstance,
@@ -288,7 +286,7 @@ pub fn init(
     _ = w32.SetWindowLongPtrW(self.msg_hwnd.?, w32.GWLP_USERDATA, @bitCast(@intFromPtr(self)));
 
     // Register global hotkey for quick terminal (if configured).
-    self.registerGlobalHotkey();
+    global_hotkey.registerGlobalHotkey(self);
 
     // Builds without Zig's segfault handler (ReleaseFast) crash through
     // here; the handler and panics are covered in main_ghostty.zig.
@@ -568,988 +566,14 @@ pub fn performIpc(
     return false;
 }
 
+/// The core asks the app to act; actions.zig carries each action out.
 pub fn performAction(
     self: *App,
     target: apprt.Target,
     comptime action: apprt.Action.Key,
     value: apprt.Action.Value(action),
 ) !bool {
-    switch (action) {
-        .quit => {
-            self.quit_requested = true;
-            w32.PostQuitMessage(0);
-            return true;
-        },
-
-        .new_window => {
-            // Inherit opacity-toggle state from the parent window: if the
-            // user toggled it to opaque via toggle_background_opacity, the
-            // new window should start opaque too. Mirrors macOS behavior
-            // from upstream e5c31e8b3 (#11583).
-            const force_opaque: bool = switch (target) {
-                .app => false,
-                .surface => |cs| blk: {
-                    if (self.config.@"background-opacity" >= 1.0) break :blk false;
-                    const h = cs.rt_surface.parent_window.hwnd orelse break :blk false;
-                    const ex = w32.GetWindowLongW(h, w32.GWL_EXSTYLE);
-                    break :blk (ex & w32.WS_EX_LAYERED) == 0;
-                },
-            };
-
-            const alloc = self.core_app.alloc;
-            const window = alloc.create(Window) catch |err| {
-                log.err("failed to allocate new window err={}", .{err});
-                return true;
-            };
-            window.init(self, .{ .force_opaque = force_opaque }) catch |err| {
-                log.err("failed to init new window err={}", .{err});
-                alloc.destroy(window);
-                return true;
-            };
-            self.windows.append(alloc, window) catch |err| {
-                log.err("failed to track new window err={}", .{err});
-                window.deinit();
-                alloc.destroy(window);
-                return true;
-            };
-            _ = window.addTab() catch |err| {
-                log.err("failed to add tab to new window err={}", .{err});
-                return true;
-            };
-            return true;
-        },
-
-        .set_title => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    const rt_surface = core_surface.rt_surface;
-                    rt_surface.setTitle(value.title);
-                },
-            }
-            return true;
-        },
-
-        .pwd => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    // Shells like cmd report at every prompt; only a real
-                    // change repaints and rewrites the session.
-                    if (core_surface.rt_surface.setFolder(value.pwd)) {
-                        core_surface.rt_surface.parent_window.invalidateTabBar();
-                        self.saveSession();
-                    }
-                },
-            }
-            return true;
-        },
-
-        .ring_bell => {
-            // A bell from a tab out of sight marks it in the tab sidebar.
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| workspace.noteBell(core_surface.rt_surface.parent_window, core_surface.rt_surface),
-            }
-            // Audio bell.
-            _ = w32.MessageBeep(0xFFFFFFFF);
-            // Visual bell: flash the taskbar button if the window owning
-            // this surface isn't currently the foreground window. Without
-            // this, BEL on a backgrounded terminal is invisible.
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    if (core_surface.rt_surface.parent_window.hwnd) |win_hwnd| {
-                        if (w32.GetForegroundWindow() != win_hwnd) {
-                            var fwi: w32.FLASHWINFO = .{
-                                .cbSize = @sizeOf(w32.FLASHWINFO),
-                                .hwnd = win_hwnd,
-                                .dwFlags = w32.FLASHW_ALL | w32.FLASHW_TIMERNOFG,
-                                .uCount = 2,
-                                .dwTimeout = 0,
-                            };
-                            _ = w32.FlashWindowEx(&fwi);
-                        }
-                    }
-                },
-            }
-            return true;
-        },
-
-        .quit_timer => {
-            switch (value) {
-                .start => self.startQuitTimer(),
-                .stop => self.stopQuitTimer(),
-            }
-            return true;
-        },
-
-        .config_change => {
-            // Update our stored config with the new one.
-            if (value.config.clone(self.core_app.alloc)) |new_config| {
-                self.config.deinit();
-                self.config = new_config;
-
-                // Recreate the background brush from the new config.
-                if (self.bg_brush) |old_brush| {
-                    _ = w32.DeleteObject(@ptrCast(old_brush));
-                }
-                const bg = new_config.background;
-                self.bg_brush = w32.CreateSolidBrush(w32.RGB(bg.r, bg.g, bg.b));
-
-                // Refresh DWM chrome (dark/light, caption color) on
-                // every live window so a config reload that changes
-                // the background color updates the title bar.
-                for (self.windows.items) |w| w.onConfigChange();
-
-                // Re-register global hotkeys against the new keybinds.
-                for (self.global_hotkeys.items) |hk| _ = w32.UnregisterHotKey(null, hk.id);
-                self.global_hotkeys.clearRetainingCapacity();
-                self.registerGlobalHotkey();
-
-                // Update quick terminal config.
-                if (self.quick_terminal) |qt| {
-                    qt.onConfigChange(&self.config);
-                }
-            } else |err| {
-                log.err("error updating app config err={}", .{err});
-            }
-            return true;
-        },
-
-        .toggle_fullscreen => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    core_surface.rt_surface.toggleFullscreen();
-                },
-            }
-            return true;
-        },
-
-        .toggle_maximize => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    if (core_surface.rt_surface.parent_window.hwnd) |hwnd| {
-                        if (w32.IsZoomed(hwnd) != 0) {
-                            _ = w32.ShowWindow(hwnd, w32.SW_RESTORE);
-                        } else {
-                            _ = w32.ShowWindow(hwnd, w32.SW_MAXIMIZE);
-                        }
-                    }
-                },
-            }
-            return true;
-        },
-
-        .close_window => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    // Close the entire window (all tabs), not just one tab.
-                    // Confirm first if any tab still has a running process.
-                    const win = core_surface.rt_surface.parent_window;
-                    if (win.confirmCloseIfNeeded()) win.close();
-                },
-            }
-            return true;
-        },
-
-        .open_config => {
-            // Sharp's settings panel is its config UI; the file itself is
-            // one click away inside it.
-            const window: ?*Window = switch (target) {
-                .surface => |core_surface| core_surface.rt_surface.parent_window,
-                .app => if (self.windows.items.len > 0) self.windows.items[0] else null,
-            };
-            if (window) |w| {
-                if (!w.is_quick_terminal) {
-                    w.openSettings();
-                    return true;
-                }
-            }
-            return self.openConfigFile(value);
-        },
-
-        .scrollbar => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    core_surface.rt_surface.setScrollbar(value);
-                },
-            }
-            return true;
-        },
-
-        .mouse_shape => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    core_surface.rt_surface.setMouseShape(value);
-                },
-            }
-            return true;
-        },
-
-        .open_url => {
-            // Deferred via WM_APP_OPEN_URL; the handler owns the copy.
-            if (value.url.len == 0) return true;
-            const hwnd = self.msg_hwnd orelse return true;
-            const alloc = self.core_app.alloc;
-            const owned = alloc.dupe(u8, value.url) catch {
-                log.warn("oom allocating url to open", .{});
-                return true;
-            };
-            const request = alloc.create(OpenUrlRequest) catch {
-                alloc.free(owned);
-                return true;
-            };
-            request.* = .{ .kind = value.kind, .url = owned };
-            if (w32.PostMessageW(hwnd, WM_APP_OPEN_URL, @intFromPtr(request), 0) == 0) {
-                request.deinit(alloc);
-            }
-            return true;
-        },
-
-        .mouse_over_link => {
-            // Show the hovered URL in a small status bubble at the bottom
-            // of the surface (cursor shape is handled by mouse_shape).
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    core_surface.rt_surface.setMouseOverLink(value.url);
-                },
-            }
-            return true;
-        },
-
-        .start_search => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    find_bar.setSearchActive(core_surface.rt_surface, true, value.needle);
-                },
-            }
-            return true;
-        },
-
-        .end_search => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    find_bar.setSearchActive(core_surface.rt_surface, false, "");
-                },
-            }
-            return true;
-        },
-
-        .search_total => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    find_bar.setSearchTotal(core_surface.rt_surface, value.total);
-                },
-            }
-            return true;
-        },
-
-        .search_selected => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    find_bar.setSearchSelected(core_surface.rt_surface, value.selected);
-                },
-            }
-            return true;
-        },
-
-        .desktop_notification => {
-            self.showDesktopNotification(target, value);
-            return true;
-        },
-
-        .new_tab => {
-            // Add a new tab to the parent window of the focused surface.
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    const parent = core_surface.rt_surface.parent_window;
-                    _ = parent.addTab() catch |err| {
-                        log.err("failed to add new tab err={}", .{err});
-                    };
-                },
-            }
-            return true;
-        },
-
-        .close_tab => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    core_surface.rt_surface.parent_window.closeTabMode(
-                        value,
-                        core_surface.rt_surface,
-                    );
-                },
-            }
-            return true;
-        },
-
-        .goto_tab => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    _ = core_surface.rt_surface.parent_window.selectTab(value);
-                },
-            }
-            return true;
-        },
-
-        .set_tab_title => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    core_surface.rt_surface.parent_window.onTabTitleChanged(
-                        core_surface.rt_surface,
-                        value.title,
-                    );
-                },
-            }
-            return true;
-        },
-
-        .set_window_title => {
-            switch (target) {
-                .app => return false,
-                .surface => |core_surface| {
-                    core_surface.rt_surface.parent_window.setWindowTitle(value.title);
-                },
-            }
-            return true;
-        },
-
-        .move_tab => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    core_surface.rt_surface.parent_window.moveTab(value.amount);
-                },
-            }
-            return true;
-        },
-
-        .move_tab_to_new_window => {
-            return switch (target) {
-                .app => false,
-                .surface => |core_surface| try core_surface.rt_surface.parent_window
-                    .moveTabToNewWindow(core_surface.rt_surface),
-            };
-        },
-
-        .toggle_tab_overview => {
-            return switch (target) {
-                .app => false,
-                .surface => |surface| surface.rt_surface.parent_window.requestToggleTabOverview(),
-            };
-        },
-
-        .initial_size => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    if (core_surface.rt_surface.parent_window.hwnd) |h| {
-                        // Convert client size to window size (accounts for
-                        // title bar, borders, scrollbar).
-                        var rect = w32.RECT{
-                            .left = 0,
-                            .top = 0,
-                            .right = @intCast(value.width),
-                            .bottom = @intCast(value.height),
-                        };
-                        _ = w32.AdjustWindowRectEx(&rect, w32.WS_OVERLAPPEDWINDOW, 0, 0);
-                        _ = w32.SetWindowPos(
-                            h,
-                            null,
-                            0,
-                            0,
-                            rect.right - rect.left,
-                            rect.bottom - rect.top,
-                            w32.SWP_NOZORDER | w32.SWP_NOMOVE,
-                        );
-                    }
-                },
-            }
-            return true;
-        },
-
-        .resize_window => {
-            return switch (target) {
-                .app => false,
-                .surface => |core| core.rt_surface.parent_window.resizeSurface(core.rt_surface, value),
-            };
-        },
-
-        .reload_config => {
-            // Reload config and push to the core, which triggers
-            // config_change actions on all surfaces.
-            const alloc = self.core_app.alloc;
-            if (value.soft) {
-                // Soft reload: re-apply existing config (for conditional state changes)
-                self.core_app.updateConfig(self, &self.config) catch |err| {
-                    log.err("soft config reload error: {}", .{err});
-                };
-            } else {
-                // Hard reload: read config from disk
-                var new_config = Config.load(alloc) catch |err| {
-                    log.err("failed to reload config: {}", .{err});
-                    return true;
-                };
-                defer new_config.deinit();
-                self.core_app.updateConfig(self, &new_config) catch |err| {
-                    log.err("config update error: {}", .{err});
-                };
-            }
-            return true;
-        },
-
-        .show_child_exited => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    const exit_code = value.exit_code;
-                    if (exit_code != 0) {
-                        // Show a message box including the actual exit code.
-                        const hwnd_val = core_surface.rt_surface.parent_window.hwnd;
-                        var utf8_buf: [128]u8 = undefined;
-                        const msg_utf8 = std.mem.print(
-                            &utf8_buf,
-                            "The shell process exited with code {d}.",
-                            .{exit_code},
-                        ) catch "The shell process exited unexpectedly.";
-
-                        var utf16_buf: [256]u16 = undefined;
-                        const utf16_len = std.unicode.utf8ToUtf16Le(&utf16_buf, msg_utf8) catch {
-                            _ = w32.MessageBoxW(
-                                hwnd_val,
-                                std.unicode.utf8ToUtf16LeStringLiteral("The shell process exited unexpectedly."),
-                                std.unicode.utf8ToUtf16LeStringLiteral(brand.name),
-                                w32.MB_ICONWARNING,
-                            );
-                            return true;
-                        };
-                        utf16_buf[utf16_len] = 0;
-                        _ = w32.MessageBoxW(
-                            hwnd_val,
-                            @ptrCast(&utf16_buf),
-                            std.unicode.utf8ToUtf16LeStringLiteral(brand.name),
-                            w32.MB_ICONWARNING,
-                        );
-                    }
-                },
-            }
-            return true;
-        },
-
-        .toggle_window_decorations => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    core_surface.rt_surface.toggleWindowDecorations();
-                },
-            }
-            return true;
-        },
-
-        .close_all_windows => {
-            // Close all surfaces by posting WM_CLOSE to each.
-            // The core tracks surfaces; iterate via quit.
-            self.quit_requested = true;
-            w32.PostQuitMessage(0);
-            return true;
-        },
-
-        .toggle_background_opacity => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    if (core_surface.rt_surface.parent_window.hwnd) |h| {
-                        const current_ex = w32.GetWindowLongW(h, w32.GWL_EXSTYLE);
-                        if (current_ex & w32.WS_EX_LAYERED != 0) {
-                            // Remove layered style (restore full opacity).
-                            // Clearing WS_EX_LAYERED is not repainted
-                            // automatically — without an explicit redraw the
-                            // window stays translucent until the next
-                            // repaint (e.g. a later focus change).
-                            _ = w32.SetWindowLongW(h, w32.GWL_EXSTYLE, current_ex & ~w32.WS_EX_LAYERED);
-                            _ = w32.RedrawWindow(
-                                h,
-                                null,
-                                null,
-                                w32.RDW_ERASE | w32.RDW_INVALIDATE | w32.RDW_FRAME | w32.RDW_ALLCHILDREN,
-                            );
-                        } else {
-                            // Apply opacity from config
-                            _ = w32.SetWindowLongW(h, w32.GWL_EXSTYLE, current_ex | w32.WS_EX_LAYERED);
-                            const alpha: u8 = @intFromFloat(@round(self.config.@"background-opacity" * 255.0));
-                            _ = w32.SetLayeredWindowAttributes(h, 0, alpha, w32.LWA_ALPHA);
-                        }
-                    }
-                },
-            }
-            return true;
-        },
-
-        .goto_window => {
-            // With no tab bar, each "tab" is a window — goto_window
-            // and goto_tab behave the same. Just acknowledge.
-            return true;
-        },
-
-        .reset_window_size => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    if (core_surface.rt_surface.parent_window.hwnd) |h| {
-                        // Reset to default 800x600
-                        var rect = w32.RECT{
-                            .left = 0,
-                            .top = 0,
-                            .right = 800,
-                            .bottom = 600,
-                        };
-                        _ = w32.AdjustWindowRectEx(&rect, w32.WS_OVERLAPPEDWINDOW, 0, 0);
-                        _ = w32.SetWindowPos(
-                            h,
-                            null,
-                            0,
-                            0,
-                            rect.right - rect.left,
-                            rect.bottom - rect.top,
-                            w32.SWP_NOZORDER | w32.SWP_NOMOVE,
-                        );
-                    }
-                },
-            }
-            return true;
-        },
-
-        .copy_title_to_clipboard => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    if (core_surface.rt_surface.parent_window.hwnd) |h| {
-                        // Get the window title and put it on the clipboard
-                        var wbuf: [512]u16 = undefined;
-                        const wlen: usize = @intCast(w32.GetWindowTextW(h, &wbuf, @intCast(wbuf.len)));
-                        if (wlen > 0) {
-                            var utf8_buf: [1024]u8 = undefined;
-                            const utf8_len = wide_string.toUtf8(&utf8_buf, wbuf[0..wlen]);
-                            if (utf8_len > 0) {
-                                // Copy to clipboard via the core surface
-                                const alloc = self.core_app.alloc;
-                                const text = alloc.dupeSentinel(u8, utf8_buf[0..utf8_len], 0) catch return true;
-                                defer alloc.free(text);
-                                core_surface.rt_surface.setClipboard(
-                                    .standard,
-                                    &.{.{ .mime = "text/plain", .data = text }},
-                                    false,
-                                ) catch {};
-                            }
-                        }
-                    }
-                },
-            }
-            return true;
-        },
-
-        .export_terminal_io => return self.exportTerminalIo(target, value.contents),
-
-        .render => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    if (core_surface.rt_surface.core_surface_ready) {
-                        core_surface.rt_surface.core_surface.renderer_thread.wakeup.notify() catch {};
-                    }
-                },
-            }
-            return true;
-        },
-
-        // Acknowledge actions that don't need Win32-specific handling.
-        // The core handles the logic; we just confirm receipt.
-        .key_sequence,
-        .key_table,
-        .cell_size,
-        .readonly,
-        // Platform-specific actions that don't apply on Windows:
-        .secure_input, // macOS EnableSecureEventInput
-        .undo, // macOS NSUndoManager
-        .redo, // macOS NSUndoManager
-        .show_gtk_inspector, // GTK-only
-        .show_on_screen_keyboard, // GTK/mobile
-        .inspector, // Not yet implemented (debug overlay)
-        .render_inspector, // Not yet implemented (debug overlay)
-        => return true,
-
-        .renderer_health => {
-            // Surface a warning when the GPU renderer degrades so a frozen
-            // display is explainable (macOS shows an in-window message).
-            switch (value) {
-                .healthy => {},
-                .unhealthy => {
-                    self.notif_desktop_surface_id = 0;
-                    self.showDesktopNotificationText(
-                        "Renderer Unhealthy",
-                        "The GPU renderer is in an unhealthy state; terminal output may stop updating.",
-                    );
-                },
-            }
-            return true;
-        },
-
-        .progress_report => {
-            // Reflect shell/TUI progress (OSC 9;4) on the taskbar button, the
-            // Windows equivalent of the macOS Dock progress. Gated on
-            // progress-style; the win32 apprt has no progress bar of its own.
-            if (!self.config.@"progress-style") return true;
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    const hwnd = core_surface.rt_surface.parent_window.hwnd orelse
-                        return true;
-                    const tb = self.taskbarList() orelse return true;
-                    switch (value.state) {
-                        .remove => tb.SetProgressState(hwnd, w32.TBPF_NOPROGRESS),
-                        .indeterminate => tb.SetProgressState(hwnd, w32.TBPF_INDETERMINATE),
-                        .set => {
-                            tb.SetProgressState(hwnd, w32.TBPF_NORMAL);
-                            if (value.progress) |p| tb.SetProgressValue(hwnd, p, 100);
-                        },
-                        .@"error" => {
-                            tb.SetProgressState(hwnd, w32.TBPF_ERROR);
-                            if (value.progress) |p| tb.SetProgressValue(hwnd, p, 100);
-                        },
-                        .pause => {
-                            tb.SetProgressState(hwnd, w32.TBPF_PAUSED);
-                            if (value.progress) |p| tb.SetProgressValue(hwnd, p, 100);
-                        },
-                    }
-                },
-            }
-            return true;
-        },
-
-        .color_change => {
-            // Track terminal background color changes (OSC 10/11) so the
-            // class background brush matches. The renderer paints the
-            // client area via OpenGL — the brush only affects the brief
-            // flash on resize before the renderer catches up.
-            if (value.kind != .background) return true;
-            if (self.bg_brush) |old_brush| {
-                _ = w32.DeleteObject(@ptrCast(old_brush));
-            }
-            self.bg_brush = w32.CreateSolidBrush(w32.RGB(value.r, value.g, value.b));
-            // SetClassLongPtrW propagates the new brush to all existing
-            // windows of the class, not just future ones.
-            for (self.windows.items) |w| {
-                if (w.hwnd) |h| {
-                    if (self.bg_brush) |b| {
-                        _ = w32.SetClassLongPtrW(
-                            h,
-                            w32.GCLP_HBRBACKGROUND,
-                            @intCast(@intFromPtr(b)),
-                        );
-                    }
-                }
-            }
-            return true;
-        },
-
-        .size_limit => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    const win = core_surface.rt_surface.parent_window;
-                    win.min_track_w = @intCast(value.min_width);
-                    win.min_track_h = @intCast(value.min_height);
-                    win.max_track_w = @intCast(value.max_width);
-                    win.max_track_h = @intCast(value.max_height);
-                },
-            }
-            return true;
-        },
-
-        .toggle_visibility => {
-            // Hide all visible top-level Ghostty windows; if any are
-            // already hidden, show + restore them. Equivalent to macOS
-            // NSApp hide / show.
-            var any_visible = false;
-            for (self.windows.items) |w| {
-                if (w.hwnd) |h| {
-                    if (w32.IsWindowVisible_(h) != 0) {
-                        any_visible = true;
-                        break;
-                    }
-                }
-            }
-            for (self.windows.items) |w| {
-                if (w.hwnd) |h| {
-                    if (any_visible) {
-                        _ = w32.ShowWindow(h, w32.SW_HIDE);
-                    } else {
-                        _ = w32.ShowWindow(h, w32.SW_SHOWNOACTIVATE);
-                    }
-                }
-            }
-            // The quick terminal manages its own visibility separately.
-            return true;
-        },
-
-        .float_window => {
-            // Toggle WS_EX_TOPMOST so the window stays above non-topmost
-            // windows. Equivalent to macOS NSWindow.level = .floating.
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    const win_hwnd = core_surface.rt_surface.parent_window.hwnd orelse return true;
-                    const ex = w32.GetWindowLongPtrW(win_hwnd, w32.GWL_EXSTYLE);
-                    const is_topmost = (ex & @as(isize, w32.WS_EX_TOPMOST)) != 0;
-                    const want: bool = switch (value) {
-                        .on => true,
-                        .off => false,
-                        .toggle => !is_topmost,
-                    };
-                    if (want == is_topmost) return true;
-                    const insert_after = if (want) w32.HWND_TOPMOST else w32.HWND_NOTOPMOST;
-                    _ = w32.SetWindowPos(
-                        win_hwnd,
-                        insert_after,
-                        0,
-                        0,
-                        0,
-                        0,
-                        w32.SWP_NOMOVE | w32.SWP_NOSIZE | w32.SWP_NOACTIVATE,
-                    );
-                },
-            }
-            return true;
-        },
-
-        .command_finished => {
-            // The core emits this for every finished command; all gating is
-            // apprt-side (config notify-on-command-finish*), matching the
-            // GTK and macOS runtimes.
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    switch (self.config.@"notify-on-command-finish") {
-                        .never => return true,
-                        .unfocused => if (core_surface.focused) return true,
-                        .always => {},
-                    }
-                    if (value.duration.lte(self.config.@"notify-on-command-finish-after"))
-                        return true;
-
-                    const act = self.config.@"notify-on-command-finish-action";
-                    if (act.bell) {
-                        _ = w32.MessageBeep(0xFFFFFFFF);
-                        // Flash the taskbar button when backgrounded so the
-                        // bell is visible too.
-                        if (core_surface.rt_surface.parent_window.hwnd) |win_hwnd| {
-                            if (w32.GetForegroundWindow() != win_hwnd) {
-                                var fwi: w32.FLASHWINFO = .{
-                                    .cbSize = @sizeOf(w32.FLASHWINFO),
-                                    .hwnd = win_hwnd,
-                                    .dwFlags = w32.FLASHW_ALL | w32.FLASHW_TIMERNOFG,
-                                    .uCount = 3,
-                                    .dwTimeout = 0,
-                                };
-                                _ = w32.FlashWindowEx(&fwi);
-                            }
-                        }
-                    }
-                    if (act.notify) {
-                        const title: []const u8 = if (value.exit_code) |code|
-                            (if (code == 0) "Command Succeeded" else "Command Failed")
-                        else
-                            "Command Finished";
-                        var body_buf: [128]u8 = undefined;
-                        const body: []const u8 = if (value.exit_code) |code|
-                            std.mem.print(
-                                &body_buf,
-                                "Command took {f} and exited with code {d}.",
-                                .{ value.duration.round(std.time.ns_per_ms), code },
-                            ) catch "Command finished."
-                        else
-                            std.mem.print(
-                                &body_buf,
-                                "Command took {f}.",
-                                .{value.duration.round(std.time.ns_per_ms)},
-                            ) catch "Command finished.";
-                        self.notif_desktop_surface_id = core_surface.id;
-                        self.showDesktopNotificationText(title, body);
-                    }
-                },
-            }
-            return true;
-        },
-
-        .mouse_visibility => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    const visible = value == .visible;
-                    core_surface.rt_surface.mouse_visible = visible;
-                    // Force the next WM_SETCURSOR to apply the new state
-                    // by issuing SetCursor immediately if the cursor is
-                    // currently in our client area.
-                    if (!visible) {
-                        _ = w32.SetCursor(null);
-                    } else if (core_surface.rt_surface.current_cursor) |c| {
-                        _ = w32.SetCursor(c);
-                    }
-                },
-            }
-            return true;
-        },
-
-        .present_terminal => {
-            // Raise the window containing the target surface and select
-            // its tab. Restores from minimized/iconic state if necessary.
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    const win = core_surface.rt_surface.parent_window;
-                    if (win.hwnd) |hwnd| {
-                        // ShowWindow(SW_RESTORE) brings back from minimize.
-                        _ = w32.ShowWindow(hwnd, w32.SW_RESTORE);
-                        _ = w32.SetForegroundWindow(hwnd);
-                        // Make sure the tab containing this surface is active.
-                        if (win.findTabIndex(core_surface.rt_surface)) |idx| {
-                            if (idx != win.active_tab) win.selectTabIndex(idx);
-                        }
-                        // Focus the surface's child HWND.
-                        if (core_surface.rt_surface.hwnd) |sh| {
-                            _ = w32.SetFocus(sh);
-                        }
-                    }
-                },
-            }
-            return true;
-        },
-
-        .new_split => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    const dir: SplitTree(Surface).Split.Direction = switch (value) {
-                        .left => .left,
-                        .right => .right,
-                        .up => .up,
-                        .down => .down,
-                    };
-                    splits.newSplit(core_surface.rt_surface.parent_window, dir) catch |err| {
-                        log.err("failed to create split: {}", .{err});
-                    };
-                },
-            }
-            return true;
-        },
-
-        .goto_split => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    splits.gotoSplit(core_surface.rt_surface.parent_window, value);
-                },
-            }
-            return true;
-        },
-
-        .resize_split => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    splits.resizeSplit(core_surface.rt_surface.parent_window, value);
-                },
-            }
-            return true;
-        },
-
-        .equalize_splits => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    splits.equalizeSplits(core_surface.rt_surface.parent_window);
-                },
-            }
-            return true;
-        },
-
-        .toggle_split_zoom => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    splits.toggleSplitZoom(core_surface.rt_surface.parent_window);
-                },
-            }
-            return true;
-        },
-
-        .prompt_title => {
-            return switch (target) {
-                .app => false,
-                .surface => |core_surface| blk: {
-                    const window = core_surface.rt_surface.parent_window;
-                    switch (value) {
-                        .surface, .tab => tab_rename.startTabRename(window, window.active_tab),
-                        .window => tab_rename.startWindowRename(window),
-                    }
-                    break :blk true;
-                },
-            };
-        },
-
-        // Sharp publishes no releases to check against.
-        .check_for_updates => return false,
-
-        .toggle_command_palette => {
-            switch (target) {
-                .app => {},
-                .surface => |core_surface| {
-                    const active = core_surface.rt_surface.palette_active;
-                    command_palette.setCommandPaletteActive(core_surface.rt_surface, !active);
-                },
-            }
-            return true;
-        },
-
-        .toggle_quick_terminal => {
-            if (self.quick_terminal) |qt| {
-                qt.toggle();
-            } else {
-                const qt = QuickTerminal.init(self) catch |err| {
-                    log.err("failed to create quick terminal: {}", .{err});
-                    return true;
-                };
-                self.quick_terminal = qt;
-                qt.toggle();
-            }
-            return true;
-        },
-
-        .selection_changed => {
-            // Win32 has no primary-selection clipboard to keep in sync (that
-            // is an X11/Wayland concept), so there is nothing to do when the
-            // core selection changes. Acknowledge the notification, mirroring
-            // the GTK apprt which also treats selection_changed as a no-op.
-            return true;
-        },
-
-        // Keep this exhaustive so upstream action additions require review.
-    }
+    return actions.performAction(self, target, action, value);
 }
 
 /// Open the config file itself, in an editor.
@@ -1824,11 +848,9 @@ fn popupSurface(self: *const App, child: w32.HWND) ?*Surface {
     return @ptrFromInt(@as(usize, @bitCast(userdata)));
 }
 
-/// Register a system-wide hotkey for toggle_quick_terminal.
-/// Scans keybinds for entries with the `global` flag.
 /// Lazily create (and cache) the shell ITaskbarList3 used for taskbar-button
 /// progress. Returns null if COM or the taskbar object is unavailable.
-fn taskbarList(self: *App) ?*w32.ITaskbarList3 {
+pub fn taskbarList(self: *App) ?*w32.ITaskbarList3 {
     if (self.taskbar) |tb| return tb;
 
     // COM must be initialized on this (the UI) thread before CoCreateInstance.
@@ -1852,129 +874,6 @@ fn taskbarList(self: *App) ?*w32.ITaskbarList3 {
     _ = tb.HrInit();
     self.taskbar = tb;
     return tb;
-}
-
-fn registerGlobalHotkey(self: *App) void {
-    const alloc = self.core_app.alloc;
-    var next_id: i32 = 1;
-    var it = self.config.keybind.set.bindings.iterator();
-    while (it.next()) |entry| {
-        const leaf = switch (entry.value_ptr.*) {
-            .leaf => |l| l,
-            // Leader and chained bindings are not registered as global hotkeys.
-            .leader, .leaf_chained => continue,
-        };
-        if (!leaf.flags.global) continue;
-
-        const trigger = entry.key_ptr.*;
-
-        // Convert Ghostty mods to Win32 mods.
-        var mods: u32 = w32.MOD_NOREPEAT;
-        if (trigger.mods.ctrl) mods |= w32.MOD_CONTROL;
-        if (trigger.mods.alt) mods |= w32.MOD_ALT;
-        if (trigger.mods.shift) mods |= w32.MOD_SHIFT;
-        if (trigger.mods.super) mods |= w32.MOD_WIN;
-
-        // Convert Ghostty key to Win32 VK.
-        const vk: ?u32 = switch (trigger.key) {
-            .physical => |phys| keyToVk(phys),
-            .unicode => |cp| blk: {
-                // For ASCII characters, VK code = uppercase char.
-                if (cp >= 'a' and cp <= 'z') break :blk @as(u32, cp - 'a' + 'A');
-                if (cp >= '0' and cp <= '9') break :blk @as(u32, cp);
-                break :blk null;
-            },
-            else => null,
-        };
-
-        const vk_code = vk orelse {
-            log.warn("unsupported key for global hotkey action={s}", .{@tagName(leaf.action)});
-            continue;
-        };
-
-        const id = next_id;
-        if (w32.RegisterHotKey(null, id, mods, vk_code) == 0) {
-            log.warn("failed to register global hotkey (may be in use) action={s}", .{@tagName(leaf.action)});
-            continue;
-        }
-        self.global_hotkeys.append(alloc, .{ .id = id, .action = leaf.action }) catch {
-            _ = w32.UnregisterHotKey(null, id);
-            continue;
-        };
-        next_id += 1;
-        log.info("registered global hotkey id={} action={s}", .{ id, @tagName(leaf.action) });
-    }
-}
-
-/// Map a Ghostty physical key to a Win32 virtual key code.
-fn keyToVk(key: @import("../../input/key.zig").Key) ?u32 {
-    return switch (key) {
-        .key_a => 0x41,
-        .key_b => 0x42,
-        .key_c => 0x43,
-        .key_d => 0x44,
-        .key_e => 0x45,
-        .key_f => 0x46,
-        .key_g => 0x47,
-        .key_h => 0x48,
-        .key_i => 0x49,
-        .key_j => 0x4A,
-        .key_k => 0x4B,
-        .key_l => 0x4C,
-        .key_m => 0x4D,
-        .key_n => 0x4E,
-        .key_o => 0x4F,
-        .key_p => 0x50,
-        .key_q => 0x51,
-        .key_r => 0x52,
-        .key_s => 0x53,
-        .key_t => 0x54,
-        .key_u => 0x55,
-        .key_v => 0x56,
-        .key_w => 0x57,
-        .key_x => 0x58,
-        .key_y => 0x59,
-        .key_z => 0x5A,
-        .digit_0 => 0x30,
-        .digit_1 => 0x31,
-        .digit_2 => 0x32,
-        .digit_3 => 0x33,
-        .digit_4 => 0x34,
-        .digit_5 => 0x35,
-        .digit_6 => 0x36,
-        .digit_7 => 0x37,
-        .digit_8 => 0x38,
-        .digit_9 => 0x39,
-        .backquote => w32.VK_OEM_3,
-        .minus => w32.VK_OEM_MINUS,
-        .equal => w32.VK_OEM_PLUS,
-        .bracket_left => w32.VK_OEM_4,
-        .bracket_right => w32.VK_OEM_6,
-        .backslash => w32.VK_OEM_5,
-        .semicolon => w32.VK_OEM_1,
-        .quote => w32.VK_OEM_7,
-        .comma => w32.VK_OEM_COMMA,
-        .period => w32.VK_OEM_PERIOD,
-        .slash => w32.VK_OEM_2,
-        .enter => w32.VK_RETURN,
-        .tab => w32.VK_TAB,
-        .space => w32.VK_SPACE,
-        .backspace => w32.VK_BACK,
-        .escape => w32.VK_ESCAPE,
-        .f1 => w32.VK_F1,
-        .f2 => w32.VK_F2,
-        .f3 => w32.VK_F3,
-        .f4 => w32.VK_F4,
-        .f5 => w32.VK_F5,
-        .f6 => w32.VK_F6,
-        .f7 => w32.VK_F7,
-        .f8 => w32.VK_F8,
-        .f9 => w32.VK_F9,
-        .f10 => w32.VK_F10,
-        .f11 => w32.VK_F11,
-        .f12 => w32.VK_F12,
-        else => null,
-    };
 }
 
 // -----------------------------------------------------------------------
@@ -2040,7 +939,7 @@ pub fn stopQuitTimer(self: *App) void {
 /// Show a Windows balloon notification via Shell_NotifyIconW.
 /// Creates a temporary tray icon, shows the balloon, then removes
 /// the icon after a short delay.
-fn showDesktopNotification(
+pub fn showDesktopNotification(
     self: *App,
     target: apprt.Target,
     value: apprt.Action.Value(.desktop_notification),
@@ -2057,7 +956,7 @@ fn showDesktopNotification(
 /// balloon click is delivered as WM_APP_TRAY (NIF_MESSAGE) and focuses the
 /// surface stored in notif_desktop_surface_id, mirroring macOS/GTK where
 /// clicking a notification presents the originating surface.
-fn showDesktopNotificationText(self: *App, title: []const u8, body: []const u8) void {
+pub fn showDesktopNotificationText(self: *App, title: []const u8, body: []const u8) void {
     const hwnd = self.msg_hwnd orelse return;
 
     var nid: w32.NOTIFYICONDATAW = std.mem.zeroes(w32.NOTIFYICONDATAW);
@@ -2094,394 +993,6 @@ fn tick(self: *App) void {
     self.core_app.tick(self) catch |err| {
         log.err("core app tick error: {}", .{err});
     };
-}
-
-/// Window procedure for terminal surface child HWNDs (GhosttyTerminal class).
-/// GWLP_USERDATA stores a *Surface pointer.
-fn surfaceWndProc(
-    hwnd: w32.HWND,
-    msg: u32,
-    wparam: usize,
-    lparam: isize,
-) callconv(.winapi) isize {
-    const userdata = w32.GetWindowLongPtrW(hwnd, w32.GWLP_USERDATA);
-    const surface: *Surface = if (userdata != 0)
-        @ptrFromInt(@as(usize, @bitCast(userdata)))
-    else
-        return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
-
-    // Guard: verify this is a surface window or one of its popups.
-    const is_surface_window = surface.hwnd != null and surface.hwnd.? == hwnd;
-    const is_search_popup = surface.search_hwnd != null and surface.search_hwnd.? == hwnd;
-    const is_palette_popup = surface.palette_hwnd != null and surface.palette_hwnd.? == hwnd;
-    if (!is_surface_window and !is_search_popup and !is_palette_popup)
-        return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
-
-    switch (msg) {
-        w32.WM_SIZE => {
-            const width: u32 = @intCast(lparam & 0xFFFF);
-            const height: u32 = @intCast((lparam >> 16) & 0xFFFF);
-            surface.handleResize(width, height);
-            return 0;
-        },
-
-        w32.WM_MOVE => {
-            if (surface.scrollbar) |sb| _ = sb.repositionAndResize();
-            return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
-        },
-
-        w32.WM_SHOWWINDOW => {
-            if (surface.scrollbar) |sb| sb.setOwnerVisible(wparam != 0);
-            return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
-        },
-
-        w32.WM_SETTINGCHANGE => {
-            if (surface.scrollbar) |sb| {
-                if (sb.onSettingsChange()) {
-                    // Re-flow the grid to accommodate a mode change.
-                    const width: u32 = surface.width;
-                    const height: u32 = surface.height;
-                    const lp_size: isize = @intCast((@as(usize, height) << 16) | @as(usize, width));
-                    _ = w32.PostMessageW(hwnd, w32.WM_SIZE, 0, lp_size);
-                }
-            }
-            return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
-        },
-
-        w32.WM_CLOSE => {
-            // Posted by Surface.close() to defer destruction to the
-            // message loop. This is the safe place to call closeSplitSurface
-            // (outside of core_surface callbacks).
-            surface.parent_window.closeSplitSurface(surface);
-            return 0;
-        },
-
-        w32.WM_DESTROY => {
-            _ = w32.SetWindowLongPtrW(hwnd, w32.GWLP_USERDATA, 0);
-            if (is_surface_window) {
-                // Only terminal destruction ends the core surface's native
-                // lifetime. Its owned popups can be destroyed independently.
-                surface.hwnd = null;
-                surface.core_surface_ready = false;
-            } else {
-                surface.popupDestroyed(hwnd);
-            }
-            return 0;
-        },
-
-        w32.WM_ERASEBKGND => {
-            // Fill with the configured background color to prevent
-            // a visible flash during resize. The OpenGL renderer will
-            // overwrite the entire client area on the next frame.
-            if (surface.app.bg_brush) |brush| {
-                const hdc_erase: w32.HDC = @ptrFromInt(wparam);
-                var rect: w32.RECT = undefined;
-                if (w32.GetClientRect(hwnd, &rect) != 0) {
-                    _ = w32.FillRect(hdc_erase, &rect, brush);
-                }
-            }
-            return 1;
-        },
-
-        w32.WM_PAINT => {
-            if (is_palette_popup) {
-                command_palette.paintPalette(surface, hwnd);
-                return 0;
-            }
-            // Validate the paint region to stop Windows from
-            // sending more WM_PAINT messages, then wake the
-            // renderer thread to redraw.
-            _ = w32.ValidateRect(hwnd, null);
-            if (surface.core_surface_ready) {
-                surface.core_surface.renderer_thread.wakeup.notify() catch {};
-            }
-            return 0;
-        },
-
-        w32.WM_DPICHANGED => {
-            surface.handleDpiChange();
-            return 0;
-        },
-
-        w32.WM_KEYDOWN, w32.WM_SYSKEYDOWN => {
-            surface.handleKeyEvent(wparam, lparam, .press);
-            return 0;
-        },
-
-        w32.WM_KEYUP, w32.WM_SYSKEYUP => {
-            surface.handleKeyEvent(wparam, lparam, .release);
-            return 0;
-        },
-
-        w32.WM_SYSCHAR => {
-            // TranslateMessage is skipped for terminal surface windows
-            // (see App.run), so WM_SYSCHAR is never posted by it for our
-            // windows. This handler guards against WM_SYSCHAR arriving via
-            // SendInput, PostMessage, or other injection paths: forwarding
-            // it to DefWindowProc would treat it as an unmatched menu
-            // accelerator and ring MessageBeep. Consume it unconditionally.
-            return 0;
-        },
-
-        w32.WM_DEADCHAR, w32.WM_SYSDEADCHAR => {
-            // The message loop skips TranslateMessage for surface windows,
-            // so WM_DEADCHAR is normally never posted for them. If one
-            // arrives via another path (e.g. SendInput), drop it — dead
-            // keys are composed via ToUnicode in handleKeyEvent.
-            return 0;
-        },
-
-        w32.WM_CHAR => {
-            // In Win32 Input Mode, keys typed on the keyboard already carry
-            // their character in the WM_KEYDOWN event (Uc parameter), and
-            // their messages skip TranslateMessage, so no WM_CHAR follows
-            // them. A WM_CHAR here is text without a key (VK_PACKET or a
-            // posted message) and must be sent as a key-less event, or
-            // it is lost: ConPTY always enables this mode.
-            if (win32_input.isWin32InputMode(surface)) {
-                win32_input.sendWin32CharEvent(surface, @intCast(wparam & 0xFFFF));
-                return 0;
-            }
-
-            // If handleKeyEvent already produced text via ToUnicode for
-            // the preceding WM_KEYDOWN, suppress this WM_CHAR to avoid
-            // double input. Otherwise, process it — the character came
-            // from IME, SendInput Unicode (VK_PACKET), PostMessage, or
-            // another source that didn't go through handleKeyEvent.
-            if (surface.key_event_produced_text) {
-                surface.key_event_produced_text = false;
-                return 0;
-            }
-            surface.handleCharEvent(wparam);
-            return 0;
-        },
-
-        w32.WM_GETOBJECT => {
-            // Opt out of MSAA accessibility for OBJID_CLIENT. Without this,
-            // DefWindowProc creates an oleacc AccWrap proxy for each surface
-            // HWND. When focus moves between split panes (which are sibling
-            // child HWNDs in our layout), oleacc destroys the outgoing
-            // surface's AccWrap synchronously inside DefWindowProc; the
-            // destructor re-enters our WindowProc via SetFocus, which fires
-            // ImeSystemHandler -> oleacc!CreateClient -> COM marshaling that
-            // waits for a reply this thread cannot pump (deep WindowProc
-            // stack). Result: SleepConditionVariableSRW forever — the
-            // ghost-hang dumps all bottom out exactly there.
-            //
-            // wezterm avoids this by being single-HWND (no cross-window
-            // focus dance), so AccWraps that exist there are never
-            // destroyed in this re-entrant pattern. Returning 0 here for
-            // OBJID_CLIENT prevents AccWrap creation for our surface
-            // windows, breaking the chain at the source. We don't expose
-            // terminal-cell-level accessibility today anyway, so the only
-            // thing this disables is the generic window-frame proxy that
-            // screen readers would otherwise see.
-            if (lparam == w32.OBJID_CLIENT) return 0;
-            return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
-        },
-
-        w32.WM_IME_SETCONTEXT => {
-            // The composition (preedit) is rendered inline in the terminal
-            // by the core, so tell the system not to show the default
-            // floating composition window. The IME candidate list is
-            // unaffected and still anchors to ImmSetCompositionWindow.
-            const cleared = lparam & ~w32.ISC_SHOWUICOMPOSITIONWINDOW;
-            return w32.DefWindowProcW(hwnd, msg, wparam, cleared);
-        },
-
-        w32.WM_IME_STARTCOMPOSITION => {
-            ime.handleImeStartComposition(surface);
-            // Consume: we draw the composition inline; no default window.
-            return 0;
-        },
-
-        w32.WM_IME_COMPOSITION => {
-            // Handles both intermediate preedit (GCS_COMPSTR, mirrored
-            // inline) and the final result string (GCS_RESULTSTR, committed
-            // to the terminal). Always consume so DefWindowProc doesn't
-            // generate WM_IME_CHAR or draw a default composition window.
-            _ = ime.handleImeComposition(surface, lparam);
-            return 0;
-        },
-
-        w32.WM_IME_ENDCOMPOSITION => {
-            ime.handleImeEndComposition(surface);
-            return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
-        },
-
-        w32.WM_LBUTTONDOWN => {
-            if (is_palette_popup) {
-                const y: i32 = @intCast(@as(i16, @truncate((lparam >> 16) & 0xFFFF)));
-                const sc = surface.scale;
-                const list_top: i32 = @intFromFloat(@round(command_palette.PALETTE_LIST_TOP * sc));
-                const item_height: i32 = @intFromFloat(@round(command_palette.PALETTE_ITEM_HEIGHT * sc));
-                if (y >= list_top) {
-                    const clicked = @divTrunc(y - list_top, item_height);
-                    if (clicked >= 0 and clicked < surface.palette_count) {
-                        surface.palette_selected = @intCast(clicked);
-                        command_palette.executePaletteSelection(surface);
-                    }
-                }
-                return 0;
-            }
-            // Take keyboard focus on click. WS_CHILD windows don't
-            // auto-focus the way top-level windows do, so without this
-            // an active sibling popup edit (tab rename, search, palette)
-            // keeps focus and the click never commits/dismisses it.
-            _ = w32.SetFocus(hwnd);
-            surface.handleMouseButton(.left, .press, lparam);
-            return 0;
-        },
-        w32.WM_LBUTTONUP => {
-            surface.handleMouseButton(.left, .release, lparam);
-            return 0;
-        },
-        w32.WM_RBUTTONDOWN => {
-            _ = w32.SetFocus(hwnd);
-            surface.handleMouseButton(.right, .press, lparam);
-            return 0;
-        },
-        w32.WM_RBUTTONUP => {
-            surface.handleMouseButton(.right, .release, lparam);
-            return 0;
-        },
-        w32.WM_MBUTTONDOWN => {
-            _ = w32.SetFocus(hwnd);
-            surface.handleMouseButton(.middle, .press, lparam);
-            return 0;
-        },
-        w32.WM_MBUTTONUP => {
-            surface.handleMouseButton(.middle, .release, lparam);
-            return 0;
-        },
-        w32.WM_XBUTTONDOWN => {
-            // X1 = back (button four), X2 = forward (button five). Deliver to
-            // the terminal for mouse reporting instead of the shell nav.
-            _ = w32.SetFocus(hwnd);
-            const btn: input.MouseButton =
-                if ((wparam >> 16) & 0xFFFF == w32.XBUTTON2) .five else .four;
-            surface.handleMouseButton(btn, .press, lparam);
-            return 1; // TRUE: handled; suppresses the default WM_APPCOMMAND.
-        },
-        w32.WM_XBUTTONUP => {
-            const btn: input.MouseButton =
-                if ((wparam >> 16) & 0xFFFF == w32.XBUTTON2) .five else .four;
-            surface.handleMouseButton(btn, .release, lparam);
-            return 1;
-        },
-
-        w32.WM_MOUSEMOVE => {
-            surface.handleMouseMove(lparam);
-            return 0;
-        },
-
-        w32.WM_MOUSEWHEEL => {
-            surface.handleMouseWheel(wparam, .vertical);
-            return 0;
-        },
-
-        w32.WM_MOUSEHWHEEL => {
-            surface.handleMouseWheel(wparam, .horizontal);
-            return 0;
-        },
-
-        w32.WM_DROPFILES => {
-            surface.handleDropFiles(wparam);
-            return 0;
-        },
-
-        w32.WM_SETCURSOR => {
-            // Only override the cursor in the client area. For non-client
-            // areas (resize borders, title bar), let DefWindowProc handle it.
-            const hit_test: u16 = @intCast(lparam & 0xFFFF);
-            if (hit_test == w32.HTCLIENT and surface.handleSetCursor()) {
-                return 1; // TRUE = we set the cursor
-            }
-            return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
-        },
-
-        w32.WM_COMMAND => {
-            const notification: u16 = @intCast((wparam >> 16) & 0xFFFF);
-            const control_id: u16 = @intCast(wparam & 0xFFFF);
-            if (control_id == Surface.SEARCH_EDIT_ID and notification == w32.EN_CHANGE) {
-                find_bar.handleSearchChange(surface);
-                return 0;
-            }
-            if (control_id == command_palette.PALETTE_EDIT_ID and notification == w32.EN_CHANGE) {
-                command_palette.handlePaletteChange(surface);
-                return 0;
-            }
-            // Auto-dismiss popups when the Edit loses focus (click outside,
-            // Alt+Tab away). Matches standard popup UX (VS Code palette,
-            // macOS Spotlight). The dismiss helpers clear *_active first,
-            // so any re-entrant EN_KILLFOCUS during ShowWindow(SW_HIDE) /
-            // SetFocus falls through these guards as a no-op.
-            if (notification == w32.EN_KILLFOCUS) {
-                if (control_id == command_palette.PALETTE_EDIT_ID and surface.palette_active) {
-                    command_palette.setCommandPaletteActive(surface, false);
-                    return 0;
-                }
-                if (control_id == Surface.SEARCH_EDIT_ID and surface.search_active) {
-                    find_bar.setSearchActive(surface, false, &[_:0]u8{});
-                    return 0;
-                }
-            }
-            return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
-        },
-
-        w32.WM_CTLCOLOREDIT => {
-            // Dark mode colors for search/palette edit controls
-            const hdc_edit: w32.HDC = @ptrFromInt(wparam);
-            _ = w32.SetTextColor(hdc_edit, w32.RGB(220, 220, 220));
-            _ = w32.SetBkColor(hdc_edit, if (is_palette_popup) w32.RGB(30, 30, 30) else w32.RGB(45, 45, 45));
-            if (is_palette_popup) {
-                if (surface.palette_brush) |brush| {
-                    return @bitCast(@intFromPtr(@as(*const anyopaque, @ptrCast(brush))));
-                }
-            }
-            if (surface.app.bg_brush) |brush| {
-                return @bitCast(@intFromPtr(@as(*const anyopaque, @ptrCast(brush))));
-            }
-            return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
-        },
-
-        w32.WM_CTLCOLORSTATIC => {
-            // Dark mode colors for the search match-count label.
-            const hdc_static: w32.HDC = @ptrFromInt(wparam);
-            _ = w32.SetTextColor(hdc_static, w32.RGB(160, 160, 160));
-            _ = w32.SetBkColor(hdc_static, w32.RGB(45, 45, 45));
-            if (surface.app.bg_brush) |brush| {
-                return @bitCast(@intFromPtr(@as(*const anyopaque, @ptrCast(brush))));
-            }
-            return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
-        },
-
-        w32.WM_ACTIVATE => {
-            // Dismiss command palette when it loses focus
-            if (is_palette_popup) {
-                const activate = @as(u16, @intCast(wparam & 0xFFFF));
-                if (activate == 0) { // WA_INACTIVE
-                    command_palette.setCommandPaletteActive(surface, false);
-                }
-                return 0;
-            }
-            return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
-        },
-
-        w32.WM_SETFOCUS => {
-            // Update the active surface for this tab when a split pane gains focus.
-            const tab = surface.parent_window.active_tab;
-            surface.parent_window.tab_active_surface[tab] = surface;
-            surface.handleFocus(true);
-            return 0;
-        },
-        w32.WM_KILLFOCUS => {
-            surface.handleFocus(false);
-            return 0;
-        },
-
-        else => return w32.DefWindowProcW(hwnd, msg, wparam, lparam),
-    }
 }
 
 /// Open a URL in the default handler. internal_os.open() uses
@@ -2574,7 +1085,8 @@ fn msgWndProc(
             // focus, matching macOS/GTK).
             if (app.notif_desktop_surface_id != 0) {
                 if (app.core_app.findSurfaceByID(app.notif_desktop_surface_id)) |surface| {
-                    _ = app.performAction(
+                    _ = actions.performAction(
+                        app,
                         .{ .surface = surface },
                         .present_terminal,
                         {},
@@ -2664,7 +1176,7 @@ test "detached tab keeps hidden popups and popup destruction preserves terminal"
     if (w32.RegisterClassExW(&.{
         .cbSize = @sizeOf(w32.WNDCLASSEXW),
         .style = 0,
-        .lpfnWndProc = &surfaceWndProc,
+        .lpfnWndProc = &pane_messages.surfaceWndProc,
         .cbClsExtra = 0,
         .cbWndExtra = 0,
         .hInstance = instance,
@@ -2788,7 +1300,7 @@ test "open URL is deferred and owns its input until dispatch" {
     // from launching a browser in the test runner.
     const original = "https://example.com/\xff";
     var url = original.*;
-    try testing.expect(try app.performAction(.app, .open_url, .{
+    try testing.expect(try actions.performAction(app, .app, .open_url, .{
         .kind = .osc8,
         .url = &url,
     }));
@@ -2831,7 +1343,7 @@ test "open URL frees undelivered requests" {
     app.msg_hwnd = hwnd;
     defer app.discardPendingOpenUrls();
 
-    try testing.expect(try app.performAction(.app, .open_url, .{
+    try testing.expect(try actions.performAction(app, .app, .open_url, .{
         .kind = .osc8,
         .url = "",
     }));
@@ -2841,7 +1353,7 @@ test "open URL frees undelivered requests" {
     // The testing allocator detects leaks both when shutdown discards a
     // successfully posted request and when PostMessageW fails.
     for (0..2) |_| {
-        try testing.expect(try app.performAction(.app, .open_url, .{
+        try testing.expect(try actions.performAction(app, .app, .open_url, .{
             .kind = .osc8,
             .url = "https://example.com/\xff",
         }));
@@ -2855,12 +1367,12 @@ test "open URL frees undelivered requests" {
 
     try testing.expect(w32.DestroyWindow(hwnd) != 0);
     window_alive = false;
-    try testing.expect(try app.performAction(.app, .open_url, .{
+    try testing.expect(try actions.performAction(app, .app, .open_url, .{
         .kind = .osc8,
         .url = "https://example.com/\xff",
     }));
     app.msg_hwnd = null;
-    try testing.expect(try app.performAction(.app, .open_url, .{
+    try testing.expect(try actions.performAction(app, .app, .open_url, .{
         .kind = .osc8,
         .url = "https://example.com/\xff",
     }));

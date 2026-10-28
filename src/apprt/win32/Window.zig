@@ -27,6 +27,7 @@ const configpkg = @import("../../config.zig");
 const workspace = @import("workspace.zig");
 const tab_rename = @import("tab_rename.zig");
 const splits = @import("splits.zig");
+const actions = @import("actions.zig");
 
 const log = std.log.scoped(.win32);
 
@@ -1746,7 +1747,7 @@ fn settingsArea(self: *Window) w32.RECT {
 
 fn settingsReload(ctx: *anyopaque) void {
     const self: *Window = @ptrCast(@alignCast(ctx));
-    _ = self.app.performAction(.app, .reload_config, .{ .soft = false }) catch |err| {
+    _ = actions.performAction(self.app, .app, .reload_config, .{ .soft = false }) catch |err| {
         log.err("failed to reload config: {}", .{err});
     };
 }
