@@ -1,0 +1,19 @@
+// Background styles (Settings > Appearance > Background, `background-style`).
+// Checked when Sharp is compiled.
+.{
+    // Pixel cascade: squares on a grid, each with its own brightness, that
+    // thin out and fade over the top of the terminal. Sizes are in pixels.
+    .pixel_cascade = .{
+        // One square per cell: `dot` pixels of every `pitch`.
+        .pitch = 5,
+        .dot = 4,
+        // The tile Ghostty repeats across: this many cells wide, and tall
+        // enough that it never repeats down a window.
+        .columns = 96,
+        .height = 2400,
+        // How far down the squares reach.
+        .fade = 560,
+        // The brightest square's opacity (0 to 1) over the background.
+        .max_alpha = 0.14,
+    },
+}

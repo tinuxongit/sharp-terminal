@@ -1901,3 +1901,9 @@ pub const SYSTEMTIME = extern struct {
 };
 pub extern "kernel32" fn FileTimeToSystemTime(lpFileTime: *const FILETIME, lpSystemTime: *SYSTEMTIME) callconv(.winapi) i32;
 pub extern "kernel32" fn SystemTimeToTzSpecificLocalTime(lpTimeZoneInformation: ?*const anyopaque, lpUniversalTime: *const SYSTEMTIME, lpLocalTime: *SYSTEMTIME) callconv(.winapi) i32;
+
+pub const CREATE_ALWAYS: u32 = 2;
+pub const FILE_ATTRIBUTE_NORMAL: u32 = 0x80;
+pub const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+pub extern "kernel32" fn CreateDirectoryW(lpPathName: [*:0]const u16, lpSecurityAttributes: ?*anyopaque) callconv(.winapi) i32;
+pub extern "kernel32" fn MoveFileExW(lpExistingFileName: [*:0]const u16, lpNewFileName: [*:0]const u16, dwFlags: u32) callconv(.winapi) i32;

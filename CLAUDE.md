@@ -61,6 +61,10 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/load_config.zig`: the exe's PE load configuration.
 - `src/apprt/win32/frame_pacer.zig`: one frame per display refresh for each
   renderer thread.
+- `src/apprt/win32/background_style.zig`: Sharp's background styles
+  (`background-style`): makes the style's tile for its color (sizes in
+  `backgrounds.zon`, written by `png.zig`) and hands it to Ghostty as the
+  background image when the config loads (`App.loadConfig`).
 - `src/apprt/win32/canvas.zig`: drawing shared by the strip and the panel
   (colors, anti-aliased shapes, text, icon fonts).
 - `src/apprt/win32/menu_theme.zig`: dark or light native popup menus.
@@ -336,6 +340,17 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   dialogs, mobile emulation and connected accounts are left out. Checked
   2026-10-28 through the real protocol and against a throwaway Claude
   Code config (`claude mcp list`: connected).
+- **Background styles are tiles Ghostty already knows how to draw.**
+  Settings > Appearance > Background offers Default (the plain theme
+  color) and Pixel cascade, a grid of squares in any color
+  (`background-style-color`, the text color by default) that thins out
+  over the top of the terminal. Ghostty's renderer draws images, not
+  patterns, so Sharp makes a small repeating PNG per color in
+  `%LOCALAPPDATA%\Sharp\Backgrounds` and sets `background-image` (and
+  its position, fit and repeat) on the loaded config, never in the file,
+  so the shared renderer is untouched. The panel no longer offers
+  background opacity, which showed the desktop through the sidebar too;
+  `background-opacity` in the file still works.
 - **OSC 7 works on Windows.** Upstream ignored it there. Paths must carry
   a drive letter, since a Linux path from WSL would break the folder new
   tabs start in, and the host check ignores case. As on other platforms,

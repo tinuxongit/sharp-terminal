@@ -7,6 +7,13 @@ const Allocator = std.mem.Allocator;
 const apprt = @import("../../apprt.zig");
 const configpkg = @import("../../config.zig");
 pub const Config = configpkg.Config;
+
+/// The config from its files, with Sharp's background style applied.
+pub fn loadConfig(alloc: std.mem.Allocator) !Config {
+    var config = try Config.load(alloc);
+    background_style.apply(&config);
+    return config;
+}
 const CoreApp = @import("../../App.zig");
 const internal_os = @import("../../os/main.zig");
 const global = @import("../../global.zig");
@@ -44,6 +51,7 @@ const actions = @import("actions.zig");
 const pane_messages = @import("pane_messages.zig");
 const window_messages = @import("window_messages.zig");
 const global_hotkey = @import("global_hotkey.zig");
+const background_style = @import("background_style.zig");
 const browser_remote = @import("browser_remote.zig");
 const mcp_server = @import("mcp_server.zig");
 
@@ -167,7 +175,7 @@ pub fn init(
 
     // Load the configuration for this application.
     const alloc = core_app.alloc;
-    var config = Config.load(alloc) catch |err| err: {
+    var config = loadConfig(alloc) catch |err| err: {
         log.err("failed to load config: {}", .{err});
         var def: Config = try .default(alloc);
         errdefer def.deinit();

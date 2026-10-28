@@ -2429,6 +2429,20 @@ else
 /// Currently only supported on Windows.
 @"browser-search-engine": ?[:0]const u8 = null,
 
+/// The style of the terminal's background. `default` is the plain
+/// `background` color. `pixel-cascade` is a grid of small squares in
+/// `background-style-color` that thins out down the terminal. A style
+/// other than `default` takes the place of `background-image`.
+///
+/// Currently only supported on Windows.
+@"background-style": BackgroundStyle = .default,
+
+/// The color of `background-style`'s pattern; the foreground color when
+/// not set.
+///
+/// Currently only supported on Windows.
+@"background-style-color": ?Color = null,
+
 /// Background color for the window titlebar. This only takes effect if
 /// window-theme is set to ghostty. Currently only supported in the GTK app
 /// runtime.
@@ -10013,6 +10027,12 @@ pub const BackgroundImagePosition = enum {
 };
 
 /// See background-image-fit
+/// See background-style
+pub const BackgroundStyle = enum {
+    default,
+    @"pixel-cascade",
+};
+
 pub const BackgroundImageFit = enum {
     contain,
     cover,

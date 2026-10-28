@@ -465,7 +465,7 @@ pub fn performAction(
                 };
             } else {
                 // Hard reload: read config from disk
-                var new_config = App.Config.load(alloc) catch |err| {
+                var new_config = App.loadConfig(alloc) catch |err| {
                     log.err("failed to reload config: {}", .{err});
                     return true;
                 };
