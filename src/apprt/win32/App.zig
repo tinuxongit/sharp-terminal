@@ -39,6 +39,7 @@ const OpenUrlRequest = struct {
 
 const build_config = @import("../../build_config.zig");
 const input = @import("../../input.zig");
+const find_bar = @import("find_bar.zig");
 
 comptime {
     // Exports the exe's load configuration; nothing references it.
@@ -393,7 +394,7 @@ pub fn run(self: *App) !void {
             // Find the parent surface of this edit control
             if (self.popupSurface(msg.hwnd.?)) |surface| {
                 if (surface.search_active and surface.search_edit == msg.hwnd) {
-                    if (surface.handleSearchKey(vk)) continue;
+                    if (find_bar.handleSearchKey(surface, vk)) continue;
                 }
                 if (surface.palette_active and surface.palette_edit == msg.hwnd) {
                     if (surface.handlePaletteKey(vk)) continue;
@@ -428,7 +429,7 @@ pub fn run(self: *App) !void {
                         break :blk surface;
                     }
                     if (surface.search_active and surface.search_edit == msg.hwnd) {
-                        surface.setSearchActive(false, &[_:0]u8{});
+                        find_bar.setSearchActive(surface, false, &[_:0]u8{});
                         break :blk surface;
                     }
                     break :blk null;
@@ -823,7 +824,7 @@ pub fn performAction(
             switch (target) {
                 .app => {},
                 .surface => |core_surface| {
-                    core_surface.rt_surface.setSearchActive(true, value.needle);
+                    find_bar.setSearchActive(core_surface.rt_surface, true, value.needle);
                 },
             }
             return true;
@@ -833,7 +834,7 @@ pub fn performAction(
             switch (target) {
                 .app => {},
                 .surface => |core_surface| {
-                    core_surface.rt_surface.setSearchActive(false, "");
+                    find_bar.setSearchActive(core_surface.rt_surface, false, "");
                 },
             }
             return true;
@@ -843,7 +844,7 @@ pub fn performAction(
             switch (target) {
                 .app => {},
                 .surface => |core_surface| {
-                    core_surface.rt_surface.setSearchTotal(value.total);
+                    find_bar.setSearchTotal(core_surface.rt_surface, value.total);
                 },
             }
             return true;
@@ -853,7 +854,7 @@ pub fn performAction(
             switch (target) {
                 .app => {},
                 .surface => |core_surface| {
-                    core_surface.rt_surface.setSearchSelected(value.selected);
+                    find_bar.setSearchSelected(core_surface.rt_surface, value.selected);
                 },
             }
             return true;
@@ -2399,7 +2400,7 @@ fn surfaceWndProc(
             const notification: u16 = @intCast((wparam >> 16) & 0xFFFF);
             const control_id: u16 = @intCast(wparam & 0xFFFF);
             if (control_id == Surface.SEARCH_EDIT_ID and notification == w32.EN_CHANGE) {
-                surface.handleSearchChange();
+                find_bar.handleSearchChange(surface);
                 return 0;
             }
             if (control_id == Surface.PALETTE_EDIT_ID and notification == w32.EN_CHANGE) {
@@ -2417,7 +2418,7 @@ fn surfaceWndProc(
                     return 0;
                 }
                 if (control_id == Surface.SEARCH_EDIT_ID and surface.search_active) {
-                    surface.setSearchActive(false, &[_:0]u8{});
+                    find_bar.setSearchActive(surface, false, &[_:0]u8{});
                     return 0;
                 }
             }
