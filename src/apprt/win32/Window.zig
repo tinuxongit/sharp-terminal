@@ -1687,15 +1687,16 @@ pub fn tabIcon(self: *Window, index: usize) ?w32.HICON {
 /// past the last profile do nothing, as in Windows Terminal.
 pub fn openProfile(self: *Window, index: usize, new_window: bool) void {
     const list = profiles.detect();
-    self.openProfileIn(&list, index, null, new_window);
+    _ = self.openProfileIn(&list, index, null, new_window);
 }
 
-/// Open profile `index` of `list`, in `folder` when given.
-pub fn openProfileIn(self: *Window, list: *const profiles.List, index: usize, folder: ?[]const u8, new_window: bool) void {
-    if (index >= list.len) return;
+/// Open profile `index` of `list`, in `folder` when given. Returns the new
+/// tab's pane; a new window's isn't returned.
+pub fn openProfileIn(self: *Window, list: *const profiles.List, index: usize, folder: ?[]const u8, new_window: bool) ?*Surface {
+    if (index >= list.len) return null;
     const alloc = self.app.core_app.alloc;
     // The surface copies the command into its own config during init.
-    const text = alloc.dupeSentinel(u8, list.command(index), 0) catch return;
+    const text = alloc.dupeSentinel(u8, list.command(index), 0) catch return null;
     defer alloc.free(text);
     const command: configpkg.Command = .{ .shell = text };
     const options = self.profileOptions(list, index, .{
@@ -1705,9 +1706,12 @@ pub fn openProfileIn(self: *Window, list: *const profiles.List, index: usize, fo
     });
     if (new_window) {
         self.app.openWindowWithTab(options) catch |err| log.err("failed to open {s} in a new window: {}", .{ list.name(index), err });
-        return;
+        return null;
     }
-    _ = self.addTabWithOptions(options) catch |err| log.err("failed to open {s}: {}", .{ list.name(index), err });
+    return self.addTabWithOptions(options) catch |err| {
+        log.err("failed to open {s}: {}", .{ list.name(index), err });
+        return null;
+    };
 }
 
 /// Drop the profile menu below the arrow beside "+". Shift+click opens the

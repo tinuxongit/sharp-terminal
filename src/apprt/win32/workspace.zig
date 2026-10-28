@@ -14,6 +14,9 @@ const folder_picker = @import("folder_picker.zig");
 const canvas_mod = @import("canvas.zig");
 const SearchField = @import("SearchField.zig");
 const ssh = @import("ssh.zig");
+const process_tree = @import("process_tree.zig");
+const termio = @import("../../termio.zig");
+const claude_session = @import("claude_session.zig");
 const session = @import("session.zig");
 const servers = @import("servers.zig");
 const configpkg = @import("../../config.zig");
@@ -189,7 +192,7 @@ pub fn sidebarClick(self: *Window, x: i32, y: i32) void {
         .group_menu => |i| {
             const list = profiles.detect();
             const index = sidebarProfileMenu(self, target, &list) orelse return;
-            self.openProfileIn(&list, index, self.tab_active_surface[i].folderPath(), false);
+            _ = self.openProfileIn(&list, index, self.tab_active_surface[i].folderPath(), false);
         },
         .section, .server_field => {},
         .usage_title => toggleCollapsed(self, usage_fold_key),
@@ -342,7 +345,14 @@ pub fn sessionWindow(self: *Window, buf: *[64]session.Tab) session.Window {
     const n = @min(self.tab_count, buf.len);
     for (0..n) |i| {
         const surface = self.tab_active_surface[i];
-        buf[i] = .{ .profile = surface.profileName(), .folder = surface.folderPath(), .server = surface.sshHost() };
+        const claude: ?*const claude_session.Session = if (surface.claude) |*c| c else null;
+        buf[i] = .{
+            .profile = surface.profileName(),
+            // A conversation resumes only from the folder Claude Code ran in.
+            .folder = if (claude != null and claude.?.folder().len > 0) claude.?.folder() else surface.folderPath(),
+            .server = surface.sshHost(),
+            .claude = if (claude) |c| &c.id else "",
+        };
     }
     return .{ .tabs = buf[0..n], .active = self.active_tab };
 }
@@ -357,7 +367,16 @@ pub fn openSavedTab(self: *Window, tab: session.Tab) void {
     const index = for (0..list.len) |i| {
         if (std.mem.eql(u8, list.name(i), tab.profile)) break i;
     } else list.selected(self.configuredCommand()) orelse return;
-    self.openProfileIn(&list, index, folder, false);
+    const surface = self.openProfileIn(&list, index, folder, false) orelse return;
+    // Claude Code was running a conversation here: type its resume into
+    // the new shell, which reads it once it starts. Not in WSL, whose
+    // claude would be another install.
+    if (tab.claude.len == 0 or !self.app.config.@"ai-resume-claude" or surface.wsl) return;
+    if (!claude_session.saved(tab.claude, folder orelse return)) return;
+    var buf: [64]u8 = undefined;
+    const command = claude_session.resumeCommand(&buf, tab.claude) orelse return;
+    const msg = termio.Message.writeReq(self.app.core_app.alloc, command) catch return;
+    surface.core_surface.io.queueMessage(msg, .unlocked);
 }
 
 /// A new tab running ssh to `destination`, from `folder` when given.
@@ -388,16 +407,18 @@ pub fn openServer(self: *Window, destination: []const u8, folder: ?[]const u8) v
 }
 
 /// Poll each tab for an SSH session, so the sidebar can file it under
-/// Servers. One process snapshot serves every tab.
-pub fn refreshServers(self: *Window) void {
-    const procs = ssh.Processes.take();
+/// Servers, and for a Claude Code conversation, so a reopened tab can
+/// resume it. One process snapshot serves every tab.
+pub fn pollTabs(self: *Window) void {
+    const procs = process_tree.Processes.take();
     var changed = false;
     for (0..self.tab_count) |i| {
         const surface = self.tab_active_surface[i];
         if (!surface.core_surface_ready) continue;
         const pid = surface.core_surface.io.processId() orelse continue;
+        if (surface.setClaudeSession(claude_session.find(&procs, pid))) changed = true;
         var buf: [128]u8 = undefined;
-        const host = procs.host(pid, &buf) orelse "";
+        const host = ssh.host(&procs, pid, &buf) orelse "";
         if (!surface.setSshHost(host)) continue;
         changed = true;
         // Servers reached by typing ssh are offered again later.
@@ -423,7 +444,7 @@ pub fn pickFolderAndOpen(self: *Window, section: tab_sidebar.Section, index: ?us
 pub fn openInSection(self: *Window, section: tab_sidebar.Section, index: ?usize, folder: []const u8) void {
     const list = profiles.detect();
     const default = (if (section == .wsl) list.first(.wsl) else null) orelse list.selected(self.configuredCommand()) orelse return;
-    self.openProfileIn(&list, index orelse default, folder, false);
+    _ = self.openProfileIn(&list, index orelse default, folder, false);
 }
 
 /// The shell menu dropped below the sidebar arrow `arrow`. Returns the

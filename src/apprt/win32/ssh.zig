@@ -1,107 +1,33 @@
 //! Finds the server an SSH session in a tab is connected to, so the tab
 //! sidebar can list the tab under Servers. Windows sends no notice when a
-//! shell starts ssh, so Window polls: the shell's process tree is searched
+//! shell starts ssh, so Window polls: the shell's process tree (from
+//! process_tree.zig) is searched
 //! for an SSH client (OpenSSH's ssh.exe, PuTTY's plink.exe, or wsl.exe
 //! running ssh) and its command line read for the destination.
 const std = @import("std");
-const w32 = @import("win32.zig");
-const internal_os = @import("../../os/main.zig");
-const windows = internal_os.windows;
-const wide_string = @import("wide_string.zig");
+const process_tree = @import("process_tree.zig");
 
-/// How deep below the shell ssh may run (e.g. shell > script > ssh).
-const max_depth = 4;
-
-/// The programs whose command lines can name a server.
-const Client = enum { none, ssh, plink, wsl };
-
-const Process = struct { pid: u32, parent: u32, client: Client };
-
-/// All processes at one moment, so several tabs can be checked against
-/// one snapshot.
-pub const Processes = struct {
-    items: [2048]Process = undefined,
-    len: usize = 0,
-
-    pub fn take() Processes {
-        var self: Processes = .{};
-        const snap = windows.exp.kernel32.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0);
-        if (snap == windows.INVALID_HANDLE_VALUE) return self;
-        defer _ = windows.exp.kernel32.CloseHandle(snap);
-        var entry: windows.PROCESSENTRY32W = .{};
-        var more = windows.exp.kernel32.Process32FirstW(snap, &entry) != windows.FALSE;
-        while (more and self.len < self.items.len) : (more = windows.exp.kernel32.Process32NextW(snap, &entry) != windows.FALSE) {
-            self.items[self.len] = .{
-                .pid = entry.th32ProcessID,
-                .parent = entry.th32ParentProcessID,
-                .client = clientOf(std.mem.sliceTo(&entry.szExeFile, 0)),
-            };
-            self.len += 1;
-        }
-        return self;
+/// Where the shell `shell_pid` is connected to through ssh ("user@host"
+/// or "host"), written into `out`, or null when it isn't running ssh.
+/// A tab opened on a server runs ssh as its shell.
+pub fn host(procs: *const process_tree.Processes, shell_pid: u32, out: []u8) ?[]const u8 {
+    var found: [16]process_tree.Process = undefined;
+    for (procs.below(shell_pid, &found)) |p| {
+        if (p.program != .ssh and p.program != .plink and p.program != .wsl) continue;
+        var line: [2048]u8 = undefined;
+        const command_line = process_tree.commandLine(p.pid, &line) orelse continue;
+        var dest_buf: [256]u8 = undefined;
+        const destination = switch (p.program) {
+            .ssh => parseDestination(command_line, &dest_buf),
+            .plink => parsePlink(command_line, &dest_buf),
+            .wsl => parseWsl(command_line, &dest_buf),
+            else => unreachable,
+        } orelse continue;
+        const len = @min(destination.len, out.len);
+        @memcpy(out[0..len], destination[0..len]);
+        return out[0..len];
     }
-
-    /// Where the shell `shell_pid` is connected to through ssh ("user@host"
-    /// or "host"), written into `out`, or null when it isn't running ssh.
-    /// A tab opened on a server runs ssh as its shell.
-    pub fn host(self: *const Processes, shell_pid: u32, out: []u8) ?[]const u8 {
-        const procs = self.items[0..self.len];
-        for (procs) |p| {
-            if (p.client == .none or (p.pid != shell_pid and !descends(procs, p, shell_pid))) continue;
-            var line: [2048]u8 = undefined;
-            const command_line = commandLine(p.pid, &line) orelse continue;
-            var dest_buf: [256]u8 = undefined;
-            const destination = switch (p.client) {
-                .none => unreachable,
-                .ssh => parseDestination(command_line, &dest_buf),
-                .plink => parsePlink(command_line, &dest_buf),
-                .wsl => parseWsl(command_line, &dest_buf),
-            } orelse continue;
-            const len = @min(destination.len, out.len);
-            @memcpy(out[0..len], destination[0..len]);
-            return out[0..len];
-        }
-        return null;
-    }
-};
-
-fn clientOf(exe: []const u16) Client {
-    inline for (.{ .{ "ssh.exe", Client.ssh }, .{ "plink.exe", Client.plink }, .{ "wsl.exe", Client.wsl } }) |c| {
-        if (exeIs(exe, c[0])) return c[1];
-    }
-    return .none;
-}
-
-fn exeIs(exe: []const u16, comptime name: []const u8) bool {
-    const wide = std.unicode.utf8ToUtf16LeStringLiteral(name);
-    if (exe.len != wide.len) return false;
-    for (exe, wide) |a, b| {
-        if (a >= 0x80 or std.ascii.toLower(@intCast(a)) != b) return false;
-    }
-    return true;
-}
-
-fn descends(procs: []const Process, p: Process, ancestor: u32) bool {
-    var parent = p.parent;
-    for (0..max_depth) |_| {
-        if (parent == ancestor) return true;
-        parent = for (procs) |q| {
-            if (q.pid == parent) break q.parent;
-        } else return false;
-    }
-    return false;
-}
-
-fn commandLine(pid: u32, out: []u8) ?[]const u8 {
-    const process = w32.OpenProcess(w32.PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) orelse return null;
-    defer _ = w32.CloseHandle(process);
-    // The answer is a UNICODE_STRING followed by the text it points to.
-    var buf: [4096]u8 align(@alignOf(w32.UNICODE_STRING)) = undefined;
-    if (w32.NtQueryInformationProcess(process, w32.ProcessCommandLineInformation, &buf, buf.len, null) < 0) return null;
-    const text: *const w32.UNICODE_STRING = @ptrCast(&buf);
-    const chars = text.Buffer orelse return null;
-    const len = wide_string.toUtf8(out, chars[0 .. text.Length / 2]);
-    return out[0..len];
+    return null;
 }
 
 /// The destination from an ssh command line: the first argument that

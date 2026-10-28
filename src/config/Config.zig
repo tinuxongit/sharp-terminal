@@ -2452,6 +2452,13 @@ else
 /// Currently only supported on Windows.
 @"clipboard-keys": ClipboardKeys = .windows,
 
+/// Whether a tab the sidebar layout reopens resumes the Claude Code
+/// conversation it was running, by typing `claude --resume <id>` into its
+/// shell.
+///
+/// Currently only supported on Windows.
+@"ai-resume-claude": bool = true,
+
 /// Background color for the window titlebar. This only takes effect if
 /// window-theme is set to ghostty. Currently only supported in the GTK app
 /// runtime.

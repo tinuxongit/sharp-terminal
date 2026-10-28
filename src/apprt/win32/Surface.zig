@@ -17,6 +17,7 @@ const Window = @import("Window.zig");
 const w32 = @import("win32.zig");
 const brand = @import("brand.zig");
 const servers = @import("servers.zig");
+const claude_session = @import("claude_session.zig");
 const frame_log = @import("frame_log.zig");
 const FramePacer = @import("frame_pacer.zig");
 const Scrollbar = @import("Scrollbar.zig").Scrollbar;
@@ -66,6 +67,8 @@ folder_len: u16 = 0,
 /// The SSH server this pane is connected to, found by Window's polling.
 ssh_host: [128]u8 = undefined,
 ssh_host_len: u8 = 0,
+/// The Claude Code conversation running here, found the same way.
+claude: ?claude_session.Session = null,
 opened_ms: u64 = 0,
 attention: bool = false,
 
@@ -777,6 +780,13 @@ pub fn setFolder(self: *Surface, path: []const u8) bool {
     if (n == self.folder_len and std.mem.eql(u8, next[0..n], self.folder[0..n])) return false;
     @memcpy(self.folder[0..n], next[0..n]);
     self.folder_len = @intCast(n);
+    return true;
+}
+
+/// Returns whether it changed.
+pub fn setClaudeSession(self: *Surface, session: ?claude_session.Session) bool {
+    if (claude_session.Session.eql(self.claude, session)) return false;
+    self.claude = session;
     return true;
 }
 

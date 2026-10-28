@@ -87,7 +87,10 @@ commands and conventions; this file covers what is specific to Sharp.
   `logos.zig` fills them, anti-aliased, by either fill rule, at any size.
 - `src/apprt/win32/session.zig`: saves and loads the sidebar layout's
   open tabs (`sharp-session`, beside the config file).
-- `src/apprt/win32/ssh.zig`: finds the server a tab's ssh is connected to.
+- `src/apprt/win32/process_tree.zig`: all processes at one moment and
+  which run below a tab's shell, for the sidebar layout's polling.
+  `ssh.zig` finds the server a tab's ssh is connected to;
+  `claude_session.zig` the Claude Code conversation a tab is running.
 - `src/apprt/win32/ai_usage.zig`: reads Claude's and Codex's plan windows
   and OpenCode's spending through their CLIs, on a background thread, for
   the sidebar's AI section.
@@ -253,6 +256,21 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   hand empties the session. Tabs come back with their shell and folder,
   not their old output: the programs that wrote it can't come back, and
   output alone isn't worth saving.
+- **Claude Code conversations come back with their tabs.** The same
+  3-second poll finds claude.exe below each tab's shell and reads the
+  file Claude Code keeps for each running process,
+  `~/.claude/sessions/<pid>.json` (or under `CLAUDE_CONFIG_DIR`), for its
+  session id and folder; Sharp touches nothing of Claude Code's. The
+  session file keeps them as a fourth field, with the tab's folder set to
+  Claude's, since conversations are kept per folder. A reopened tab whose
+  conversation was saved (`projects/<folder>/<id>.jsonl` exists; Claude
+  saves only once a message is sent) gets `claude --resume <id>` typed
+  into its shell, so the shell remains after Claude exits. The id must be
+  a UUID before it is saved or typed. Not in WSL tabs, whose claude would
+  be another install. Settings > AI > Claude > Resume conversations
+  (`ai-resume-claude`, on by default) turns it off. Checked 2026-10-28
+  with a throwaway Claude config: a saved conversation resumed, an unsaved
+  one typed nothing.
 - **SSH sessions are found by polling.** Windows doesn't announce them, so
   every 3 seconds one process snapshot is searched below each tab's shell
   for an SSH client (ssh.exe, PuTTY's plink.exe, or wsl.exe running ssh)

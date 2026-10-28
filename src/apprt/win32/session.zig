@@ -9,10 +9,11 @@
 //!     window = 1
 //!     tab = Windows PowerShell|C:\Users\me\project
 //!     tab = Command Prompt|C:\Users\me|me@example.com
+//!     tab = Windows PowerShell|C:\Users\me\app||0bcf5988-ee82-4024-bf5f-338191b1ba4b
 //!
 //! `window = N` starts a window whose active tab is the Nth (from 0);
-//! `|` separates a tab's profile, folder and server, since no Windows path
-//! may contain it.
+//! `|` separates a tab's profile, folder, server and the Claude Code
+//! conversation it was running, since no Windows path may contain it.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const configpkg = @import("../../config.zig");
@@ -26,6 +27,8 @@ pub const Tab = struct {
     folder: []const u8,
     /// The SSH destination, or empty for a local tab.
     server: []const u8 = "",
+    /// The Claude Code session id it was running, or empty.
+    claude: []const u8 = "",
 };
 
 pub const Window = struct {
@@ -105,7 +108,8 @@ pub fn load(alloc: Allocator, default_width: f32) !?Loaded {
             const profile = fields.first();
             const folder = fields.next() orelse continue;
             const server = fields.next() orelse "";
-            try tabs.append(a, .{ .profile = try a.dupe(u8, profile), .folder = try a.dupe(u8, folder), .server = try a.dupe(u8, server) });
+            const claude = fields.next() orelse "";
+            try tabs.append(a, .{ .profile = try a.dupe(u8, profile), .folder = try a.dupe(u8, folder), .server = try a.dupe(u8, server), .claude = try a.dupe(u8, claude) });
         }
     }
     if (in_window) try windows.append(a, .{ .tabs = try tabs.toOwnedSlice(a), .active = active });
@@ -127,7 +131,8 @@ pub fn save(alloc: Allocator, session: Session) !void {
         try out.print(alloc, "window = {d}\n", .{window.active});
         for (window.tabs) |tab| {
             try out.print(alloc, "tab = {s}|{s}", .{ tab.profile, tab.folder });
-            if (tab.server.len > 0) try out.print(alloc, "|{s}", .{tab.server});
+            if (tab.server.len > 0 or tab.claude.len > 0) try out.print(alloc, "|{s}", .{tab.server});
+            if (tab.claude.len > 0) try out.print(alloc, "|{s}", .{tab.claude});
             try out.append(alloc, '\n');
         }
     }

@@ -86,7 +86,7 @@ pub fn windowWndProc(
             }
             if (wparam == Window.SIDEBAR_TIMER_ID) {
                 if (window.sidebarMode()) {
-                    workspace.refreshServers(window);
+                    workspace.pollTabs(window);
                     window.sidebar_ticks +%= 1;
                     if (window.sidebar_ticks % (60_000 / Window.SIDEBAR_TIMER_MS) == 0) window.invalidateTabBar();
                 }

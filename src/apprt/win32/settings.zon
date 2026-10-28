@@ -225,6 +225,14 @@
                     .title = "Claude",
                     .settings = .{
                         .{
+                            .label = "Resume conversations",
+                            .description = "Reopened Workspace tabs continue the Claude Code session they had.",
+                            .key = "ai-resume-claude",
+                            .on = "",
+                            .off = "false",
+                            .default_on = true,
+                        },
+                        .{
                             .label = "Show Claude",
                             .description = "Your Claude plan's limits in the sidebar, read from Claude Code.",
                             .key = "ai-usage-claude",
