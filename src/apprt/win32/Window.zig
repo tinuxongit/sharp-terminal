@@ -22,6 +22,8 @@ const new_tab_menu = @import("new_tab_menu.zig");
 const tab_sidebar = @import("tab_sidebar.zig");
 const canvas_mod = @import("canvas.zig");
 const SearchField = @import("SearchField.zig");
+const ssh = @import("ssh.zig");
+const session = @import("session.zig");
 const configpkg = @import("../../config.zig");
 
 const log = std.log.scoped(.win32);
@@ -76,6 +78,19 @@ sidebar_hover: tab_sidebar.Target = .none,
 sidebar_scroll: i32 = 0,
 sidebar_max_scroll: i32 = 0,
 sidebar_spots: tab_sidebar.Spots = .{},
+/// Sidebar width in pixels at 96 DPI, which the user can drag.
+sidebar_width: f32 = tab_sidebar.default_width,
+sidebar_resizing: bool = false,
+/// A tab pressed in the sidebar, and whether it has moved enough to drag.
+sidebar_drag: ?usize = null,
+sidebar_drag_y: i32 = 0,
+sidebar_dragging: bool = false,
+/// Folders (or servers) the user folded in the sidebar.
+collapsed: [max_collapsed][300]u8 = undefined,
+collapsed_lens: [max_collapsed]u16 = undefined,
+collapsed_count: usize = 0,
+/// Counts the sidebar timer's ticks, to refresh ages once a minute.
+sidebar_ticks: u32 = 0,
 
 /// Tab drag state: which tab is being dragged (-1 = none).
 drag_tab: isize = -1,
@@ -365,7 +380,7 @@ pub fn init(self: *Window, app: *App, options: InitOptions) !void {
     }
 
     self.loadStripFonts();
-    _ = w32.SetTimer(hwnd, SIDEBAR_AGE_TIMER_ID, 60_000, null);
+    _ = w32.SetTimer(hwnd, SIDEBAR_TIMER_ID, SIDEBAR_TIMER_MS, null);
 
     // WM_NCCALCSIZE during CreateWindowExW ran before GWLP_USERDATA was
     // set, so the default caption was laid out. Recompute the frame now
@@ -546,8 +561,121 @@ fn sidebarMode(self: *const Window) bool {
     return !self.is_quick_terminal and self.app.config.@"window-tab-bar-position" == .sidebar;
 }
 
+pub const max_collapsed = 32;
+
 fn sidebarWidth(self: *const Window) i32 {
-    return if (self.sidebarMode()) tab_sidebar.width(self.scale) else 0;
+    return if (self.sidebarMode()) @intFromFloat(@round(self.sidebar_width * self.scale)) else 0;
+}
+
+fn tabSection(self: *Window, tab: usize) tab_sidebar.Section {
+    const surface = self.tab_active_surface[tab];
+    return if (surface.sshHost().len > 0) .servers else if (surface.wsl) .wsl else .local;
+}
+
+/// What a tab is grouped by in the sidebar: its SSH server, else its folder.
+fn groupKey(self: *Window, tab: usize) []const u8 {
+    const surface = self.tab_active_surface[tab];
+    const host = surface.sshHost();
+    return if (host.len > 0) host else surface.folderPath();
+}
+
+/// The group's label: the folder's name, with its parent added when two
+/// open folders share a name.
+fn groupLabel(self: *Window, tab: usize, buf: []u8) []const u8 {
+    const surface = self.tab_active_surface[tab];
+    const host = surface.sshHost();
+    if (host.len > 0) return host;
+    const name = surface.folderName();
+    const clash = for (0..self.tab_count) |j| {
+        const other = self.tab_active_surface[j];
+        if (other.sshHost().len == 0 and std.ascii.eqlIgnoreCase(other.folderName(), name) and
+            !tab_sidebar.sameGroup(other.folderPath(), surface.folderPath())) break true;
+    } else false;
+    if (!clash) return name;
+    const path = surface.folderPath();
+    const name_start = path.len - name.len;
+    const parent_end = if (name_start > 0) name_start - 1 else 0;
+    const parent_start = if (std.mem.lastIndexOfScalar(u8, path[0..parent_end], '\\')) |i| i + 1 else 0;
+    return std.fmt.bufPrint(buf, "{s}\\{s}", .{ path[parent_start..parent_end], name }) catch name;
+}
+
+pub fn collapsedGroups(self: *const Window, buf: *[max_collapsed][]const u8) []const []const u8 {
+    for (0..self.collapsed_count) |i| buf[i] = self.collapsed[i][0..self.collapsed_lens[i]];
+    return buf[0..self.collapsed_count];
+}
+
+fn toggleCollapsed(self: *Window, key: []const u8) void {
+    for (0..self.collapsed_count) |i| {
+        if (!tab_sidebar.sameGroup(self.collapsed[i][0..self.collapsed_lens[i]], key)) continue;
+        self.collapsed_count -= 1;
+        self.collapsed[i] = self.collapsed[self.collapsed_count];
+        self.collapsed_lens[i] = self.collapsed_lens[self.collapsed_count];
+        self.invalidateTabBar();
+        self.app.saveSession();
+        return;
+    }
+    if (self.collapsed_count == max_collapsed or key.len > self.collapsed[0].len) return;
+    @memcpy(self.collapsed[self.collapsed_count][0..key.len], key);
+    self.collapsed_lens[self.collapsed_count] = @intCast(key.len);
+    self.collapsed_count += 1;
+    self.invalidateTabBar();
+    self.app.saveSession();
+}
+
+/// Apply a saved sidebar width and folded groups.
+pub fn restoreSidebar(self: *Window, width: f32, collapsed: []const []const u8) void {
+    self.sidebar_width = std.math.clamp(width, tab_sidebar.min_width, tab_sidebar.max_width);
+    self.collapsed_count = 0;
+    for (collapsed) |key| {
+        if (self.collapsed_count == max_collapsed or key.len > self.collapsed[0].len) continue;
+        @memcpy(self.collapsed[self.collapsed_count][0..key.len], key);
+        self.collapsed_lens[self.collapsed_count] = @intCast(key.len);
+        self.collapsed_count += 1;
+    }
+    self.handleResize();
+}
+
+/// This window's tabs as the session saves them.
+pub fn sessionWindow(self: *Window, buf: *[64]session.Tab) session.Window {
+    const n = @min(self.tab_count, buf.len);
+    for (0..n) |i| {
+        const surface = self.tab_active_surface[i];
+        buf[i] = .{ .profile = surface.profileName(), .folder = surface.folderPath() };
+    }
+    return .{ .tabs = buf[0..n], .active = self.active_tab };
+}
+
+/// Reopen a saved tab: its profile (or the default one, if that shell is
+/// gone) in its folder (or the usual one, if the folder is gone).
+pub fn openSavedTab(self: *Window, profile_name: []const u8, folder: []const u8) void {
+    const list = profiles.detect();
+    const index = for (0..list.len) |i| {
+        if (std.mem.eql(u8, list.name(i), profile_name)) break i;
+    } else list.selected(self.configuredCommand()) orelse return;
+    self.openProfileIn(&list, index, if (profiles.programExists(folder)) folder else null, false);
+}
+
+/// Poll each tab for an SSH session, so the sidebar can file it under
+/// Servers. One process snapshot serves every tab.
+fn refreshServers(self: *Window) void {
+    const procs = ssh.Processes.take();
+    var changed = false;
+    for (0..self.tab_count) |i| {
+        const surface = self.tab_active_surface[i];
+        if (!surface.core_surface_ready) continue;
+        const pid = surface.core_surface.io.processId() orelse continue;
+        var buf: [128]u8 = undefined;
+        const host = procs.host(pid, &buf) orelse "";
+        if (surface.setSshHost(host)) changed = true;
+    }
+    if (changed) self.invalidateTabBar();
+}
+
+/// A new tab with the default shell in the folder of `tab`'s group.
+fn openInFolder(self: *Window, tab: usize) void {
+    const list = profiles.detect();
+    const index = list.selected(self.configuredCommand()) orelse return;
+    self.openProfileIn(&list, index, self.tab_active_surface[tab].folderPath(), false);
 }
 
 /// The sidebar's rectangle in client coordinates.
@@ -671,6 +799,7 @@ pub fn addTabWithOptions(self: *Window, options: AddTabOptions) !*Surface {
     }
     self.updateTabBarVisibility();
     self.invalidateTabBar();
+    self.app.saveSession();
     return surface;
 }
 
@@ -761,6 +890,9 @@ fn closeTabByIndex(self: *Window, idx: usize) void {
         self.tab_title_lens[i] = self.tab_title_lens[i + 1];
     }
     self.tab_count -= 1;
+    // Before `closing` is set: closing the last tab by hand empties the
+    // session, unlike closing the window, which keeps it.
+    self.app.saveSession();
     if (self.tab_count == 0) {
         self.closing = true;
         self.tab_overview.hide(false);
@@ -1639,6 +1771,7 @@ fn paintSidebar(self: *Window, hdc_screen: w32.HDC, palette: tab_strip.Palette) 
     }
 
     var titles: [MAX_TABS][256]u8 = undefined;
+    var labels: [MAX_TABS][256]u8 = undefined;
     var items: [MAX_TABS]tab_sidebar.Item = undefined;
     const now = w32.GetTickCount64();
     for (0..self.tab_count) |i| {
@@ -1648,12 +1781,14 @@ fn paintSidebar(self: *Window, hdc_screen: w32.HDC, palette: tab_strip.Palette) 
             .tab = i,
             .title = titles[i][0..title_len],
             .icon = self.tabIcon(i),
-            .group = if (surface.folder_len > 0) surface.folderName() else surface.profileName(),
-            .wsl = surface.wsl,
+            .section = self.tabSection(i),
+            .group = self.groupKey(i),
+            .group_label = self.groupLabel(i, &labels[i]),
             .age_ms = now -| surface.opened_ms,
             .attention = self.tabNeedsAttention(i),
         };
     }
+    var collapsed: [max_collapsed][]const u8 = undefined;
 
     const canvas: canvas_mod.Canvas = .{ .hdc = mem_dc, .pixels = @ptrCast(@alignCast(bits orelse return)), .width = width, .height = height };
     self.sidebar_max_scroll = tab_sidebar.paint(canvas, self.scale, palette, self.sidebar_fonts, .{
@@ -1663,6 +1798,8 @@ fn paintSidebar(self: *Window, hdc_screen: w32.HDC, palette: tab_strip.Palette) 
         .search = &self.sidebar_search,
         .window_focused = self.window_active,
         .scroll = self.sidebar_scroll,
+        .collapsed = self.collapsedGroups(&collapsed),
+        .dragging = if (self.sidebar_dragging) self.sidebar_drag else null,
     }, &self.sidebar_spots);
     canvas.sync();
     _ = w32.BitBlt(hdc_screen, rect.left, rect.top, width, height, mem_dc, 0, 0, w32.SRCCOPY);
@@ -1715,11 +1852,28 @@ fn focusSidebarSearch(self: *Window, focused: bool) void {
 fn sidebarClick(self: *Window, x: i32, y: i32) void {
     const target = self.sidebarTarget(x, y);
     if (target != .search) self.focusSidebarSearch(false);
+    const hwnd = self.hwnd orelse return;
     switch (target) {
         .none => {},
         .search => self.focusSidebarSearch(true),
-        .tab => |i| self.selectTabIndex(i),
+        .resize => {
+            self.sidebar_resizing = true;
+            _ = w32.SetCapture(hwnd);
+        },
+        .tab => |i| {
+            self.selectTabIndex(i);
+            // A press may become a drag to reorder; see WM_MOUSEMOVE.
+            self.sidebar_drag = i;
+            self.sidebar_drag_y = y;
+            self.sidebar_dragging = false;
+            _ = w32.SetCapture(hwnd);
+        },
         .close => |i| self.requestCloseTabs(&.{self.tabId(i)}),
+        .group => |i| {
+            var buf: [300]u8 = undefined;
+            self.toggleCollapsed(tab_sidebar.collapseKey(&buf, self.tabSection(i), self.groupKey(i)));
+        },
+        .group_new => |i| self.openInFolder(i),
     }
 }
 
@@ -1896,8 +2050,10 @@ pub fn toggleWindowDecorations(self: *Window) void {
 /// Handle WM_SIZE: re-layout the active tab's split panes and repaint tab bar.
 /// Timer id used to auto-hide the resize overlay.
 const RESIZE_OVERLAY_TIMER_ID: usize = 0x5247; // 'RG'
-/// Refreshes the sidebar's "opened 5m ago" ages once a minute.
-const SIDEBAR_AGE_TIMER_ID: usize = 0x5341; // 'SA'
+/// Polls tabs for SSH sessions, and refreshes the sidebar's "opened 5m
+/// ago" ages once a minute.
+const SIDEBAR_TIMER_ID: usize = 0x5341; // 'SA'
+const SIDEBAR_TIMER_MS = 3_000;
 
 fn handleResize(self: *Window) void {
     if (self.settings_panel) |panel| panel.place(self.settingsArea());
@@ -2076,15 +2232,21 @@ fn tabIcon(self: *Window, index: usize) ?w32.HICON {
 /// past the last profile do nothing, as in Windows Terminal.
 pub fn openProfile(self: *Window, index: usize, new_window: bool) void {
     const list = profiles.detect();
+    self.openProfileIn(&list, index, null, new_window);
+}
+
+/// Open profile `index` of `list`, in `folder` when given.
+fn openProfileIn(self: *Window, list: *const profiles.List, index: usize, folder: ?[]const u8, new_window: bool) void {
     if (index >= list.len) return;
     const alloc = self.app.core_app.alloc;
     // The surface copies the command into its own config during init.
     const text = alloc.dupeSentinel(u8, list.command(index), 0) catch return;
     defer alloc.free(text);
     const command: configpkg.Command = .{ .shell = text };
-    const options = self.profileOptions(&list, index, .{
+    const options = self.profileOptions(list, index, .{
         .context = if (new_window) .window else .tab,
         .command = &command,
+        .working_directory = folder,
     });
     if (new_window) {
         self.app.openWindowWithTab(options) catch |err| log.err("failed to open {s} in a new window: {}", .{ list.name(index), err });
@@ -2211,6 +2373,7 @@ fn moveTabTo(self: *Window, from: usize, to: usize) void {
 
     self.active_tab = to;
     self.invalidateTabBar();
+    self.app.saveSession();
 }
 
 /// Handle mouse movement over the tab bar for hover effects.
@@ -2517,6 +2680,9 @@ pub fn confirmCloseIfNeeded(self: *Window) bool {
 /// because Win32 destroys child HWNDs during DestroyWindow and the
 /// OpenGL driver crashes if contexts are still active on destroyed windows.
 pub fn close(self: *Window) void {
+    // Closing the window keeps its tabs in the session; see saveSession.
+    self.closing = true;
+    self.app.saveSession();
     self.tab_overview.deinit();
     // First, cleanly shut down all surfaces (renderer/IO threads, WGL, DC).
     self.cleanupAllSurfaces();
@@ -2648,8 +2814,12 @@ pub fn windowWndProc(
                 window.invalidateTabBar();
                 return 0;
             }
-            if (wparam == SIDEBAR_AGE_TIMER_ID) {
-                if (window.sidebarMode()) window.invalidateTabBar();
+            if (wparam == SIDEBAR_TIMER_ID) {
+                if (window.sidebarMode()) {
+                    window.refreshServers();
+                    window.sidebar_ticks +%= 1;
+                    if (window.sidebar_ticks % (60_000 / SIDEBAR_TIMER_MS) == 0) window.invalidateTabBar();
+                }
                 return 0;
             }
             if (wparam == RESIZE_OVERLAY_TIMER_ID) {
@@ -2916,6 +3086,21 @@ pub fn windowWndProc(
                 window.endDividerDrag();
                 return 0;
             }
+            if (window.sidebar_resizing) {
+                window.sidebar_resizing = false;
+                _ = w32.ReleaseCapture();
+                window.app.saveSession();
+                return 0;
+            }
+            if (window.sidebar_drag != null) {
+                const moved = window.sidebar_dragging;
+                window.sidebar_drag = null;
+                window.sidebar_dragging = false;
+                _ = w32.ReleaseCapture();
+                window.invalidateTabBar();
+                if (moved) window.app.saveSession();
+                return 0;
+            }
             if (window.drag_tab >= 0) {
                 window.drag_tab = -1;
                 window.drag_active = false;
@@ -2954,7 +3139,7 @@ pub fn windowWndProc(
                     window.showTabMenu(i, x, y);
                     return 0;
                 },
-                else => {},
+                .none, .search, .resize, .group, .group_new => {},
             }
             return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
         },
@@ -2968,7 +3153,7 @@ pub fn windowWndProc(
             }
             switch (window.sidebarTarget(x, y)) {
                 .tab, .close => |i| window.requestCloseTabs(&.{window.tabId(i)}),
-                else => {},
+                .none, .search, .resize, .group, .group_new => {},
             }
             return 0;
         },
@@ -2977,6 +3162,32 @@ pub fn windowWndProc(
             const y: i32 = @as(i16, @truncate((lparam >> 16) & 0xFFFF));
             if (window.dragging_split) {
                 window.updateDividerDrag(x, y);
+                return 0;
+            }
+            if (window.sidebar_resizing) {
+                const width = std.math.clamp(@as(f32, @floatFromInt(x)) / window.scale, tab_sidebar.min_width, tab_sidebar.max_width);
+                if (width != window.sidebar_width) {
+                    window.sidebar_width = width;
+                    window.handleResize();
+                }
+                return 0;
+            }
+            if (window.sidebar_drag) |from| {
+                if (!window.sidebar_dragging and @abs(y - window.sidebar_drag_y) > @as(i32, @intFromFloat(5 * window.scale))) {
+                    window.sidebar_dragging = true;
+                    window.invalidateTabBar();
+                }
+                if (window.sidebar_dragging) {
+                    // Tabs move within their folder; the folder decides the group.
+                    switch (window.sidebarTarget(x, y)) {
+                        .tab => |to| if (to != from and tab_sidebar.sameGroup(window.groupKey(from), window.groupKey(to))) {
+                            window.moveTabTo(from, to);
+                            window.sidebar_drag = to;
+                            _ = w32.UpdateWindow(hwnd);
+                        },
+                        else => {},
+                    }
+                }
                 return 0;
             }
             // Handle tab drag reorder
@@ -3010,6 +3221,10 @@ pub fn windowWndProc(
             var pt: w32.POINT = undefined;
             if (w32.GetCursorPos_(&pt) != 0) {
                 if (window.hwnd) |h| _ = w32.ScreenToClient(h, &pt);
+                if (window.sidebar_resizing or window.sidebarTarget(pt.x, pt.y) == .resize) {
+                    if (w32.LoadCursorW(null, w32.IDC_SIZEWE)) |cursor| _ = w32.SetCursor(cursor);
+                    return 1;
+                }
                 if (window.hitTestDivider(pt.x, pt.y)) |hit| {
                     const cursor_id: usize = if (hit.layout == .horizontal) w32.IDC_SIZEWE else w32.IDC_SIZENS;
                     if (w32.LoadCursorW(null, cursor_id)) |cursor| {

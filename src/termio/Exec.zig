@@ -939,6 +939,7 @@ const Subprocess = struct {
 
         if (comptime builtin.target.os.tag == .windows) {
             try @import("wsl.zig").setup(&env);
+            try @import("cmd_prompt.zig").setup(&env);
         }
 
         // Add the environment variables that override any others.
@@ -1389,18 +1390,24 @@ const Subprocess = struct {
         return pty.getProcessInfo(info);
     }
 
-    /// Whether the shell is running a command, or null when that can't be
-    /// told. Only answered on Windows: it has no foreground process group,
-    /// and a ConPTY can't say who reads from it, but a command the shell
-    /// runs is a child process of the shell.
-    pub fn commandRunning(self: *Subprocess) ?bool {
+    /// The shell's process id, so the app can look at what it runs.
+    /// Windows only, where POSIX process groups don't exist.
+    pub fn processId(self: *Subprocess) ?u32 {
         if (comptime builtin.target.os.tag != .windows) return null;
         const handle = switch (self.process orelse return null) {
             .fork_exec => |cmd| cmd.pid orelse return null,
             .flatpak => return null,
         };
-        const shell = windows.exp.kernel32.GetProcessId(handle);
-        if (shell == 0) return null;
+        const pid = windows.exp.kernel32.GetProcessId(handle);
+        return if (pid == 0) null else pid;
+    }
+
+    /// Whether the shell is running a command, or null when that can't be
+    /// told. Only answered on Windows: it has no foreground process group,
+    /// and a ConPTY can't say who reads from it, but a command the shell
+    /// runs is a child process of the shell.
+    pub fn commandRunning(self: *Subprocess) ?bool {
+        const shell = self.processId() orelse return null;
 
         const snapshot = windows.exp.kernel32.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0);
         if (snapshot == windows.INVALID_HANDLE_VALUE) return null;
@@ -2241,6 +2248,11 @@ pub fn getProcessInfo(self: *Exec, comptime info: ProcessInfo) ?ProcessInfo.Type
 /// See Subprocess.commandRunning.
 pub fn commandRunning(self: *Exec) ?bool {
     return self.subprocess.commandRunning();
+}
+
+/// See Subprocess.processId.
+pub fn processId(self: *Exec) ?u32 {
+    return self.subprocess.processId();
 }
 
 test "execCommand darwin: shell command" {

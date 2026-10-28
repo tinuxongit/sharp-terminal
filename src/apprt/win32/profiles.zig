@@ -25,6 +25,7 @@ pub const Sidebar = struct {
     search_placeholder: []const u8,
     local: []const u8,
     wsl: []const u8,
+    servers: []const u8,
 };
 
 pub const Data = struct {

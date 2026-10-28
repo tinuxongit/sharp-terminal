@@ -117,6 +117,13 @@ pub const Backend = union(Kind) {
             .exec => |*exec| exec.commandRunning(),
         };
     }
+
+    /// The shell's process id, where the platform exposes it.
+    pub fn processId(self: *Backend) ?u32 {
+        return switch (self.*) {
+            .exec => |*exec| exec.processId(),
+        };
+    }
 };
 
 /// Termio thread data. See termio.ThreadData for docs.

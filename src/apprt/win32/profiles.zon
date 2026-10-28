@@ -54,6 +54,7 @@
         .search_placeholder = "Search",
         .local = "Local",
         .wsl = "WSL",
+        .servers = "Servers",
     },
     .menu = .{
         // Shown after a profile's name: the 3rd profile is Ctrl+Shift+3.

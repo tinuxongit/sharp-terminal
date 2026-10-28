@@ -51,6 +51,11 @@ commands and conventions; this file covers what is specific to Sharp.
   "+", with icons and shortcuts.
 - `src/apprt/win32/tab_sidebar.zig`: tabs as a list beside the terminal,
   grouped by where the shell runs and by folder; layout and painting.
+- `src/apprt/win32/session.zig`: saves and loads the sidebar layout's
+  open tabs (`sharp-session`, beside the config file).
+- `src/apprt/win32/ssh.zig`: finds the server a tab's ssh is connected to.
+- `src/termio/cmd_prompt.zig`: makes cmd.exe report its folder (OSC 7)
+  through its PROMPT.
 - `src/apprt/win32/SearchField.zig`: the search box shared by the settings
   panel and the tab sidebar.
 - `src/apprt/win32/spots.zig`: clickable regions recorded while painting.
@@ -128,11 +133,23 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   panel is the config UI. The file is under Settings > Advanced.
 - **Tabs can live in a sidebar** (`window-tab-bar-position = sidebar`,
   off by default), laid out like Citropy's thread list: a search box,
-  sections for local and WSL shells, groups per folder, and per tab its
-  shell icon, title, age, and a red dot after a bell out of sight. A tab
-  is grouped by its folder when the shell reports it (OSC 7), otherwise
-  by its shell's name. The strip stays as the title bar with "+" and the
-  active tab's title.
+  sections for local, WSL and SSH servers, a group per folder (or server),
+  and per tab its shell icon, title, age, and a red dot after a bell out
+  of sight. The strip stays as the title bar with "+" and the active tab's
+  title, and the terminal gets a rounded top-left corner.
+- **The sidebar layout works by folder.** Every tab has a folder from the
+  start (inherited or configured) that the shell's OSC 7 reports keep
+  current; cmd.exe reports too, through a PROMPT prefix. The shell's type
+  shows only in the icon. Groups fold per section and folder, tabs drag
+  within their folder, a group's "+" opens a tab there, and the right edge
+  resizes the sidebar.
+- **The sidebar layout reopens what was open.** Tabs (profile and folder),
+  the active tab, folded groups and the width are saved as they change.
+  Closing a window keeps its tabs for next time; closing the last tab by
+  hand empties the session.
+- **SSH sessions are found by polling.** Windows doesn't announce them, so
+  every 3 seconds one process snapshot is searched for ssh.exe below each
+  tab's shell and its command line parsed for the destination.
 - **OSC 7 works on Windows.** Upstream ignored it there. Paths must carry
   a drive letter, since a Linux path from WSL would break the folder new
   tabs start in, and the host check ignores case. As on other platforms,
@@ -178,8 +195,9 @@ the scrollback.
 - Replies to programs that probe for image support travel back through
   ConPTY's input side, which reportedly drops APC replies. Tools that
   insist on a reply may not detect image support. Unverified.
-- The sidebar can't reorder tabs by dragging, collapse groups or be
-  resized; the strip still can reorder.
+- Only ssh.exe is recognized as a server session: PuTTY's plink, mosh or
+  `wsl ssh` stay under their folder.
+- A saved session reopens shells, not their output or running programs.
 - Ctrl+Shift+1..9 is taken before Ghostty's keybindings run, so it can't
   be rebound in the config file.
 - Visual Studio is found only in the folders `profiles.zon` lists, not

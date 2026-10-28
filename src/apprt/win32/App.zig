@@ -19,6 +19,7 @@ const TabOverview = @import("TabOverview.zig");
 const SettingsPanel = @import("SettingsPanel.zig");
 const canvas = @import("canvas.zig");
 const profiles = @import("profiles.zig");
+const session = @import("session.zig");
 const SplitTree = @import("../../datastruct/split_tree.zig").SplitTree;
 const w32 = @import("win32.zig");
 const brand = @import("brand.zig");
@@ -92,6 +93,10 @@ ui_fonts: canvas.EmbeddedFonts = .{ null, null },
 
 /// Shell profile icons shown on tabs and in the profile menu.
 profile_icons: profiles.Icons = .{},
+
+/// Set while reopening saved tabs, so they don't rewrite the session one
+/// at a time.
+restoring_session: bool = false,
 msg_class_atom: u16 = 0,
 
 /// List of active Window containers (tabbed windows).
@@ -281,7 +286,11 @@ pub fn run(self: *App) !void {
     errdefer alloc.destroy(window);
     try window.init(self, .{});
     try self.windows.append(alloc, window);
-    _ = try window.addTab();
+    const restored = self.restoreSession(window) catch |err| restored: {
+        log.err("failed to restore the session: {}", .{err});
+        break :restored false;
+    };
+    if (!restored) _ = try window.addTab();
 
     // Enter the Win32 message loop
     var msg: w32.MSG = undefined;
@@ -602,8 +611,12 @@ pub fn performAction(
             switch (target) {
                 .app => {},
                 .surface => |core_surface| {
-                    core_surface.rt_surface.setFolder(value.pwd);
-                    core_surface.rt_surface.parent_window.invalidateTabBar();
+                    // Shells like cmd report at every prompt; only a real
+                    // change repaints and rewrites the session.
+                    if (core_surface.rt_surface.setFolder(value.pwd)) {
+                        core_surface.rt_surface.parent_window.invalidateTabBar();
+                        self.saveSession();
+                    }
                 },
             }
             return true;
@@ -1530,6 +1543,71 @@ pub fn openConfigFile(self: *App, how: apprt.action.OpenConfig) bool {
         .new_window => (self.openConfigInNewWindow(config_path) catch false) or
             self.openConfigWithOs(config_path),
     };
+}
+
+/// Save the open tabs for the sidebar layout to reopen at startup.
+pub fn saveSession(self: *App) void {
+    if (self.config.@"window-tab-bar-position" != .sidebar or self.restoring_session) return;
+    var windows: [16]session.Window = undefined;
+    var tabs: [16][64]session.Tab = undefined;
+    var count: usize = 0;
+    var any_closing = false;
+    for (self.windows.items) |window| {
+        if (window.closing) {
+            any_closing = true;
+            continue;
+        }
+        if (window.tab_count == 0 or count == windows.len) continue;
+        windows[count] = window.sessionWindow(&tabs[count]);
+        count += 1;
+    }
+    // Closing the last window quits: keep what it had open for next time.
+    if (count == 0 and any_closing) return;
+    const first = if (self.windows.items.len > 0) self.windows.items[0] else return;
+    var collapsed: [Window.max_collapsed][]const u8 = undefined;
+    session.save(self.core_app.alloc, .{
+        .windows = windows[0..count],
+        .width = first.sidebar_width,
+        .collapsed = first.collapsedGroups(&collapsed),
+    }) catch |err| log.warn("failed to save the session: {}", .{err});
+}
+
+/// Reopen the saved tabs, using `first` for the first saved window.
+/// Returns false when there is nothing to restore.
+fn restoreSession(self: *App, first: *Window) !bool {
+    if (self.config.@"window-tab-bar-position" != .sidebar) return false;
+    const alloc = self.core_app.alloc;
+    var loaded = (try session.load(alloc, first.sidebar_width)) orelse return false;
+    defer loaded.deinit();
+    const saved = loaded.session;
+    if (saved.windows.len == 0 or saved.windows[0].tabs.len == 0) return false;
+
+    self.restoring_session = true;
+    defer self.restoring_session = false;
+    for (saved.windows, 0..) |saved_window, i| {
+        if (saved_window.tabs.len == 0) continue;
+        const window = if (i == 0) first else window: {
+            const w = try alloc.create(Window);
+            w.init(self, .{}) catch |err| {
+                alloc.destroy(w);
+                return err;
+            };
+            self.windows.append(alloc, w) catch |err| {
+                w.deinit();
+                alloc.destroy(w);
+                return err;
+            };
+            break :window w;
+        };
+        window.restoreSidebar(saved.width, saved.collapsed);
+        for (saved_window.tabs) |tab| window.openSavedTab(tab.profile, tab.folder);
+        if (window.tab_count == 0) {
+            _ = try window.addTab();
+        } else {
+            window.selectTabIndex(@min(saved_window.active, window.tab_count - 1));
+        }
+    }
+    return true;
 }
 
 /// Open a new window whose first tab uses `options`.

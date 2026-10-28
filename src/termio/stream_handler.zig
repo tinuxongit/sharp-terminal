@@ -1586,11 +1586,12 @@ pub const StreamHandler = struct {
         defer arena_alloc.deinit();
         const raw_path = try uri.path.toRawMaybeAlloc(stack_alloc.allocator());
 
-        // On Windows a file URI path is "/C:/dir". Only drive paths work as
-        // a working directory here: a Linux path from a WSL shell would
-        // break the folder new tabs start in.
+        // On Windows a file URI path is "/C:/dir", or "/mnt/c/dir" from a
+        // WSL shell. Only drive paths work as a working directory here: a
+        // Linux path like /home would break the folder new tabs start in.
+        var drive_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const path = if (comptime builtin.target.os.tag == .windows)
-            windowsPwd(raw_path) orelse {
+            windowsPwd(raw_path, &drive_buf) orelse {
                 log.debug("ignoring OSC 7 path without a drive letter: {s}", .{raw_path});
                 return;
             }
@@ -1615,7 +1616,23 @@ pub const StreamHandler = struct {
         }
     }
 
-    fn windowsPwd(path: []const u8) ?[]const u8 {
+    /// The Windows folder an OSC 7 path names: "/C:/dir" from Windows
+    /// shells, or "/mnt/c/dir" from WSL shells, written into `buf`.
+    fn windowsPwd(path: []const u8, buf: []u8) ?[]const u8 {
+        if (std.mem.startsWith(u8, path, "/mnt/") and path.len >= 6 and std.ascii.isAlphabetic(path[5]) and
+            (path.len == 6 or path[6] == '/'))
+        {
+            const rest = path[6..];
+            if (2 + rest.len + 1 > buf.len) return null;
+            buf[0] = std.ascii.toUpper(path[5]);
+            buf[1] = ':';
+            @memcpy(buf[2..][0..rest.len], rest);
+            if (rest.len == 0) {
+                buf[2] = '/';
+                return buf[0..3];
+            }
+            return buf[0 .. 2 + rest.len];
+        }
         const drive = if (path.len >= 1 and path[0] == '/') path[1..] else path;
         if (drive.len < 2 or !std.ascii.isAlphabetic(drive[0]) or drive[1] != ':') return null;
         return drive;

@@ -54,8 +54,11 @@ icon: ?w32.HICON = null,
 profile_name: [64]u8 = undefined,
 profile_name_len: u8 = 0,
 wsl: bool = false,
-folder: [128]u8 = undefined,
-folder_len: u8 = 0,
+folder: [260]u8 = undefined,
+folder_len: u16 = 0,
+/// The SSH server this pane is connected to, found by Window's polling.
+ssh_host: [128]u8 = undefined,
+ssh_host_len: u8 = 0,
 opened_ms: u64 = 0,
 attention: bool = false,
 
@@ -238,6 +241,8 @@ pub const InitOptions = struct {
     profile_name: []const u8 = "",
     /// Whether the shell runs in WSL, for the sidebar's sections.
     wsl: bool = false,
+    /// Start in this folder instead of the inherited or configured one.
+    working_directory: ?[]const u8 = null,
 };
 
 /// Initialize a surface with optional per-surface config overrides. The
@@ -366,6 +371,16 @@ pub fn initWithOptions(
     if (options.title) |title| {
         config.title = try config.arenaAlloc().dupeSentinel(u8, title, 0);
     }
+    if (options.working_directory) |dir| {
+        config.@"working-directory" = .{ .path = try config.arenaAlloc().dupe(u8, dir) };
+    }
+
+    // The sidebar groups tabs by folder from the start; the shell's own
+    // reports (OSC 7) keep it current afterwards.
+    if (config.@"working-directory") |dir| switch (dir) {
+        .path => |path| _ = self.setFolder(path),
+        .home, .inherit => self.setHomeFolder(),
+    } else self.setHomeFolder();
 
     // Initialize the core surface. This sets up fonts, the renderer, PTY,
     // and spawns the renderer + IO threads.
@@ -1044,18 +1059,52 @@ pub fn defaultTermioEnv(self: *const Surface) !std.process.Environ.Map {
     return env;
 }
 
-/// Remember the last folder of the shell's working directory, which the
-/// tab sidebar groups by. `pwd` may be a path or a file:// URL path.
-pub fn setFolder(self: *Surface, pwd: []const u8) void {
-    const trimmed = std.mem.trimEnd(u8, pwd, "/\\");
-    const start = if (std.mem.lastIndexOfAny(u8, trimmed, "/\\")) |i| i + 1 else 0;
-    const name = trimmed[start..];
-    self.folder_len = @intCast(@min(name.len, self.folder.len));
-    @memcpy(self.folder[0..self.folder_len], name[0..self.folder_len]);
+/// Remember the shell's working directory, which the tab sidebar groups
+/// by and the session restores. Stored with backslashes and no trailing
+/// separator, except for a drive root ("C:\\").
+/// Returns whether the folder changed.
+pub fn setFolder(self: *Surface, path: []const u8) bool {
+    var trimmed = std.mem.trimEnd(u8, path, "/\\");
+    if (trimmed.len == 2 and trimmed[1] == ':') trimmed = path[0..@min(path.len, 3)];
+    const n = @min(trimmed.len, self.folder.len);
+    var next: [260]u8 = undefined;
+    for (trimmed[0..n], next[0..n]) |c, *out| out.* = if (c == '/') '\\' else c;
+    if (n == self.folder_len and std.mem.eql(u8, next[0..n], self.folder[0..n])) return false;
+    @memcpy(self.folder[0..n], next[0..n]);
+    self.folder_len = @intCast(n);
+    return true;
 }
 
-pub fn folderName(self: *const Surface) []const u8 {
+pub fn sshHost(self: *const Surface) []const u8 {
+    return self.ssh_host[0..self.ssh_host_len];
+}
+
+/// Returns whether the host changed.
+pub fn setSshHost(self: *Surface, host: []const u8) bool {
+    const n: u8 = @intCast(@min(host.len, self.ssh_host.len));
+    if (n == self.ssh_host_len and std.mem.eql(u8, host[0..n], self.ssh_host[0..n])) return false;
+    @memcpy(self.ssh_host[0..n], host[0..n]);
+    self.ssh_host_len = n;
+    return true;
+}
+
+fn setHomeFolder(self: *Surface) void {
+    const alloc = self.app.core_app.alloc;
+    const home = global.environ().getAlloc(alloc, "USERPROFILE") catch return;
+    defer alloc.free(home);
+    _ = self.setFolder(home);
+}
+
+/// The full path of the folder the shell is in.
+pub fn folderPath(self: *const Surface) []const u8 {
     return self.folder[0..self.folder_len];
+}
+
+/// The folder's own name, as the sidebar shows it.
+pub fn folderName(self: *const Surface) []const u8 {
+    const path = self.folderPath();
+    const start = if (std.mem.lastIndexOfScalar(u8, std.mem.trimEnd(u8, path, "\\"), '\\')) |i| i + 1 else 0;
+    return std.mem.trimEnd(u8, path[start..], "\\");
 }
 
 pub fn profileName(self: *const Surface) []const u8 {

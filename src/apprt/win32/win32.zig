@@ -1741,3 +1741,14 @@ pub const RGN_DIFF: i32 = 4;
 pub extern "gdi32" fn CreateRectRgn(x1: i32, y1: i32, x2: i32, y2: i32) callconv(.winapi) ?*anyopaque;
 pub extern "gdi32" fn CombineRgn(hrgnDst: *anyopaque, hrgnSrc1: *anyopaque, hrgnSrc2: *anyopaque, iMode: i32) callconv(.winapi) i32;
 pub extern "user32" fn SetWindowRgn(hWnd: HWND, hRgn: ?*anyopaque, bRedraw: i32) callconv(.winapi) i32;
+
+// Reading another process's command line, to find SSH destinations.
+pub const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+pub const ProcessCommandLineInformation: u32 = 60;
+pub extern "kernel32" fn OpenProcess(dwDesiredAccess: u32, bInheritHandle: i32, dwProcessId: u32) callconv(.winapi) ?HANDLE;
+pub extern "ntdll" fn NtQueryInformationProcess(ProcessHandle: HANDLE, ProcessInformationClass: u32, ProcessInformation: *anyopaque, ProcessInformationLength: u32, ReturnLength: ?*u32) callconv(.winapi) i32;
+pub const UNICODE_STRING = extern struct {
+    Length: u16,
+    MaximumLength: u16,
+    Buffer: ?[*]u16,
+};

@@ -887,3 +887,8 @@ pub fn getProcessInfo(self: *Termio, comptime info: ProcessInfo) ?ProcessInfo.Ty
 pub fn commandRunning(self: *Termio) ?bool {
     return self.backend.commandRunning();
 }
+
+/// The shell's process id, where the platform exposes it.
+pub fn processId(self: *Termio) ?u32 {
+    return self.backend.processId();
+}
