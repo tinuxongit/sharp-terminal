@@ -15,6 +15,7 @@ const global = @import("../../global.zig");
 const App = @import("App.zig");
 const Window = @import("Window.zig");
 const w32 = @import("win32.zig");
+const profiles = @import("profiles.zig");
 const brand = @import("brand.zig");
 const servers = @import("servers.zig");
 const claude_session = @import("claude_session.zig");
@@ -62,6 +63,8 @@ icon: ?w32.HICON = null,
 profile_name: [64]u8 = undefined,
 profile_name_len: u8 = 0,
 wsl: bool = false,
+/// How the shell writes paths, for files dropped or pasted on it.
+paths: profiles.PathStyle = .windows,
 folder: [260]u8 = undefined,
 folder_len: u16 = 0,
 /// The SSH server this pane is connected to, found by Window's polling.
@@ -242,6 +245,7 @@ pub const InitOptions = struct {
     profile_name: []const u8 = "",
     /// Whether the shell runs in WSL, for the sidebar's sections.
     wsl: bool = false,
+    paths: profiles.PathStyle = .windows,
     /// Start in this folder instead of the inherited or configured one.
     working_directory: ?[]const u8 = null,
 };
@@ -260,6 +264,7 @@ pub fn initWithOptions(
         .parent_window = parent,
         .icon = options.icon,
         .wsl = options.wsl,
+        .paths = options.paths,
         .opened_ms = w32.GetTickCount64(),
     };
     self.profile_name_len = @intCast(@min(options.profile_name.len, self.profile_name.len));

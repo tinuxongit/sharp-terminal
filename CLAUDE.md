@@ -393,7 +393,11 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   (Claude Code reads the image itself). Settings > General offers
   Ghostty's Ctrl+Shift+C/V instead. Files dropped on a terminal are
   pasted as quoted paths, a bracketed paste, so Claude Code takes an
-  image's path as an attachment.
+  image's path as an attachment. Each profile says how its shell writes
+  paths (`.paths` in `profiles.zon`, Windows Terminal's
+  `pathTranslationStyle`): WSL tabs get `/mnt/c/...` (and a distribution's
+  own `\wsl.localhost` share its root), Git Bash `/c/...`, both in single
+  quotes, which expand nothing.
 - **Background styles are tiles Ghostty already knows how to draw.**
   Settings > Appearance > Background offers Default (the plain theme
   color) and Pixel cascade, a grid of squares in any color

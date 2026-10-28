@@ -9,6 +9,7 @@ const terminal = @import("../../terminal/main.zig");
 const w32 = @import("win32.zig");
 const clipboard = @import("clipboard.zig");
 const key_map = @import("key_map.zig");
+const profiles = @import("profiles.zig");
 const log = std.log.scoped(.win32);
 const Surface = @import("Surface.zig");
 
@@ -174,7 +175,7 @@ pub fn handleDropFiles(self: *Surface, wparam: usize) void {
     defer w32.DragFinish(hdrop);
 
     const alloc = self.app.core_app.alloc;
-    const text = (hdropPathsToUtf8(alloc, hdrop) catch |err| {
+    const text = (hdropPathsToUtf8(alloc, hdrop, self.paths) catch |err| {
         log.err("drop-files path conversion: {}", .{err});
         return;
     }) orelse return;
@@ -188,8 +189,9 @@ pub fn handleDropFiles(self: *Surface, wparam: usize) void {
     };
 }
 
-/// Convert the path list in an HDROP into one shell-ready UTF-8 string:
-/// each path double-quoted, joined with single spaces.
+/// Convert the path list in an HDROP into one shell-ready UTF-8 string,
+/// each path written and quoted as `style`'s shell reads it, joined with
+/// single spaces.
 ///
 /// Used by both WM_DROPFILES and CF_HDROP clipboard pastes. The caller owns
 /// the returned slice; this function never releases the HDROP. A
@@ -198,7 +200,7 @@ pub fn handleDropFiles(self: *Surface, wparam: usize) void {
 /// or unlocked — the clipboard owns it, and DragQueryFileW takes and drops
 /// its own lock internally, so the caller neither locks nor unlocks it.
 /// Returns null when there is nothing usable.
-pub fn hdropPathsToUtf8(alloc: Allocator, hdrop: w32.HDROP) Allocator.Error!?[]u8 {
+pub fn hdropPathsToUtf8(alloc: Allocator, hdrop: w32.HDROP, style: profiles.PathStyle) Allocator.Error!?[]u8 {
     // Number of files (passing 0xFFFFFFFF as iFile).
     const count = w32.DragQueryFileW(hdrop, 0xFFFFFFFF, null, 0);
     if (count == 0) return null;
@@ -222,33 +224,11 @@ pub fn hdropPathsToUtf8(alloc: Allocator, hdrop: w32.HDROP) Allocator.Error!?[]u
         const utf8_len = std.unicode.utf16LeToUtf8(utf8_buf, u16_buf[0..got]) catch continue;
         const path = utf8_buf[0..utf8_len];
 
-        // A double quote can't occur in a path created through the Win32
-        // API, but volumes written by WSL, Samba/NFS, or via \\?\ paths can
-        // carry one. It would close the wrapper below and let the rest of
-        // the name — and the quoting of every path after it — be read as
-        // shell syntax, so refuse to emit such a path at all. Logged
-        // without the name: it can also hold control characters.
-        if (std.mem.indexOfScalar(u8, path, '"') != null) {
-            log.warn("refusing to paste a path containing a double quote", .{});
-            continue;
-        }
-
-        // Quote unconditionally, not just for whitespace. Windows filenames
-        // may legally contain & | ( ) ; ^ < > and glob characters, and
-        // wrapping neutralizes those in cmd.exe, PowerShell and POSIX
-        // shells alike. Residual, and not fixable without knowing which
-        // shell is on the other end: $(...) and backticks still expand
-        // inside double quotes under bash/zsh/PowerShell, as does %VAR%
-        // under cmd.exe. The core unsafe-paste check does not cover these
-        // (input/paste.zig isSafe only looks for \n and \x1b[201~), but
-        // pasting never submits a line on its own.
-        //
         // Separate from whatever we already appended rather than keying off
         // `i`, so a skipped entry can't leave a leading or doubled space.
-        if (buf.items.len > 0) try buf.append(alloc, ' ');
-        try buf.append(alloc, '"');
-        try buf.appendSlice(alloc, path);
-        try buf.append(alloc, '"');
+        const before = buf.items.len;
+        if (before > 0) try buf.append(alloc, ' ');
+        if (!try appendShellPath(alloc, &buf, path, style)) buf.shrinkRetainingCapacity(before);
     }
 
     if (buf.items.len == 0) {
@@ -256,6 +236,63 @@ pub fn hdropPathsToUtf8(alloc: Allocator, hdrop: w32.HDROP) Allocator.Error!?[]u
         return null;
     }
     return try buf.toOwnedSlice(alloc);
+}
+
+/// Append `path` as `style`'s shell reads it, always quoted: Windows file
+/// names may hold & | ( ) ; ^ < > and glob characters. False when the path
+/// can't be written safely and is left out.
+fn appendShellPath(alloc: Allocator, buf: *std.ArrayListUnmanaged(u8), path: []const u8, style: profiles.PathStyle) Allocator.Error!bool {
+    switch (style) {
+        .windows => {
+            // A double quote can't occur in a path created through the
+            // Win32 API, but volumes written by WSL, Samba/NFS, or via \\?\
+            // paths can carry one. It would close the quotes and let the
+            // rest be read as shell syntax, so such a path is refused.
+            // Logged without the name: it can hold control characters.
+            // Residual, and not fixable without knowing the shell: $(...)
+            // and backticks still expand inside double quotes in
+            // PowerShell, as does %VAR% in cmd.exe; pasting never submits
+            // a line on its own.
+            if (std.mem.indexOfScalar(u8, path, '"') != null) {
+                log.warn("refusing to paste a path containing a double quote", .{});
+                return false;
+            }
+            try buf.append(alloc, '"');
+            try buf.appendSlice(alloc, path);
+            try buf.append(alloc, '"');
+        },
+        // POSIX shells: single quotes expand nothing, and a quote inside
+        // is written '\''.
+        .wsl, .msys => {
+            try buf.append(alloc, '\'');
+            const rest = try appendPosixRoot(alloc, buf, path, style);
+            for (rest) |c| switch (c) {
+                '\\' => try buf.append(alloc, '/'),
+                '\'' => try buf.appendSlice(alloc, "'\\''"),
+                else => try buf.append(alloc, c),
+            };
+            try buf.append(alloc, '\'');
+        },
+    }
+    return true;
+}
+
+/// Write where a Windows path lives in a WSL or MSYS shell's tree and
+/// return the part of `path` after it: a drive "C:\" becomes /mnt/c or
+/// /c, and a WSL distribution's own share (\\wsl.localhost\Ubuntu\...)
+/// its root. Other network paths stay as they are.
+fn appendPosixRoot(alloc: Allocator, buf: *std.ArrayListUnmanaged(u8), path: []const u8, style: profiles.PathStyle) Allocator.Error![]const u8 {
+    if (path.len >= 2 and path[1] == ':' and std.ascii.isAlphabetic(path[0])) {
+        try buf.appendSlice(alloc, if (style == .wsl) "/mnt/" else "/");
+        try buf.append(alloc, std.ascii.toLower(path[0]));
+        return path[2..];
+    }
+    if (style == .wsl) for ([_][]const u8{ "\\\\wsl.localhost\\", "\\\\wsl$\\" }) |share| {
+        if (!std.ascii.startsWithIgnoreCase(path, share)) continue;
+        const distro_end = std.mem.indexOfScalarPos(u8, path, share.len, '\\') orelse return "/";
+        return path[distro_end..];
+    };
+    return path;
 }
 
 /// Handle WM_MOUSEWHEEL (vertical) and WM_MOUSEHWHEEL (horizontal).

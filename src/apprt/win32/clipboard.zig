@@ -145,7 +145,7 @@ pub fn clipboardRequest(
             // pointer: clipboard data is moveable, so the handle and the
             // locked address are different values. And never DragFinish it;
             // the clipboard owns this handle, not us.
-            const paths = (try pane_mouse.hdropPathsToUtf8(alloc, @ptrCast(hdrop_handle))) orelse
+            const paths = (try pane_mouse.hdropPathsToUtf8(alloc, @ptrCast(hdrop_handle), self.paths)) orelse
                 break :hdrop;
             defer alloc.free(paths);
             break :blk try alloc.dupeSentinel(u8, paths, 0);

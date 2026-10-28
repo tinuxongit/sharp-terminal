@@ -9,6 +9,9 @@ const global = @import("../../global.zig");
 
 pub const Source = enum { fixed, visual_studio, wsl };
 
+/// How a profile's shell writes a Windows path, for dropped files.
+pub const PathStyle = enum { windows, wsl, msys };
+
 pub const Template = struct {
     name: []const u8,
     command: []const u8,
@@ -16,6 +19,7 @@ pub const Template = struct {
     requires: ?[]const u8 = null,
     source: Source = .fixed,
     default: bool = false,
+    paths: PathStyle = .windows,
 };
 
 pub const Menu = struct {
@@ -92,6 +96,7 @@ pub const Profile = struct {
     icon: Text,
     default: bool,
     source: Source,
+    paths: PathStyle,
 };
 
 /// A string inside List.text, stored as a position so the list can be
@@ -162,7 +167,7 @@ pub const List = struct {
                 return;
             }
         }
-        self.items[self.len] = .{ .name = name_, .command = command_, .icon = icon_, .default = t.default, .source = t.source };
+        self.items[self.len] = .{ .name = name_, .command = command_, .icon = icon_, .default = t.default, .source = t.source, .paths = t.paths };
         self.len += 1;
     }
 

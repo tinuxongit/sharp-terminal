@@ -15,6 +15,8 @@
 //   .wsl            once per WSL distribution; {distro} becomes its name
 //
 // .default marks the shell new tabs run when `command` is not set.
+// .paths is how the shell writes a path, for files dropped on it: .windows
+// (the default), .wsl (/mnt/c/...) or .msys (/c/..., Git Bash).
 .{
     // Distributions WSL uses internally, hidden as in Windows Terminal.
     .hidden_wsl_prefixes = .{"docker-desktop"},
@@ -27,6 +29,7 @@
             .command = "\"C:\\Program Files\\Git\\bin\\bash.exe\" -i -l",
             .icon = "C:\\Program Files\\Git\\git-bash.exe",
             .requires = "C:\\Program Files\\Git\\bin\\bash.exe",
+            .paths = .msys,
         },
         .{
             .name = "Developer Command Prompt for VS {vs_year}",
@@ -42,7 +45,7 @@
             .icon = "powershell.exe",
             .requires = "{vs}\\Common7\\Tools\\Microsoft.VisualStudio.DevShell.dll",
         },
-        .{ .name = "{distro}", .source = .wsl, .command = "wsl.exe -d {distro}", .icon = "wsl.exe" },
+        .{ .name = "{distro}", .source = .wsl, .command = "wsl.exe -d {distro}", .icon = "wsl.exe", .paths = .wsl },
     },
     // The tab sidebar's text. Tabs are listed by where their shell runs.
     .sidebar = .{

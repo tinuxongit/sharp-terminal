@@ -1675,6 +1675,7 @@ fn profileOptions(self: *Window, list: *const profiles.List, index: usize, base:
     options.icon = self.app.profile_icons.get(list.icon(index), self.tabIconSize());
     options.profile_name = list.name(index);
     options.wsl = list.items[index].source == .wsl;
+    options.paths = list.items[index].paths;
     return options;
 }
 
