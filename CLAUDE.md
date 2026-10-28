@@ -95,7 +95,9 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   Ghostty's config file and reloads it, so the file stays the single
   source of truth. The panel is a per-pixel-alpha layered window drawn
   with `canvas.zig`, so it has no child controls; the search box is drawn
-  too, and typing anywhere in the panel searches. Dropdowns open native
+  too, and typing anywhere in the panel searches. Its text is JetBrains
+  Mono, the terminal's own font, registered privately at startup from the
+  copy Ghostty embeds, and its surfaces have no outlines, only fills. Dropdowns open native
   menus, themed through uxtheme's unnamed SetPreferredAppMode export, as
   Explorer and Notepad do.
 - **Images use the kitty graphics protocol.** The bundled ConPTY passes it

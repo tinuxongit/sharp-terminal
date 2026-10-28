@@ -231,3 +231,26 @@ pub fn iconFace(hdc: w32.HDC) [*:0]const u16 {
     const expected: []const u16 = fluent;
     return if (std.mem.startsWith(u16, picked, expected)) fluent else mdl2;
 }
+
+/// Sharp's own UI text uses the terminal's default font, JetBrains Mono,
+/// which Ghostty embeds. Windows can't use it until it is registered;
+/// AddFontMemResourceEx keeps it private to this process.
+pub const jetbrains_mono = std.unicode.utf8ToUtf16LeStringLiteral("JetBrains Mono");
+
+pub const EmbeddedFonts = [2]?w32.HANDLE;
+
+pub fn loadEmbeddedFonts() EmbeddedFonts {
+    const embedded = @import("../../font/main.zig").embedded;
+    var result: EmbeddedFonts = .{ null, null };
+    inline for (.{ embedded.regular, embedded.bold }, 0..) |file, i| {
+        var count: u32 = 0;
+        result[i] = w32.AddFontMemResourceEx(file.ptr, file.len, null, &count);
+    }
+    return result;
+}
+
+pub fn unloadEmbeddedFonts(fonts: EmbeddedFonts) void {
+    for (fonts) |font| if (font) |h| {
+        _ = w32.RemoveFontMemResourceEx(h);
+    };
+}

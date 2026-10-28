@@ -73,13 +73,13 @@ pub const Palette = struct {
         return .{
             .panel = panel,
             .sidebar = sidebar,
-            .card = panel.mix(contrast, 0.035),
-            .border = panel.mix(contrast, 0.12),
+            .card = panel.mix(contrast, 0.05),
+            .border = panel.mix(contrast, 0.09),
             .hover = sidebar.mix(contrast, 0.06),
             .selected = sidebar.mix(contrast, 0.11),
             .panel_hover = panel.mix(contrast, 0.08),
-            .control = panel.mix(contrast, 0.07),
-            .control_hover = panel.mix(contrast, 0.12),
+            .control = panel.mix(contrast, 0.11),
+            .control_hover = panel.mix(contrast, 0.16),
             .text = foreground,
             .text_dim = foreground.mix(panel, 0.45),
             .accent = accent,
@@ -99,16 +99,17 @@ pub const Fonts = struct {
     icons_small: ?*anyopaque = null,
 
     pub fn init(hdc: w32.HDC, scale: f32) Fonts {
-        const ui = canvas_mod.segoe_ui;
+        // The terminal's own font, registered by App from Ghostty's copy.
+        const ui = canvas_mod.jetbrains_mono;
         const icon_face = canvas_mod.iconFace(hdc);
         const f = canvas_mod.createFont;
         return .{
-            .body = f(14, scale, ui, w32.FW_NORMAL, .cleartype),
-            .strong = f(14, scale, ui, w32.FW_SEMIBOLD, .cleartype),
-            .small = f(12.5, scale, ui, w32.FW_NORMAL, .cleartype),
-            .heading = f(16, scale, ui, w32.FW_SEMIBOLD, .cleartype),
-            .crumb = f(15, scale, ui, w32.FW_NORMAL, .cleartype),
-            .crumb_strong = f(15, scale, ui, w32.FW_SEMIBOLD, .cleartype),
+            .body = f(13, scale, ui, w32.FW_NORMAL, .cleartype),
+            .strong = f(13, scale, ui, w32.FW_BOLD, .cleartype),
+            .small = f(12, scale, ui, w32.FW_NORMAL, .cleartype),
+            .heading = f(15, scale, ui, w32.FW_BOLD, .cleartype),
+            .crumb = f(14, scale, ui, w32.FW_NORMAL, .cleartype),
+            .crumb_strong = f(14, scale, ui, w32.FW_BOLD, .cleartype),
             .icons = f(16, scale, icon_face, w32.FW_NORMAL, .grayscale),
             .icons_small = f(10, scale, icon_face, w32.FW_NORMAL, .grayscale),
         };
@@ -128,6 +129,8 @@ pub const State = struct {
     scroll: i32,
     hover: Target,
     focused: bool,
+    search_focused: bool,
+    caret_visible: bool,
     config_text: []const u8,
 };
 
@@ -255,7 +258,7 @@ fn paintSection(p: *Painter, title: []const u8, refs: []const settings.Ref, left
 
     const row_h = p.px(row_height);
     const card: w32.RECT = .{ .left = left, .top = y, .right = right, .bottom = y + row_h * @as(i32, @intCast(refs.len)) };
-    p.c.fillBordered(card, p.px(card_corner), p.palette.card, p.palette.border);
+    p.c.fillRounded(card, p.px(card_corner), p.palette.card);
     for (refs, 0..) |ref, i| {
         const row_top = y + row_h * @as(i32, @intCast(i));
         if (i > 0) p.c.fill(.{ .left = card.left + 1, .top = row_top, .right = card.right - 1, .bottom = row_top + 1 }, p.palette.border);
@@ -289,7 +292,7 @@ fn paintRow(p: *Painter, row: w32.RECT, ref: settings.Ref) void {
 
     switch (setting.kind()) {
         .dropdown => {
-            p.c.fillBordered(control, p.px(control_corner), if (hovered) pal.control_hover else pal.control, pal.border);
+            p.c.fillRounded(control, p.px(control_corner), if (hovered) pal.control_hover else pal.control);
             const label = settings.currentLabel(setting, p.state.config_text);
             p.c.text(.{ .left = control.left + p.px(12), .top = control.top, .right = control.right - p.px(30), .bottom = control.bottom }, label, p.fonts.body, pal.text, .left);
             p.c.glyph(.{ .left = control.right - p.px(30), .top = control.top, .right = control.right - p.px(8), .bottom = control.bottom }, icon_chevron, p.fonts.icons_small, pal.text_dim);
@@ -304,12 +307,12 @@ fn paintRow(p: *Painter, row: w32.RECT, ref: settings.Ref) void {
                 p.c.fillRounded(control, @divTrunc(h, 2), if (hovered) pal.accent.mix(Rgb.white, 0.12) else pal.accent);
                 p.c.fillRounded(knob_rect, @divTrunc(knob, 2), Rgb.white);
             } else {
-                p.c.fillBordered(control, @divTrunc(h, 2), if (hovered) pal.control_hover else pal.card, pal.text_dim);
+                p.c.fillRounded(control, @divTrunc(h, 2), if (hovered) pal.control_hover else pal.control);
                 p.c.fillRounded(knob_rect, @divTrunc(knob, 2), pal.text_dim);
             }
         },
         .action => {
-            p.c.fillBordered(control, p.px(control_corner), if (hovered) pal.control_hover else pal.control, pal.border);
+            p.c.fillRounded(control, p.px(control_corner), if (hovered) pal.control_hover else pal.control);
             p.c.text(control, setting.button, p.fonts.body, pal.text, .center);
         },
     }
@@ -357,12 +360,14 @@ fn paintHeader(p: *Painter, content: w32.RECT) void {
 fn paintSidebar(p: *Painter, side: w32.RECT) void {
     const pal = p.palette;
     p.c.fill(side, pal.sidebar);
-    p.c.fill(.{ .left = side.right, .top = side.top, .right = side.right + 1, .bottom = side.bottom }, pal.border);
     p.spots.add(side, .none);
 
     const search: w32.RECT = .{ .left = side.left + p.px(12), .top = side.top + p.px(12), .right = side.right - p.px(12), .bottom = side.top + p.px(48) };
     const searching = p.state.query.len > 0;
-    p.c.fillBordered(search, p.px(8), pal.sidebar.mix(pal.text, 0.05), if (p.state.focused) pal.text_dim else pal.border);
+    const search_fill = if (p.state.search_focused)
+        pal.selected
+    else if (p.state.hover.eql(.search)) pal.hover else pal.sidebar.mix(pal.text, 0.05);
+    p.c.fillRounded(search, p.px(8), search_fill);
     p.c.glyph(.{ .left = search.left + p.px(8), .top = search.top, .right = search.left + p.px(30), .bottom = search.bottom }, icon_search, p.fonts.icons_small, pal.text_dim);
     const text_rect: w32.RECT = .{ .left = search.left + p.px(36), .top = search.top, .right = search.right - p.px(8), .bottom = search.bottom };
     if (searching) {
@@ -370,9 +375,10 @@ fn paintSidebar(p: *Painter, side: w32.RECT) void {
     } else {
         p.c.text(text_rect, settings.data.search_placeholder, p.fonts.body, pal.text_dim, .left);
     }
-    if (p.state.focused and searching) {
-        // Typing anywhere in the panel searches, so show where it goes.
-        const caret_x = @min(text_rect.left + p.c.textWidth(p.state.query, p.fonts.body) + 1, text_rect.right);
+    if (p.state.search_focused and p.state.focused and p.state.caret_visible) {
+        // With no query the caret sits just before the placeholder.
+        const after = if (searching) p.c.textWidth(p.state.query, p.fonts.body) + 1 else -p.px(3);
+        const caret_x = @min(text_rect.left + after, text_rect.right);
         const h = p.px(16);
         const t = search.top + @divTrunc(search.bottom - search.top - h, 2);
         p.c.fill(.{ .left = caret_x, .top = t, .right = caret_x + @max(1, p.px(1)), .bottom = t + h }, pal.text);

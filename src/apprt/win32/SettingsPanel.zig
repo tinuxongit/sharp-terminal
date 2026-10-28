@@ -55,6 +55,11 @@ hover: view.Target = .none,
 spots: view.Spots = .{},
 tracking_mouse: bool = false,
 focused: bool = true,
+/// Whether typing goes to the search box. Typing anywhere also focuses it.
+search_focused: bool = false,
+caret_visible: bool = true,
+
+const caret_timer: usize = 1;
 
 pub fn registerClass(instance: w32.HINSTANCE) !u16 {
     const atom = w32.RegisterClassExW(&.{
@@ -158,6 +163,8 @@ fn render(self: *SettingsPanel) void {
         .scroll = self.scroll,
         .hover = self.hover,
         .focused = self.focused,
+        .search_focused = self.search_focused,
+        .caret_visible = self.caret_visible,
         .config_text = self.config_text,
     }, &self.spots);
     canvas.sync();
@@ -226,10 +233,23 @@ fn targetAt(self: *SettingsPanel, x: i32, y: i32) ?view.Spots.Spot {
     return self.spots.at(x, y);
 }
 
+fn focusSearch(self: *SettingsPanel, focused: bool) void {
+    const hwnd = self.hwnd orelse return;
+    self.search_focused = focused;
+    self.caret_visible = true;
+    if (focused) {
+        _ = w32.SetTimer(hwnd, caret_timer, w32.GetCaretBlinkTime(), null);
+    } else {
+        _ = w32.KillTimer(hwnd, caret_timer);
+    }
+}
+
 fn click(self: *SettingsPanel, x: i32, y: i32) void {
     const spot = self.targetAt(x, y) orelse return;
+    // Clicking anything but the search box takes focus away from it.
+    self.focusSearch(spot.target == .search);
     switch (spot.target) {
-        .none, .search => {},
+        .none, .search => self.render(),
         .backdrop, .close => self.close(),
         .restore => self.restoreDefaults(),
         .category => |i| {
@@ -299,12 +319,35 @@ fn restoreDefaults(self: *SettingsPanel) void {
 }
 
 fn typeChar(self: *SettingsPanel, char: u16) void {
-    if (char < 0x20 or char == 0x7F or (char >= 0xD800 and char <= 0xDFFF)) return;
+    if (!self.append(char)) return;
+    self.focusSearch(true);
+    self.scroll = 0;
+    self.render();
+}
+
+fn append(self: *SettingsPanel, char: u16) bool {
+    if (char < 0x20 or char == 0x7F or (char >= 0xD800 and char <= 0xDFFF)) return false;
     var buf: [4]u8 = undefined;
-    const len = std.unicode.utf8Encode(char, &buf) catch return;
-    if (self.query_len + len > self.query.len) return;
+    const len = std.unicode.utf8Encode(char, &buf) catch return false;
+    if (self.query_len + len > self.query.len) return false;
     @memcpy(self.query[self.query_len..][0..len], buf[0..len]);
     self.query_len += len;
+    return true;
+}
+
+/// Ctrl+V: paste the clipboard's first line into the search box.
+fn paste(self: *SettingsPanel) void {
+    if (w32.OpenClipboard(self.hwnd) == 0) return;
+    defer _ = w32.CloseClipboard();
+    const handle = w32.GetClipboardData(w32.CF_UNICODETEXT) orelse return;
+    const bytes = w32.GlobalLock(handle) orelse return;
+    defer _ = w32.GlobalUnlock(handle);
+    const text: [*:0]const u16 = @ptrCast(@alignCast(bytes));
+    var i: usize = 0;
+    while (text[i] != 0 and text[i] != '\r' and text[i] != '\n') : (i += 1) {
+        if (!self.append(text[i])) break;
+    }
+    self.focusSearch(true);
     self.scroll = 0;
     self.render();
 }
@@ -315,6 +358,7 @@ fn backspace(self: *SettingsPanel) void {
     var i = self.query_len - 1;
     while (i > 0 and self.query[i] & 0xC0 == 0x80) i -= 1;
     self.query_len = i;
+    self.caret_visible = true;
     self.render();
 }
 
@@ -357,8 +401,12 @@ fn wndProc(hwnd: w32.HWND, msg: u32, wparam: usize, lparam: isize) callconv(.win
             return 0;
         },
         w32.WM_SETCURSOR => {
+            if (self.hover == .search) {
+                if (w32.LoadCursorW(null, w32.IDC_IBEAM)) |cursor| _ = w32.SetCursor(cursor);
+                return 1;
+            }
             const clickable = switch (self.hover) {
-                .none, .backdrop, .search => false,
+                .none, .backdrop => false,
                 else => true,
             };
             if (clickable) {
@@ -374,12 +422,20 @@ fn wndProc(hwnd: w32.HWND, msg: u32, wparam: usize, lparam: isize) callconv(.win
                     self.render();
                 } else self.close(),
                 w32.VK_BACK => self.backspace(),
+                'V' => if (w32.GetKeyState(@as(i32, w32.VK_CONTROL)) < 0) self.paste(),
                 else => {},
             }
             return 0;
         },
         w32.WM_CHAR => {
             self.typeChar(@truncate(wparam));
+            return 0;
+        },
+        w32.WM_TIMER => {
+            if (wparam == caret_timer) {
+                self.caret_visible = !self.caret_visible;
+                self.render();
+            }
             return 0;
         },
         w32.WM_SETFOCUS, w32.WM_KILLFOCUS => {

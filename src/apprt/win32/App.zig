@@ -17,6 +17,7 @@ const Surface = @import("Surface.zig");
 const Window = @import("Window.zig");
 const TabOverview = @import("TabOverview.zig");
 const SettingsPanel = @import("SettingsPanel.zig");
+const canvas = @import("canvas.zig");
 const SplitTree = @import("../../datastruct/split_tree.zig").SplitTree;
 const w32 = @import("win32.zig");
 const brand = @import("brand.zig");
@@ -84,6 +85,9 @@ class_atom: u16 = 0,
 terminal_class_atom: u16 = 0,
 overview_class_atom: u16 = 0,
 settings_class_atom: u16 = 0,
+
+/// JetBrains Mono registered for Sharp's own UI; see canvas.zig.
+ui_fonts: canvas.EmbeddedFonts = .{ null, null },
 msg_class_atom: u16 = 0,
 
 /// List of active Window containers (tabbed windows).
@@ -213,6 +217,7 @@ pub fn init(
 
     self.overview_class_atom = try TabOverview.registerClass(hinstance);
     self.settings_class_atom = try SettingsPanel.registerClass(hinstance);
+    self.ui_fonts = canvas.loadEmbeddedFonts();
     errdefer _ = w32.UnregisterClassW(TabOverview.class_name, hinstance);
 
     // Register the message-only window class (WM_APP_WAKEUP, WM_TIMER).
@@ -494,6 +499,8 @@ pub fn terminate(self: *App) void {
         _ = w32.UnregisterClassW(SettingsPanel.class_name, self.hinstance);
         self.settings_class_atom = 0;
     }
+    canvas.unloadEmbeddedFonts(self.ui_fonts);
+    self.ui_fonts = .{ null, null };
     if (self.class_atom != 0) {
         _ = w32.UnregisterClassW(WINDOW_CLASS_NAME, self.hinstance);
         self.class_atom = 0;

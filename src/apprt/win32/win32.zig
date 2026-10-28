@@ -1683,3 +1683,7 @@ pub extern "kernel32" fn GetProcAddress(hModule: HINSTANCE, lpProcName: [*:0]con
 pub const ANTIALIASED_QUALITY: u32 = 4;
 pub const DT_RIGHT: u32 = 0x2;
 pub extern "dwmapi" fn DwmGetColorizationColor(pcrColorization: *u32, pfOpaqueBlend: *i32) callconv(.winapi) i32;
+pub const FW_BOLD: i32 = 700;
+pub extern "user32" fn GetCaretBlinkTime() callconv(.winapi) u32;
+pub extern "gdi32" fn AddFontMemResourceEx(pFileView: *const anyopaque, cjSize: u32, pvResrved: ?*anyopaque, pNumFonts: *u32) callconv(.winapi) ?HANDLE;
+pub extern "gdi32" fn RemoveFontMemResourceEx(h: HANDLE) callconv(.winapi) i32;
