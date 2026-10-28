@@ -182,8 +182,10 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   Closing a window keeps its tabs for next time; closing the last tab by
   hand empties the session.
 - **SSH sessions are found by polling.** Windows doesn't announce them, so
-  every 3 seconds one process snapshot is searched for ssh.exe below each
-  tab's shell and its command line parsed for the destination.
+  every 3 seconds one process snapshot is searched below each tab's shell
+  for an SSH client (ssh.exe, PuTTY's plink.exe, or wsl.exe running ssh)
+  and its command line parsed for the destination, user included. An ssh
+  typed inside a WSL shell runs in Linux, out of Windows' sight.
 - **Servers open from the sidebar.** Local, WSL (when installed) and
   Servers always show. Servers' "+" opens a box for `user@host`, and its
   arrow lists the hosts in `~/.ssh/config` and the servers used recently,
@@ -241,8 +243,6 @@ Baseline, 2026-10-28, two runs each:
 - Replies to programs that probe for image support travel back through
   ConPTY's input side, which reportedly drops APC replies. Tools that
   insist on a reply may not detect image support. Unverified.
-- Only ssh.exe is recognized as a server session: PuTTY's plink, mosh or
-  `wsl ssh` stay under their folder.
 - A saved session reopens shells, not their output or running programs.
 - A console program started from the tab in a window of its own (`start
   cmd`) ends with the tab, since only the GUI subsystem marks a program
