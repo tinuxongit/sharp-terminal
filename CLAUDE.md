@@ -196,10 +196,10 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   new tabs now open in the current tab's folder.
 - **Two tab styles.** `window-tab-style` (a Sharp addition to Ghostty's
   config) picks Chrome's flowing tabs or Windows Terminal's flat ones.
-- **Changes are checked by building, not by tests.** The owner's rule is
-  that no tests are written or run, so neither Ghostty's test workflows
-  nor the fork's are kept. `.github/workflows/windows-ci.yml` builds
-  ReleaseSafe on every push; `CONTRIBUTING.md` says the same to others.
+- **Changes are checked by building locally, with no tests and no CI.**
+  The owner's rule is that no tests are written or run, and Sharp is only
+  built for Windows on the owner's PC, so neither Ghostty's workflows nor
+  the fork's are kept.
 - **Sharp has its own version (0.1.0), in `dist/windows/ghostty.rc`.**
   `TERM_PROGRAM_VERSION` keeps Ghostty's, which tells programs which
   Ghostty features to expect.
