@@ -685,12 +685,7 @@ fn openHandedOver(self: *App, handed: *const terminal_handoff.Handed) void {
 }
 
 fn handoffWindow(self: *App) !*Window {
-    var i = self.windows.items.len;
-    while (i > 0) {
-        i -= 1;
-        const window = self.windows.items[i];
-        if (!window.is_quick_terminal and !window.closing) return window;
-    }
+    if (self.newestWindow()) |window| return window;
     const alloc = self.core_app.alloc;
     const window = try alloc.create(Window);
     errdefer alloc.destroy(window);
@@ -698,6 +693,17 @@ fn handoffWindow(self: *App) !*Window {
     errdefer window.deinit();
     try self.windows.append(alloc, window);
     return window;
+}
+
+/// The most recently opened ordinary window, if any is open.
+pub fn newestWindow(self: *App) ?*Window {
+    var i = self.windows.items.len;
+    while (i > 0) {
+        i -= 1;
+        const window = self.windows.items[i];
+        if (!window.is_quick_terminal and !window.closing) return window;
+    }
+    return null;
 }
 
 /// Restart into a downloaded update, after asking: running programs end.

@@ -1,6 +1,7 @@
 //! The tab strip's mouse: clicks, hover and leaving, closing tabs Chrome's
 //! way, dragging them to reorder, and the right-click tab menu.
 const std = @import("std");
+const closed_tabs = @import("closed_tabs.zig");
 const w32 = @import("win32.zig");
 const tab_strip = @import("tab_strip.zig");
 const menu_theme = @import("menu_theme.zig");
@@ -101,6 +102,7 @@ const TAB_CTX_CLOSE: usize = 9001;
 const TAB_CTX_CLOSE_OTHERS: usize = 9002;
 const TAB_CTX_CLOSE_RIGHT: usize = 9003;
 const TAB_CTX_NEW_TAB: usize = 9004;
+const TAB_CTX_REOPEN: usize = 9005;
 
 /// Handle a right-button click in the tab bar region.
 /// Shows a context menu for the clicked tab.
@@ -135,6 +137,7 @@ pub fn showTabMenu(self: *Window, clicked_tab: ?usize, x: i16, y: i16) void {
         _ = w32.AppendMenuW(menu, w32.MF_SEPARATOR, 0, null);
     }
     _ = w32.AppendMenuW(menu, w32.MF_STRING, TAB_CTX_NEW_TAB, std.unicode.utf8ToUtf16LeStringLiteral("New Tab"));
+    _ = w32.AppendMenuW(menu, if (closed_tabs.any()) w32.MF_STRING else w32.MF_GRAYED, TAB_CTX_REOPEN, std.unicode.utf8ToUtf16LeStringLiteral("Reopen Closed Tab"));
 
     menu_theme.apply(menusDark(self));
 
@@ -172,6 +175,7 @@ pub fn showTabMenu(self: *Window, clicked_tab: ?usize, x: i16, y: i16) void {
                 log.err("failed to create new tab: {}", .{err});
             };
         },
+        TAB_CTX_REOPEN => _ = closed_tabs.reopen(self),
         else => {},
     }
 }

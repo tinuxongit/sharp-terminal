@@ -343,18 +343,21 @@ pub fn restoreSidebar(self: *Window, width: f32, collapsed: []const []const u8) 
 /// This window's tabs as the session saves them.
 pub fn sessionWindow(self: *Window, buf: *[64]session.Tab) session.Window {
     const n = @min(self.tab_count, buf.len);
-    for (0..n) |i| {
-        const surface = self.tab_active_surface[i];
-        const claude: ?*const claude_session.Session = if (surface.claude) |*c| c else null;
-        buf[i] = .{
-            .profile = surface.profileName(),
-            // A conversation resumes only from the folder Claude Code ran in.
-            .folder = if (claude != null and claude.?.folder().len > 0) claude.?.folder() else surface.folderPath(),
-            .server = surface.sshHost(),
-            .claude = if (claude) |c| &c.id else "",
-        };
-    }
+    for (0..n) |i| buf[i] = sessionTab(self.tab_active_surface[i]);
     return .{ .tabs = buf[0..n], .active = self.active_tab };
+}
+
+/// What reopens a tab: its shell, folder, server and conversation. The
+/// text belongs to `surface`.
+pub fn sessionTab(surface: *const Surface) session.Tab {
+    const claude: ?*const claude_session.Session = if (surface.claude) |*c| c else null;
+    return .{
+        .profile = surface.profileName(),
+        // A conversation resumes only from the folder Claude Code ran in.
+        .folder = if (claude != null and claude.?.folder().len > 0) claude.?.folder() else surface.folderPath(),
+        .server = surface.sshHost(),
+        .claude = if (claude) |c| &c.id else "",
+    };
 }
 
 /// Reopen a saved tab: its server, or its profile (or the default one, if

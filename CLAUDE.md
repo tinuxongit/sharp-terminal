@@ -142,6 +142,8 @@ commands and conventions; this file covers what is specific to Sharp.
   `terminal_handoff.zig` is the COM class Windows Terminal's console hands
   each console to; `src/os/console_handoff.zig` keeps it until its tab's
   IO thread takes it (`Pty.adopt` in `src/pty.zig`).
+- `src/apprt/win32/closed_tabs.zig`: the last ten closed tabs, for
+  reopening.
 - `src/apprt/win32/user_environment.zig`: the variables a new tab starts
   with.
 - `src/apprt/win32/updater.zig`: finds, downloads and verifies a newer
@@ -419,6 +421,11 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   beside a portable copy is ignored; checked 2026-10-28 by planting junk
   copies of each non-KnownDLL import. Windows ignores the field unless the
   structure has its full Windows 10 size (0x140).
+- **Closed tabs reopen as the session would restore them.** Windows has
+  no undo manager, so Ghostty's `undo` (the palette's "Reopen Closed
+  Tab", and the tab menu) reopens the last of ten closed tabs: shell,
+  folder, server and Claude conversation, not output. It has no key by
+  default, as in Windows Terminal; Ctrl+Shift+T stays "new tab".
 - **New tabs see the environment Windows has now.** Each tab starts from
   Sharp's own variables overlaid with the user's as Windows builds them
   for a new sign-in (`CreateEnvironmentBlock`), as Windows Terminal's

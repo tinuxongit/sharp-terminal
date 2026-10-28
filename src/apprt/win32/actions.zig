@@ -25,6 +25,7 @@ const mcp_server = @import("mcp_server.zig");
 const claude_mcp = @import("claude_mcp.zig");
 const updater = @import("updater.zig");
 const pane_mouse = @import("pane_mouse.zig");
+const closed_tabs = @import("closed_tabs.zig");
 
 pub fn performAction(
     self: *App,
@@ -132,6 +133,15 @@ pub fn performAction(
                 },
             }
             return true;
+        },
+
+        // Windows has no undo manager; undo reopens the last closed tab.
+        .undo => {
+            const window = switch (target) {
+                .surface => |cs| cs.rt_surface.parent_window,
+                .app => self.newestWindow() orelse return false,
+            };
+            return closed_tabs.reopen(window);
         },
 
         .quit_timer => {
@@ -653,7 +663,6 @@ pub fn performAction(
         .readonly,
         // Platform-specific actions that don't apply on Windows:
         .secure_input, // macOS EnableSecureEventInput
-        .undo, // macOS NSUndoManager
         .redo, // macOS NSUndoManager
         .show_gtk_inspector, // GTK-only
         .show_on_screen_keyboard, // GTK/mobile

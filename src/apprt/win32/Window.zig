@@ -27,6 +27,7 @@ const session = @import("session.zig");
 const servers = @import("servers.zig");
 const configpkg = @import("../../config.zig");
 const workspace = @import("workspace.zig");
+const closed_tabs = @import("closed_tabs.zig");
 const tab_rename = @import("tab_rename.zig");
 const splits = @import("splits.zig");
 const actions = @import("actions.zig");
@@ -791,6 +792,7 @@ fn closeTabByIndex(self: *Window, idx: usize) void {
     if (idx >= self.tab_count) return;
     // Cancel any in-progress rename (the edit control may belong to this tab).
     tab_rename.cancelTabRename(self);
+    closed_tabs.remember(workspace.sessionTab(self.tab_active_surface[idx]));
     var tree = self.tab_trees[idx];
     tree.deinit(); // This unrefs all surfaces → Surface.unref frees when ref_count=0
     var i: usize = idx;

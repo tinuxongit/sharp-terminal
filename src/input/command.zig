@@ -693,8 +693,8 @@ fn actionCommands(action: Action.Key) []const Command {
 
         .undo => comptime &.{.{
             .action = .undo,
-            .title = i18n.N_("Undo"),
-            .description = i18n.N_("Undo the last action."),
+            .title = i18n.N_("Reopen Closed Tab"),
+            .description = i18n.N_("Open the last tab you closed again, in its folder."),
         }},
 
         .redo => comptime &.{.{
