@@ -3,6 +3,12 @@ dump a 50 MB text file to the terminal, then scroll up and down through the
 scrollback, and report the average and worst frame.
 
 usage: python frame_benchmark.py <path to sharp.exe> [label]
+           [--baseline <json>] [--save-baseline <json>]
+
+With --baseline the run fails (exit code 1) when it breaks the budget or
+its average frame is more than 30 % slower than the saved baseline's,
+which --save-baseline records. The post-commit hook runs it this way
+(dist/windows/hooks/post-commit).
 
 Sharp writes one line per frame to the file named by SHARP_FRAME_LOG
 (src/apprt/win32/frame_log.zig): the frame's total time and the part spent
@@ -14,10 +20,12 @@ only by posted messages: it never takes focus or moves the mouse. Sharp
 runs with default settings (`--config-default-files=false`), so the
 user's config and saved session are neither used nor changed.
 """
-import ctypes, ctypes.wintypes as wt, os, random, subprocess, sys, tempfile, time
+import ctypes, ctypes.wintypes as wt, json, os, random, subprocess, sys, tempfile, time
 
 BUDGET_AVG_MS = 4.0
 BUDGET_WORST_MS = 16.0
+# Runs vary by about 10 %; a slowdown past this is a regression.
+REGRESSION_LIMIT = 1.30
 DUMP_BYTES = 50 * 1024 * 1024
 SCROLL_STEPS = 600       # wheel messages each way
 SCROLL_NOTCHES = 10      # notches per message
@@ -137,8 +145,18 @@ def stats(rows):
 
 
 def main():
-    exe = os.path.abspath(sys.argv[1])
-    label = sys.argv[2] if len(sys.argv) > 2 else os.path.basename(os.path.dirname(os.path.dirname(exe)))
+    args = sys.argv[1:]
+    def option(name):
+        if name not in args:
+            return None
+        i = args.index(name)
+        value = args[i + 1]
+        del args[i:i + 2]
+        return value
+    baseline_path = option("--baseline")
+    save_path = option("--save-baseline")
+    exe = os.path.abspath(args[0])
+    label = args[1] if len(args) > 1 else os.path.basename(os.path.dirname(os.path.dirname(exe)))
     dump = sample_file()
     log = os.path.join(tempfile.gettempdir(), f"sharp-frames-{os.getpid()}.log")
     env = dict(os.environ, SHARP_FRAME_LOG=log)
@@ -197,6 +215,19 @@ def main():
     n, (wa, _, ww), _ = stats(rows[marks[0]:marks[2]])
     ok = wa <= BUDGET_AVG_MS and ww <= BUDGET_WORST_MS
     print(f"budget {BUDGET_AVG_MS} ms avg / {BUDGET_WORST_MS} ms worst: {'met' if ok else 'BROKEN'}")
+    result = {"avg_ms": round(wa, 3), "worst_ms": round(ww, 3), "dump_seconds": round(dump_seconds, 1)}
+    if save_path:
+        with open(save_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2)
+        print(f"baseline saved to {save_path}")
+    if baseline_path:
+        with open(baseline_path, encoding="utf-8") as f:
+            base = json.load(f)
+        slower = wa / base["avg_ms"]
+        regressed = slower > REGRESSION_LIMIT
+        print(f"against the baseline ({base['avg_ms']} ms avg): {slower:.2f}x{' - REGRESSION' if regressed else ''}")
+        if regressed or not ok:
+            sys.exit(1)
 
 
 if __name__ == "__main__":

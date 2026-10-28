@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Checks the performance budget after every commit that changes code, in
+# the background so the commit itself stays instant. See bench-commit.sh.
+# Installed with: git config core.hooksPath dist/windows/hooks
+
+changed_code() {
+  local files
+  files=$(git diff-tree --no-commit-id --name-only -r HEAD)
+  grep -qE '^(src/|pkg/|build\.zig)' <<<"$files"
+}
+
+if changed_code; then
+  nohup bash dist/windows/bench-commit.sh >/dev/null 2>&1 &
+fi
+exit 0

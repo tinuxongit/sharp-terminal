@@ -259,7 +259,16 @@ zig-out/bin/sharp.exe` runs the load on the second monitor without taking
 focus, using `SHARP_FRAME_LOG` (`src/apprt/win32/frame_log.zig`, fed by a
 small hook in the shared `src/renderer/Thread.zig` and `OpenGL.zig`).
 
-Baseline, 2026-10-28, two runs each:
+After every commit that changes code, the post-commit hook
+(`dist/windows/hooks/post-commit`, installed with `git config
+core.hooksPath dist/windows/hooks`) runs `dist/windows/bench-commit.sh` in
+the background: it builds into `zig-out-bench` and runs the benchmark
+against `dist/windows/frame_baseline.json`. A broken budget, or an
+average 30 % over the baseline, shows a Windows notification;
+`.git/sharp-bench.log` keeps every result. Re-save the baseline with
+`--save-baseline` after a deliberate change in cost.
+
+Measured 2026-10-28, two runs each, before frame pacing:
 
 - ReleaseFast: 2.0 ms average, 8.6 to 9.8 ms worst.
 - ReleaseSafe: 2.4 ms average, 9.0 to 11.9 ms worst.
@@ -267,5 +276,3 @@ Baseline, 2026-10-28, two runs each:
 
 ## Tech debt
 
-- The frame-time benchmark is run by hand, not after every commit: it
-  takes a minute and opens a window.
