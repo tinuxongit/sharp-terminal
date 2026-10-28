@@ -1173,7 +1173,9 @@ fn terminalCorner(self: *const Window) i32 {
 fn placePane(self: *Window, hwnd: w32.HWND, rect: w32.RECT) void {
     const w = @max(rect.right - rect.left, 1);
     const h = @max(rect.bottom - rect.top, 1);
-    _ = w32.MoveWindow(hwnd, rect.left, rect.top, @intCast(w), @intCast(h), 1);
+    // Copying the old pixels along would leave copies of the terminal in
+    // the area it moved out of until the parent repaints there.
+    _ = w32.SetWindowPos(hwnd, null, rect.left, rect.top, w, h, w32.SWP_NOZORDER | w32.SWP_NOACTIVATE | w32.SWP_NOCOPYBITS);
     _ = w32.ShowWindow(hwnd, w32.SW_SHOW);
 
     const area = self.surfaceRect();
@@ -3332,6 +3334,9 @@ pub fn windowWndProc(
                 if (width != window.sidebar_width) {
                     window.sidebar_width = width;
                     window.handleResize();
+                    // Mouse moves keep coming during the drag, and WM_PAINT
+                    // waits for a quiet queue, so the sidebar would lag.
+                    _ = w32.UpdateWindow(hwnd);
                 }
                 return 0;
             }
