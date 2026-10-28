@@ -5,6 +5,7 @@ bin/sharp.exe
 bin/conpty.dll
 bin/OpenConsole.exe
 bin/WebView2Loader.dll
+bin/OpenConsoleProxy.dll
 bin/sharp-mcp.exe
 share/terminfo/ghostty.terminfo
 share/licenses/conpty/LICENSE.txt

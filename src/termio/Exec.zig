@@ -1025,6 +1025,32 @@ const Subprocess = struct {
     } {
         assert(self.pty == null and self.process == null);
 
+        // A console Windows handed over, with Sharp as its default
+        // terminal, is already running: the tab takes it as its shell.
+        if (comptime builtin.target.os.tag == .windows) {
+            if (internal_os.console_handoff.take(self.args)) |console| {
+                self.pty = console.pty;
+                self.pty.?.setSize(.{
+                    .ws_row = @intCast(self.grid_size.rows),
+                    .ws_col = @intCast(self.grid_size.columns),
+                    .ws_xpixel = @intCast(self.screen_size.width),
+                    .ws_ypixel = @intCast(self.screen_size.height),
+                }) catch |err| log.warn("error sizing a handed-over console: {}", .{err});
+                self.process = .{ .fork_exec = .{
+                    .path = self.args[0],
+                    .args = self.args,
+                    .os_pre_exec = null,
+                    .rt_pre_exec = null,
+                    .rt_pre_exec_info = self.rt_pre_exec_info,
+                    .rt_post_fork = null,
+                    .rt_post_fork_info = self.rt_post_fork_info,
+                    .pid = console.client,
+                    .job = console.job,
+                } };
+                return .{ .read = console.pty.out_pipe, .write = console.pty.in_pipe };
+            }
+        }
+
         // This function is funny because on POSIX systems it can
         // fail in the forked process. This is flipped to true if
         // we're in an error state in the forked process (child

@@ -146,9 +146,11 @@ pub fn performAction(
             // Update our stored config with the new one.
             if (value.config.clone(self.core_app.alloc)) |new_config| {
                 const browser_was = self.config.@"ai-tools-browser";
+                const default_terminal_was = self.config.@"default-terminal";
                 self.config.deinit();
                 self.config = new_config;
                 self.configureUpdater();
+                self.configureDefaultTerminal(new_config.@"default-terminal" != default_terminal_was);
 
                 // The browser switch also connects Claude Code to Sharp.
                 if (new_config.@"ai-tools-browser" != browser_was) {

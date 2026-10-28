@@ -58,6 +58,8 @@ const clipboard_keys = @import("clipboard_keys.zig");
 const updater = @import("updater.zig");
 const browser_remote = @import("browser_remote.zig");
 const mcp_server = @import("mcp_server.zig");
+const default_terminal = @import("default_terminal.zig");
+const terminal_handoff = @import("terminal_handoff.zig");
 
 comptime {
     // Exports the exe's load configuration; nothing references it.
@@ -86,6 +88,9 @@ pub const WM_APP_AI_USAGE: u32 = w32.WM_APP + 5;
 
 /// Posted by updater.zig's thread when an update's state changes.
 pub const WM_APP_UPDATE: u32 = w32.WM_APP + 7;
+
+/// Posted by terminal_handoff.zig when Windows hands Sharp a console.
+const WM_APP_HANDOFF: u32 = w32.WM_APP + 8;
 
 /// Timer ID for the quit-after-last-window-closed delay.
 const QUIT_TIMER_ID: usize = 1;
@@ -310,6 +315,7 @@ pub fn init(
     global_hotkey.registerGlobalHotkey(self);
 
     self.configureUpdater();
+    self.configureDefaultTerminal(false);
 
     // Claude's browser tools, only while the browser is switched on.
     browser_remote.target = self.msg_hwnd;
@@ -338,7 +344,17 @@ pub fn run(self: *App) !void {
         log.err("failed to restore the session: {}", .{err});
         break :restored false;
     };
-    if (!restored) _ = try window.addTab();
+    // Started by Windows for a console: that console is the first tab. The
+    // quit armed at startup, which a first tab disarms, waits for it.
+    if (!restored) {
+        if (terminal_handoff.launchedByWindows()) {
+            self.stopQuitTimer();
+            if (self.msg_hwnd) |hwnd| {
+                _ = w32.SetTimer(hwnd, QUIT_TIMER_ID, 30_000, null);
+                self.quit_timer_state = .active;
+            }
+        } else _ = try window.addTab();
+    }
 
     // Enter the Win32 message loop
     var msg: w32.MSG = undefined;
@@ -624,6 +640,64 @@ pub fn openConfigFile(self: *App, how: apprt.action.OpenConfig) bool {
 pub fn configureUpdater(self: *App) void {
     const hwnd = self.msg_hwnd orelse return;
     updater.configure(hwnd, WM_APP_UPDATE, self.config.@"auto-update" != .off);
+}
+
+/// Follow `default-terminal`: take consoles Windows hands over while it
+/// is on, or while Windows started Sharp for one. Only a change of the
+/// setting (`changed`) claims Windows' choice or gives it back, so a
+/// terminal picked in Windows' own settings since then stays picked.
+pub fn configureDefaultTerminal(self: *App, changed: bool) void {
+    const on = self.config.@"default-terminal";
+    if (changed) {
+        if (on) {
+            default_terminal.claim() catch |err| log.warn("could not make Sharp the default terminal: {}", .{err});
+        } else default_terminal.release();
+    } else if (on) default_terminal.refresh();
+
+    const hwnd = self.msg_hwnd orelse return;
+    if (on or terminal_handoff.launchedByWindows()) {
+        terminal_handoff.start(hwnd, WM_APP_HANDOFF);
+    } else terminal_handoff.stop();
+}
+
+/// Open a console Windows handed over in a tab of the newest window, or
+/// a new window when there is none. Its program ends if it can't open.
+fn openHandedOver(self: *App, handed: *const terminal_handoff.Handed) void {
+    var name: [32]u8 = undefined;
+    const command_text = internal_os.console_handoff.command(handed.id, &name) orelse
+        return internal_os.console_handoff.discard(handed.id);
+    const argv = [_][:0]const u8{command_text};
+    const command: configpkg.Command = .{ .direct = &argv };
+    const window = self.handoffWindow() catch |err| {
+        log.warn("no window for a handed-over console: {}", .{err});
+        return internal_os.console_handoff.discard(handed.id);
+    };
+    _ = window.addTabWithOptions(.{
+        .context = .tab,
+        .command = &command,
+        .icon = self.profile_icons.get(handed.program(), window.tabIconSize()),
+        .profile_name = handed.name(),
+    }) catch |err| {
+        log.warn("could not open a handed-over console: {}", .{err});
+        return internal_os.console_handoff.discard(handed.id);
+    };
+    if (window.hwnd) |hwnd| _ = w32.SetForegroundWindow(hwnd);
+}
+
+fn handoffWindow(self: *App) !*Window {
+    var i = self.windows.items.len;
+    while (i > 0) {
+        i -= 1;
+        const window = self.windows.items[i];
+        if (!window.is_quick_terminal and !window.closing) return window;
+    }
+    const alloc = self.core_app.alloc;
+    const window = try alloc.create(Window);
+    errdefer alloc.destroy(window);
+    try window.init(self, .{});
+    errdefer window.deinit();
+    try self.windows.append(alloc, window);
+    return window;
 }
 
 /// Restart into a downloaded update, after asking: running programs end.
@@ -1117,6 +1191,11 @@ fn msgWndProc(
 
     if (msg == WM_APP_AI_USAGE) {
         for (app.windows.items) |window| window.invalidateTabBar();
+        return 0;
+    }
+
+    if (msg == WM_APP_HANDOFF) {
+        while (terminal_handoff.next()) |handed| app.openHandedOver(&handed);
         return 0;
     }
 

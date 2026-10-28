@@ -13,6 +13,13 @@
         // pinned NuGet ZIP, whose .nupkg suffix Zig cannot unpack directly.
         .conpty = .{ .path = "./pkg/conpty", .lazy = true },
         .webview2 = .{ .path = "./pkg/webview2", .lazy = true },
+        // Windows Terminal's portable build, for OpenConsoleProxy.dll: the
+        // marshaling code its console needs to hand a console to Sharp.
+        .windows_terminal = .{
+            .url = "https://github.com/microsoft/terminal/releases/download/v1.24.12741.0/Microsoft.WindowsTerminal_1.24.12741.0_x64.zip",
+            .hash = "N-V-__8AAEzQ_gFMnGmUbvE_W_0RtMe2JGwoCcvNzOFPI3hN",
+            .lazy = true,
+        },
 
         // Zig libs
         .libxev = .{

@@ -131,6 +131,8 @@ pub const PROC_THREAD_ATTRIBUTE_JOB_LIST = ProcThreadAttributeValue(
 // Job objects (see console_programs.zig)
 pub const PROCESS_TERMINATE: DWORD = 0x0001;
 pub const PROCESS_QUERY_LIMITED_INFORMATION: DWORD = 0x1000;
+pub const PROCESS_SET_QUOTA: DWORD = 0x0100;
+pub const DUPLICATE_SAME_ACCESS: DWORD = 0x0002;
 pub const JobObjectBasicLimitInformation: c_int = 2;
 /// NtQueryInformationProcess: the conhost/OpenConsole hosting a process's
 /// console, as a PID with flags in its low two bits.
@@ -346,6 +348,17 @@ pub const exp = struct {
             bInheritHandle: BOOL,
             dwProcessId: DWORD,
         ) callconv(.winapi) ?HANDLE;
+        pub extern "kernel32" fn AssignProcessToJobObject(hJob: HANDLE, hProcess: HANDLE) callconv(.winapi) BOOL;
+        pub extern "kernel32" fn GetCurrentProcess() callconv(.winapi) HANDLE;
+        pub extern "kernel32" fn DuplicateHandle(
+            hSourceProcessHandle: HANDLE,
+            hSourceHandle: HANDLE,
+            hTargetProcessHandle: HANDLE,
+            lpTargetHandle: *HANDLE,
+            dwDesiredAccess: DWORD,
+            bInheritHandle: BOOL,
+            dwOptions: DWORD,
+        ) callconv(.winapi) BOOL;
         pub extern "kernel32" fn QueryFullProcessImageNameW(
             hProcess: HANDLE,
             dwFlags: DWORD,

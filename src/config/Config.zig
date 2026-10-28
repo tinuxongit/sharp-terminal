@@ -2452,6 +2452,15 @@ else
 /// Currently only supported on Windows.
 @"clipboard-keys": ClipboardKeys = .windows,
 
+/// Whether Sharp is Windows' default terminal: console programs started
+/// outside a terminal, from Explorer, the Run box or the Start menu, open
+/// in a Sharp tab. Turning it on remembers Windows' previous choice, and
+/// turning it off gives it back. Windows Terminal must be installed: its
+/// console runs the program and hands it to Sharp.
+///
+/// Currently only supported on Windows.
+@"default-terminal": bool = false,
+
 /// Whether a tab the sidebar layout reopens resumes the Claude Code
 /// conversation it was running, by typing `claude --resume <id>` into its
 /// shell.

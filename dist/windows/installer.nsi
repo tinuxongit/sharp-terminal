@@ -63,6 +63,7 @@ VIAddVersionKey "LegalCopyright" "MIT License"
     Delete "$INSTDIR\OpenConsole.exe"
     Delete "$INSTDIR\conpty.dll"
     Delete "$INSTDIR\WebView2Loader.dll"
+    Delete "$INSTDIR\OpenConsoleProxy.dll"
     ${IfNot} ${Errors}
       ${ExitDo}
     ${EndIf}
@@ -122,12 +123,40 @@ Function .onInstSuccess
   ${EndIf}
 FunctionEnd
 
+; Sharp's terminal class (terminal_handoff.zig).
+!define SHARP_TERMINAL "{88076DA1-582B-4D00-BB74-1CAB70E0738E}"
+
+; Put back one delegation value as Sharp remembered it, or remove it when
+; there was none ("let Windows decide").
+!macro RestoreDelegation NAME
+  ClearErrors
+  ReadRegStr $1 HKCU "Software\Sharp\DefaultTerminal" "${NAME}"
+  ${If} ${Errors}
+    DeleteRegValue HKCU "Console\%%Startup" "${NAME}"
+  ${Else}
+    WriteRegStr HKCU "Console\%%Startup" "${NAME}" $1
+  ${EndIf}
+!macroend
+
 Section "Uninstall"
   !insertmacro WaitForSharp
   ; Claude Code keeps the browser's MCP registration only while Sharp's
   ; setting is on; without Sharp it would point at a missing program.
   nsExec::Exec 'cmd.exe /d /c claude mcp remove --scope user sharp'
   Pop $0
+  ; Give Windows back the terminal it had before Sharp was made the
+  ; default (src/apprt/win32/default_terminal.zig), unless another was
+  ; chosen since, and remove Sharp's registrations.
+  ReadRegStr $0 HKCU "Console\%%Startup" "DelegationTerminal"
+  ${If} $0 == "${SHARP_TERMINAL}"
+    !insertmacro RestoreDelegation "DelegationConsole"
+    !insertmacro RestoreDelegation "DelegationTerminal"
+  ${EndIf}
+  DeleteRegKey HKCU "Software\Sharp\DefaultTerminal"
+  DeleteRegKey /ifempty HKCU "Software\Sharp"
+  DeleteRegKey HKCU "Software\Classes\CLSID\${SHARP_TERMINAL}"
+  DeleteRegKey HKCU "Software\Classes\Interface\{6F23DA90-15C5-4203-9DB0-64E73F1B1B00}"
+  DeleteRegKey HKCU "Software\Classes\CLSID\{3171DE52-6EFA-4AEF-8A9F-D02BD67E7A4F}"
   RMDir /r "$INSTDIR\share"
   Delete "$INSTDIR\*.exe"
   Delete "$INSTDIR\*.dll"

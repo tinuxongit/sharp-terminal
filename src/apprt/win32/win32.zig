@@ -1497,6 +1497,23 @@ pub extern "advapi32" fn RegQueryValueExW(
 
 pub extern "advapi32" fn RegCloseKey(hKey: HKEY) callconv(.winapi) u32;
 
+// Writing: the default terminal's values and Sharp's COM registrations.
+pub const KEY_SET_VALUE: u32 = 0x0002;
+pub extern "advapi32" fn RegCreateKeyExW(
+    hKey: HKEY,
+    lpSubKey: [*:0]const u16,
+    Reserved: u32,
+    lpClass: ?[*:0]const u16,
+    dwOptions: u32,
+    samDesired: u32,
+    lpSecurityAttributes: ?*anyopaque,
+    phkResult: *HKEY,
+    lpdwDisposition: ?*u32,
+) callconv(.winapi) u32;
+pub extern "advapi32" fn RegSetValueExW(hKey: HKEY, lpValueName: ?[*:0]const u16, Reserved: u32, dwType: u32, lpData: [*]const u8, cbData: u32) callconv(.winapi) u32;
+pub extern "advapi32" fn RegDeleteValueW(hKey: HKEY, lpValueName: [*:0]const u16) callconv(.winapi) u32;
+pub extern "advapi32" fn RegDeleteTreeW(hKey: HKEY, lpSubKey: [*:0]const u16) callconv(.winapi) u32;
+
 // -----------------------------------------------------------------------
 // Settings change broadcast
 // -----------------------------------------------------------------------
@@ -1554,6 +1571,15 @@ pub const CLSCTX_INPROC_SERVER: u32 = 0x1;
 pub const COINIT_APARTMENTTHREADED: u32 = 0x2;
 
 pub extern "ole32" fn CoInitializeEx(pvReserved: ?*anyopaque, dwCoInit: u32) callconv(.winapi) HRESULT;
+pub extern "ole32" fn CoUninitialize() callconv(.winapi) void;
+
+// A COM class other processes create (the default terminal's handoff).
+pub const COINIT_MULTITHREADED: u32 = 0x0;
+pub const CLSCTX_LOCAL_SERVER: u32 = 0x4;
+pub const REGCLS_MULTIPLEUSE: u32 = 1;
+pub extern "ole32" fn CoRegisterClassObject(rclsid: *const GUID, pUnk: *anyopaque, dwClsContext: u32, flags: u32, lpdwRegister: *u32) callconv(.winapi) HRESULT;
+pub extern "ole32" fn CoRevokeClassObject(dwRegister: u32) callconv(.winapi) HRESULT;
+pub extern "oleaut32" fn SysStringLen(bstr: ?[*:0]const u16) callconv(.winapi) u32;
 pub extern "ole32" fn CoCreateInstance(
     rclsid: *const GUID,
     pUnkOuter: ?*anyopaque,
@@ -1751,6 +1777,7 @@ pub const TPM_RIGHTALIGN: u32 = 0x0008;
 pub const INVALID_FILE_ATTRIBUTES: u32 = 0xFFFFFFFF;
 pub extern "kernel32" fn SearchPathW(lpPath: ?[*:0]const u16, lpFileName: [*:0]const u16, lpExtension: ?[*:0]const u16, nBufferLength: u32, lpBuffer: ?[*]u16, lpFilePart: ?*?[*]u16) callconv(.winapi) u32;
 pub extern "kernel32" fn GetFileAttributesW(lpFileName: [*:0]const u16) callconv(.winapi) u32;
+pub extern "kernel32" fn GetCommandLineW() callconv(.winapi) [*:0]const u16;
 pub extern "kernel32" fn LoadLibraryExW(lpLibFileName: [*:0]const u16, hFile: ?HANDLE, dwFlags: u32) callconv(.winapi) ?HINSTANCE;
 /// Search only System32, never the program's folder or the current one.
 pub const LOAD_LIBRARY_SEARCH_SYSTEM32: u32 = 0x00000800;

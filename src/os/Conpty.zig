@@ -11,11 +11,15 @@ const HMODULE = std.os.windows.HMODULE;
 const Create = *const @TypeOf(windows.exp.kernel32.CreatePseudoConsole);
 const Resize = *const @TypeOf(windows.exp.kernel32.ResizePseudoConsole);
 const Close = *const @TypeOf(windows.exp.kernel32.ClosePseudoConsole);
+/// Wraps a console handed over by another console host (Pty.adopt).
+const Pack = *const fn (server: windows.HANDLE, reference: windows.HANDLE, signal: windows.HANDLE, pseudo_console: *windows.HPCON) callconv(.winapi) windows.HRESULT;
 
 module: ?HMODULE = null,
 create: Create = &windows.exp.kernel32.CreatePseudoConsole,
 resize: Resize = &windows.exp.kernel32.ResizePseudoConsole,
 close: Close = &windows.exp.kernel32.ClosePseudoConsole,
+/// Only the bundled redistributable has it; Windows' inbox ConPTY doesn't.
+pack: ?Pack = null,
 
 pub const Error = error{
     Unexpected,
@@ -70,6 +74,7 @@ pub fn init() Error!Conpty {
         .create = try resolve(module, Create, "ConptyCreatePseudoConsole"),
         .resize = try resolve(module, Resize, "ConptyResizePseudoConsole"),
         .close = try resolve(module, Close, "ConptyClosePseudoConsole"),
+        .pack = try resolve(module, Pack, "ConptyPackPseudoConsole"),
     };
 }
 

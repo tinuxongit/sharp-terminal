@@ -80,6 +80,14 @@
                             .off = "",
                             .default_on = false,
                         },
+                        .{
+                            .label = "Default terminal",
+                            .description = "Programs started from Explorer or the Start menu open in a Sharp tab.",
+                            .key = "default-terminal",
+                            .on = "true",
+                            .off = "",
+                            .default_on = false,
+                        },
                     },
                 },
                 .{

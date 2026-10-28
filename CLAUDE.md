@@ -137,6 +137,11 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/spots.zig`: clickable regions recorded while painting.
 - `src/apprt/win32/config_file.zig`: reads and changes one key of the
   user's Ghostty config file, leaving the rest of it untouched.
+- `src/apprt/win32/default_terminal.zig`: makes Sharp Windows' default
+  terminal and gives the previous choice back (the registry side).
+  `terminal_handoff.zig` is the COM class Windows Terminal's console hands
+  each console to; `src/os/console_handoff.zig` keeps it until its tab's
+  IO thread takes it (`Pty.adopt` in `src/pty.zig`).
 - `src/apprt/win32/updater.zig`: finds, downloads and verifies a newer
   release on a background thread, and runs its installer. `updates.zon`
   holds the repository, timings, asset names and text;
@@ -412,6 +417,28 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   beside a portable copy is ignored; checked 2026-10-28 by planting junk
   copies of each non-KnownDLL import. Windows ignores the field unless the
   structure has its full Windows 10 size (0x140).
+- **Sharp can be Windows' default terminal.** Settings > General >
+  Default terminal (`default-terminal`, off by default): console programs
+  started from Explorer, the Run box or the Start menu open in a Sharp
+  tab, as with Windows Terminal. Windows' own setting lists only packaged
+  (MSIX) terminals, and packaging needs signing, so Sharp writes the same
+  two values itself (`DelegationConsole`, `DelegationTerminal` in
+  `HKCU\Console\%%Startup`). Windows Terminal's console stays the console
+  host and hands each console to Sharp's COM class through
+  `ITerminalHandoff3`; the tab wraps it with `ConptyPackPseudoConsole`
+  from the bundled ConPTY and puts its program in a job like a shell's.
+  The call needs `OpenConsoleProxy.dll`, which Windows won't load from
+  Windows Terminal's folder into another app (access denied), so Sharp
+  ships the copy from Windows Terminal 1.24's portable zip, pinned by hash
+  in `build.zig.zon`, x64 only. Switching on remembers the previous
+  choice under `HKCU\Software\Sharp`; switching off, or uninstalling,
+  puts it back unless another terminal was chosen since. When Sharp
+  isn't running, Windows starts it with `-Embedding`: it restores its
+  session as usual but opens no shell of its own, and waits up to 30 s
+  for the console. Needs Windows Terminal installed, as it is on Windows
+  11. Checked 2026-10-28 with throwaway config: a cmd started outside
+  Sharp opened as a tab, in a running Sharp and in one Windows started,
+  and the switch and the uninstaller each restored the previous choice.
 - **Sharp has its own version, in `dist/windows/VERSION`.** The build
   writes it into the exe's version resource. `TERM_PROGRAM_VERSION` keeps
   Ghostty's, which tells programs which Ghostty features to expect.

@@ -111,6 +111,15 @@ pub fn install(self: *const Ghostty) void {
             b.path("dist/windows/conpty-LICENSE.txt"),
             "share/licenses/conpty/LICENSE.txt",
         ).step);
+        // Lets Windows hand new consoles to Sharp when it is the default
+        // terminal; same project and license as ConPTY. Only x64 is pinned.
+        if (target.result.cpu.arch == .x86_64) {
+            const wt = b.lazyDependency("windows_terminal", .{}) orelse return;
+            b.getInstallStep().dependOn(&b.addInstallBinFile(
+                wt.path("terminal-1.24.12741.0/OpenConsoleProxy.dll"),
+                "OpenConsoleProxy.dll",
+            ).step);
+        }
         // MIT requires the copyright notice in every copy of the program.
         b.getInstallStep().dependOn(&b.addInstallFile(
             b.path("LICENSE"),
