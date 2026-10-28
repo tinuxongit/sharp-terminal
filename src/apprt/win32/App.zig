@@ -67,6 +67,9 @@ const WM_APP_WAKEUP: u32 = w32.WM_APP + 1;
 /// messages whose handlers take that lock, so the URL is opened later.
 pub const WM_APP_OPEN_URL: u32 = w32.WM_APP + 4;
 
+/// Posted by ai_usage.zig's thread when it has read new usage.
+pub const WM_APP_AI_USAGE: u32 = w32.WM_APP + 5;
+
 /// Timer ID for the quit-after-last-window-closed delay.
 const QUIT_TIMER_ID: usize = 1;
 
@@ -1064,6 +1067,11 @@ fn msgWndProc(
 
     if (msg == WM_APP_WAKEUP) {
         app.tick();
+        return 0;
+    }
+
+    if (msg == WM_APP_AI_USAGE) {
+        for (app.windows.items) |window| window.invalidateTabBar();
         return 0;
     }
 

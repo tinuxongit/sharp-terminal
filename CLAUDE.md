@@ -76,6 +76,9 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/session.zig`: saves and loads the sidebar layout's
   open tabs (`sharp-session`, beside the config file).
 - `src/apprt/win32/ssh.zig`: finds the server a tab's ssh is connected to.
+- `src/apprt/win32/ai_usage.zig`: reads Claude's plan windows and
+  OpenCode's spending through their CLIs, on a background thread, for the
+  sidebar's AI section.
 - `src/apprt/win32/servers.zig`: the servers the sidebar offers (hosts in
   `~/.ssh/config` and recent ones), and which addresses ssh may be given.
 - `src/apprt/win32/folder_picker.zig`: Windows' folder picker, behind the
@@ -219,6 +222,20 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   as Windows Terminal's SSH profiles do, so it ends with the connection.
   Addresses are checked before reaching ssh, since a leading `-` would be
   read as an option.
+- **The sidebar shows AI usage, read through each tool's CLI.** An AI
+  section pinned at its foot shows Claude's 5-hour and weekly plan windows
+  (percent used, time to reset) and OpenCode's spending today and this
+  week, for whichever is installed, refreshed every 5 minutes. Claude Code
+  is asked as T3 Code asks it: started in stream-json mode with hooks and
+  MCP off, never given a prompt, and sent the `get_usage` control request
+  its /usage uses. It reads its own credentials, so Sharp touches no token
+  and no Claude setting, and an API key simply shows "no plan limits".
+  The request is marked experimental in Anthropic's Agent SDK, so the
+  reply is read loosely and a failed read keeps the last one. The
+  undocumented `/api/oauth/usage` endpoint other tools call was rejected:
+  it needs the user's token and Claude Code's User-Agent, and may break
+  Anthropic's consumer terms. OpenCode answers `opencode stats --json
+  --cost --standalone`, which leaves no background service behind.
 - **OSC 7 works on Windows.** Upstream ignored it there. Paths must carry
   a drive letter, since a Linux path from WSL would break the folder new
   tabs start in, and the host check ignores case. As on other platforms,

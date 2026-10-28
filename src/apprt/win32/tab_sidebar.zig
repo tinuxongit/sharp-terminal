@@ -8,6 +8,7 @@ const canvas_mod = @import("canvas.zig");
 const tab_strip = @import("tab_strip.zig");
 const profiles = @import("profiles.zig");
 const SearchField = @import("SearchField.zig");
+const ai_usage = @import("ai_usage.zig");
 
 const Canvas = canvas_mod.Canvas;
 const Rgb = canvas_mod.Rgb;
@@ -135,6 +136,10 @@ pub const State = struct {
     has_wsl: bool = false,
     /// The address box under Servers, while open.
     server_field: ?*const SearchField = null,
+    /// Claude's and OpenCode's usage, shown at the foot.
+    usage: ai_usage.Snapshot = .{},
+    /// Unix seconds, for "resets in".
+    now_s: i64 = 0,
 };
 
 /// How a folded group is remembered: the same folder can hold both local
@@ -160,6 +165,8 @@ const Painter = struct {
     state: State,
     spots: *Spots,
     list_top: i32,
+    /// Where the list ends: the AI section is pinned below it.
+    list_bottom: i32,
 
     fn px(self: Painter, value: f32) i32 {
         return @intFromFloat(@round(value * self.s));
@@ -174,7 +181,8 @@ pub fn paint(c: Canvas, scale: f32, palette: tab_strip.Palette, fonts: Fonts, st
 
     const search_rect: w32.RECT = .{ .left = px(pad, scale), .top = px(pad, scale), .right = c.width - px(pad, scale), .bottom = px(pad + search_height, scale) };
     const list_top = search_rect.bottom + px(pad, scale);
-    var p: Painter = .{ .c = c, .s = scale, .palette = palette, .fonts = fonts, .state = state, .spots = spots, .list_top = list_top };
+    const list_bottom = c.height - usageHeight(state, scale);
+    var p: Painter = .{ .c = c, .s = scale, .palette = palette, .fonts = fonts, .state = state, .spots = spots, .list_top = list_top, .list_bottom = list_bottom };
 
     // The list first, so the search area covers what scrolls under it.
     var y = list_top - state.scroll;
@@ -201,6 +209,7 @@ pub fn paint(c: Canvas, scale: f32, palette: tab_strip.Palette, fonts: Fonts, st
     }
     const content_height = y + state.scroll - list_top;
 
+    paintUsage(&p);
     c.fill(.{ .left = 0, .top = 0, .right = c.width, .bottom = list_top }, palette.strip);
     state.search.paint(c, search_rect, scale, .{
         .fill = palette.strip.mix(palette.contrast, 0.06),
@@ -219,7 +228,133 @@ pub fn paint(c: Canvas, scale: f32, palette: tab_strip.Palette, fonts: Fonts, st
     if (state.hover.eql(.resize)) c.fill(.{ .left = c.width - px(2, scale), .top = 0, .right = c.width, .bottom = c.height }, palette.separator);
     spots.add(grip, .resize);
 
-    return @max(0, content_height - (c.height - list_top));
+    return @max(0, content_height - (list_bottom - list_top));
+}
+
+const usage_row_height = 22.0;
+const usage_bar_height = 4.0;
+
+const UsageRow = union(enum) {
+    window: struct { label: []const u8, window: ai_usage.Window },
+    spend: struct { label: []const u8, spend: ai_usage.Spend },
+    note: []const u8,
+};
+
+/// The rows the AI section shows, in order.
+fn usageRows(state: State, out: *[5]UsageRow) []const UsageRow {
+    const text = profiles.data.sidebar.ai;
+    const u = state.usage;
+    var n: usize = 0;
+    if (u.claude_found) {
+        if (u.five_hour) |w| {
+            out[n] = .{ .window = .{ .label = text.claude_session, .window = w } };
+            n += 1;
+        }
+        if (u.seven_day) |w| {
+            out[n] = .{ .window = .{ .label = text.claude_week, .window = w } };
+            n += 1;
+        }
+        if (u.five_hour == null and u.seven_day == null) {
+            out[n] = .{ .note = if (u.claude_answered) text.claude_api else text.claude_waiting };
+            n += 1;
+        }
+    }
+    if (u.opencode_found) {
+        if (u.opencode_today) |s| {
+            out[n] = .{ .spend = .{ .label = text.opencode_today, .spend = s } };
+            n += 1;
+        }
+        if (u.opencode_week) |s| {
+            out[n] = .{ .spend = .{ .label = text.opencode_week, .spend = s } };
+            n += 1;
+        }
+    }
+    return out[0..n];
+}
+
+fn usageHeight(state: State, scale: f32) i32 {
+    var rows: [5]UsageRow = undefined;
+    const shown = usageRows(state, &rows);
+    if (shown.len == 0) return 0;
+    var h: f32 = section_height + pad;
+    for (shown) |row| h += usage_row_height + @as(f32, if (row == .window) usage_bar_height + 4 else 0);
+    return px(h, scale);
+}
+
+/// The AI section, pinned under the list: Claude's plan windows as bars,
+/// OpenCode's spending as figures.
+fn paintUsage(p: *Painter) void {
+    var rows: [5]UsageRow = undefined;
+    const shown = usageRows(p.state, &rows);
+    if (shown.len == 0) return;
+    const c = p.c;
+    c.fill(.{ .left = 0, .top = p.list_bottom, .right = c.width, .bottom = c.height }, p.palette.strip);
+    var y = p.list_bottom;
+    // The section title, as the list's are drawn.
+    const title = profiles.data.sidebar.ai.title;
+    const h = p.px(section_height);
+    const left = p.px(pad + 6);
+    const right = c.width - p.px(pad + 6);
+    c.text(.{ .left = left, .top = y, .right = right, .bottom = y + h }, title, p.fonts.small, p.palette.text_dim, .left);
+    const rule_left = left + c.textWidth(title, p.fonts.small) + p.px(10);
+    const mid = y + @divTrunc(h, 2);
+    if (right > rule_left) c.fill(.{ .left = rule_left, .top = mid, .right = right, .bottom = mid + 1 }, p.palette.separator);
+    y += h;
+
+    const row_h = p.px(usage_row_height);
+    for (shown) |row| {
+        var value_buf: [48]u8 = undefined;
+        const label, const value = switch (row) {
+            .window => |w| .{ w.label, windowText(&value_buf, w.window, p.state.now_s) },
+            .spend => |s| .{ s.label, spendText(&value_buf, s.spend) },
+            .note => |text| .{ text, "" },
+        };
+        // The figure keeps its room; a narrow sidebar cuts the label.
+        const line: w32.RECT = .{ .left = left, .top = y, .right = right, .bottom = y + row_h };
+        const value_w = if (value.len > 0) c.textWidth(value, p.fonts.small) + p.px(8) else 0;
+        c.text(.{ .left = left, .top = y, .right = @max(left, right - value_w), .bottom = y + row_h }, label, p.fonts.small, p.palette.text_dim, .left);
+        if (value.len > 0) c.text(line, value, p.fonts.small, p.palette.text, .right);
+        y += row_h;
+        if (row == .window) {
+            const bar_h = p.px(usage_bar_height);
+            const track: w32.RECT = .{ .left = left, .top = y, .right = right, .bottom = y + bar_h };
+            c.fillRounded(track, @divTrunc(bar_h, 2), p.palette.strip.mix(p.palette.contrast, 0.12));
+            const percent = row.window.window.percent;
+            const fill_w: i32 = @intFromFloat(@round(@as(f32, @floatFromInt(right - left)) * percent / 100));
+            if (fill_w > 0) {
+                const ai = profiles.data.sidebar.ai;
+                const color: Rgb = if (percent >= @as(f32, @floatFromInt(ai.warn_percent)))
+                    .{ .r = ai.warning_color.r, .g = ai.warning_color.g, .b = ai.warning_color.b }
+                else
+                    p.palette.text_dim;
+                c.fillRounded(.{ .left = left, .top = y, .right = left + @max(fill_w, bar_h), .bottom = y + bar_h }, @divTrunc(bar_h, 2), color);
+            }
+            y += bar_h + p.px(4);
+        }
+    }
+}
+
+/// "42% · 2h 31m": how much is used and how long until it resets.
+fn windowText(buf: []u8, w: ai_usage.Window, now_s: i64) []const u8 {
+    const percent: u32 = @intFromFloat(@round(w.percent));
+    if (w.resets_at == 0 or w.resets_at <= now_s) return std.fmt.bufPrint(buf, "{d}%", .{percent}) catch "";
+    const minutes: u64 = @intCast(@divFloor(w.resets_at - now_s + 59, 60));
+    const days = minutes / (24 * 60);
+    const hours = (minutes / 60) % 24;
+    return if (days > 0)
+        std.fmt.bufPrint(buf, "{d}% \u{00B7} {d}d {d}h", .{ percent, days, hours }) catch ""
+    else if (hours > 0)
+        std.fmt.bufPrint(buf, "{d}% \u{00B7} {d}h {d}m", .{ percent, hours, minutes % 60 }) catch ""
+    else
+        std.fmt.bufPrint(buf, "{d}% \u{00B7} {d}m", .{ percent, minutes }) catch "";
+}
+
+/// "$1.20 · 248k": spent, and tokens read and written.
+fn spendText(buf: []u8, s: ai_usage.Spend) []const u8 {
+    return if (s.tokens >= 1_000_000)
+        std.fmt.bufPrint(buf, "${d:.2} \u{00B7} {d:.1}M", .{ s.cost_usd, @as(f64, @floatFromInt(s.tokens)) / 1_000_000 }) catch ""
+    else
+        std.fmt.bufPrint(buf, "${d:.2} \u{00B7} {d}k", .{ s.cost_usd, s.tokens / 1000 }) catch "";
 }
 
 fn visible(state: State, item: Item) bool {
@@ -281,7 +416,7 @@ fn paintSection(p: *Painter, section: Section, y: i32) i32 {
     const mid = y + @divTrunc(h, 2);
     if (rule_right > rule_left) p.c.fill(.{ .left = rule_left, .top = mid, .right = rule_right, .bottom = mid + 1 }, p.palette.separator);
 
-    p.spots.add(clip(row, p.list_top), .{ .section = section });
+    p.spots.add(clip(row, p), .{ .section = section });
     if (hovered) paintNewTabButtons(p, row, buttons, p.palette.strip);
     return y + h;
 }
@@ -301,7 +436,7 @@ fn paintServerField(p: *Painter, field: *const SearchField, y: i32) i32 {
         .placeholder = profiles.data.sidebar.server_placeholder,
         .icon = icon_server,
     }, false, p.state.window_focused);
-    p.spots.add(clip(rect, p.list_top), .server_field);
+    p.spots.add(clip(rect, p), .server_field);
     return y + h + p.px(4);
 }
 
@@ -321,7 +456,7 @@ fn paintGroup(p: *Painter, first: Item, folded: bool, y: i32) i32 {
     const label_right = (if (hovered) newTabButtonsLeft(p, row) else row.right) - p.px(4);
     p.c.text(.{ .left = left + p.px(icon_size + 8), .top = y, .right = label_right, .bottom = y + h }, first.group_label, if (active) p.fonts.item_strong else p.fonts.item, color, .left);
 
-    p.spots.add(clip(row, p.list_top), .{ .group = first.tab });
+    p.spots.add(clip(row, p), .{ .group = first.tab });
     // New tabs open in a folder; a server's tabs come from SSH itself.
     if (hovered and first.section != .servers) paintNewTabButtons(p, row, buttons, p.palette.hover);
     return y + h;
@@ -353,8 +488,8 @@ fn paintNewTabButtons(p: *Painter, row: w32.RECT, buttons: NewTabButtons, under:
     if (on_plus or on_arrow) p.c.fillRounded(if (on_plus) plus else arrow, p.px(corner), under.mix(p.palette.contrast, 0.1));
     p.c.glyph(plus, icon_add, p.fonts.icons_small, if (on_plus) p.palette.text else p.palette.text_dim);
     p.c.glyph(arrow, icon_chevron_down, p.fonts.icons_tiny, if (on_arrow) p.palette.text else p.palette.text_dim);
-    p.spots.add(clip(plus, p.list_top), buttons.plus);
-    p.spots.add(clip(arrow, p.list_top), buttons.menu);
+    p.spots.add(clip(plus, p), buttons.plus);
+    p.spots.add(clip(arrow, p), buttons.menu);
 }
 
 fn paintItem(p: *Painter, item: Item, y: i32) i32 {
@@ -396,16 +531,18 @@ fn paintItem(p: *Painter, item: Item, y: i32) i32 {
         var buf: [8]u8 = undefined;
         p.c.text(side, age(&buf, item.age_ms), p.fonts.small, p.palette.text_dim, .right);
     }
-    p.spots.add(clip(row, p.list_top), .{ .tab = item.tab });
+    p.spots.add(clip(row, p), .{ .tab = item.tab });
     // Added after the row so it wins the hit test.
-    if (hovered) p.spots.add(clip(close, p.list_top), .{ .close = item.tab });
+    if (hovered) p.spots.add(clip(close, p), .{ .close = item.tab });
     return y + h;
 }
 
-/// Rows that scrolled under the search box can't be clicked there.
-fn clip(rect: w32.RECT, top: i32) w32.RECT {
+/// Rows that scrolled under the search box or the AI section can't be
+/// clicked there.
+fn clip(rect: w32.RECT, p: *const Painter) w32.RECT {
     var r = rect;
-    r.top = @max(r.top, top);
+    r.top = @max(r.top, p.list_top);
+    r.bottom = @min(r.bottom, p.list_bottom);
     if (r.bottom < r.top) r.bottom = r.top;
     return r;
 }

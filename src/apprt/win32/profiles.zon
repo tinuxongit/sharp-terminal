@@ -53,6 +53,22 @@
         .pick_folder = "Open a tab in folder",
         .server_placeholder = "user@host",
         .no_servers = "No servers in ~/.ssh/config yet",
+        // The AI section at the foot of the sidebar: Claude Code's plan
+        // windows and OpenCode's spending, read through their CLIs.
+        .ai = .{
+            // How often both CLIs are asked, in minutes.
+            .refresh_minutes = 5,
+            // From this percentage a plan window's bar turns warning-colored.
+            .warn_percent = 80,
+            .warning_color = .{ .r = 0xE5, .g = 0x9B, .b = 0x3E },
+            .title = "AI",
+            .claude_session = "Claude \u{00B7} 5 h",
+            .claude_week = "Claude \u{00B7} week",
+            .claude_api = "Claude \u{00B7} API key, no plan limits",
+            .claude_waiting = "Claude \u{00B7} checking",
+            .opencode_today = "OpenCode \u{00B7} today",
+            .opencode_week = "OpenCode \u{00B7} week",
+        },
     },
     .menu = .{
         // Shown after a profile's name: the 3rd profile is Ctrl+Shift+3.

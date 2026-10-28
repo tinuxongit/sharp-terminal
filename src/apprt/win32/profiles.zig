@@ -22,6 +22,20 @@ pub const Menu = struct {
     profile_shortcut: []const u8,
 };
 
+/// The AI usage section at the foot of the sidebar (ai_usage.zig).
+pub const AiUsage = struct {
+    refresh_minutes: u8,
+    warn_percent: u8,
+    warning_color: struct { r: u8, g: u8, b: u8 },
+    title: []const u8,
+    claude_session: []const u8,
+    claude_week: []const u8,
+    claude_api: []const u8,
+    claude_waiting: []const u8,
+    opencode_today: []const u8,
+    opencode_week: []const u8,
+};
+
 pub const Sidebar = struct {
     search_placeholder: []const u8,
     local: []const u8,
@@ -33,6 +47,7 @@ pub const Sidebar = struct {
     server_placeholder: []const u8,
     /// The Servers menu when there is nothing to list.
     no_servers: []const u8,
+    ai: AiUsage,
 };
 
 pub const Data = struct {

@@ -20,6 +20,9 @@ const configpkg = @import("../../config.zig");
 const log = std.log.scoped(.win32);
 const Window = @import("Window.zig");
 const strip_mouse = @import("strip_mouse.zig");
+const ai_usage = @import("ai_usage.zig");
+const global = @import("../../global.zig");
+const App = @import("App.zig");
 
 pub fn paintSidebar(self: *Window, hdc_screen: w32.HDC, palette: tab_strip.Palette) void {
     const rect = sidebarRect(self);
@@ -71,7 +74,12 @@ pub fn paintSidebar(self: *Window, hdc_screen: w32.HDC, palette: tab_strip.Palet
         .pressed = self.sidebar_pressed,
         .has_wsl = self.has_wsl,
         .server_field = if (self.server_field.focused) &self.server_field else null,
+        .usage = ai_usage.snapshot(),
+        .now_s = std.Io.Clock.now(.real, global.io()).toSeconds(),
     }, &self.sidebar_spots);
+    // Usage is read only once a sidebar is shown, so Tabs mode never runs
+    // the CLIs.
+    if (self.app.msg_hwnd) |hwnd| ai_usage.ensureStarted(hwnd, App.WM_APP_AI_USAGE);
     canvas.sync();
     _ = w32.BitBlt(hdc_screen, rect.left, rect.top, width, height, mem_dc, 0, 0, w32.SRCCOPY);
 }
