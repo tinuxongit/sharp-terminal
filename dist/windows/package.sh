@@ -18,7 +18,7 @@ cd "$REPO_DIR"
 echo "Building sharp (optimize=$OPTIMIZE)..."
 zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize="$OPTIMIZE"
 
-for resource in bin/sharp.exe bin/conpty.dll bin/OpenConsole.exe bin/WebView2Loader.dll bin/sharp-mcp.exe share/terminfo/ghostty.terminfo share/licenses/conpty/LICENSE.txt share/licenses/sharp/LICENSE.txt share/licenses/webview2/LICENSE.txt; do
+for resource in bin/sharp.exe bin/conpty.dll bin/OpenConsole.exe bin/WebView2Loader.dll bin/sharp-mcp.exe share/terminfo/ghostty.terminfo share/licenses/conpty/LICENSE.txt share/licenses/sharp/LICENSE.txt share/licenses/webview2/LICENSE.txt share/licenses/thesvg/LICENSE.txt; do
     if [ ! -f "zig-out/$resource" ]; then
         echo "ERROR: Incomplete Windows build — zig-out/$resource not found" >&2
         exit 1

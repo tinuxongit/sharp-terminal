@@ -31,8 +31,8 @@ pub const AiUsage = struct {
     claude: []const u8,
     codex: []const u8,
     opencode: []const u8,
-    /// The programs whose icons the cards show.
-    icons: [3][]const u8,
+    /// The logos (from logos.zon) of Claude Code, Codex and OpenCode.
+    logos: [3][]const u8,
     five_hours: []const u8,
     week: []const u8,
     month: []const u8,

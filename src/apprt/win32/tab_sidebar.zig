@@ -145,8 +145,6 @@ pub const State = struct {
     usage_folded: bool = false,
     /// Unix seconds, for "resets in".
     now_s: i64 = 0,
-    /// Claude Code's, Codex's and OpenCode's program icons.
-    usage_icons: [3]?w32.HICON = @splat(null),
 };
 
 fn usageView(state: *const State) sidebar_usage.View {
@@ -155,7 +153,6 @@ fn usageView(state: *const State) sidebar_usage.View {
         .folded = state.usage_folded,
         .title_hovered = state.hover.eql(.usage_title),
         .now_s = state.now_s,
-        .icons = state.usage_icons,
     };
 }
 

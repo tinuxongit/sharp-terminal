@@ -112,6 +112,11 @@ pub fn install(self: *const Ghostty) void {
             webview2.namedLazyPath("license"),
             "share/licenses/webview2/LICENSE.txt",
         ).step);
+        // The AI section's logos come from thesvg.org, under MIT.
+        b.getInstallStep().dependOn(&b.addInstallFile(
+            b.path("dist/windows/logos/LICENSE.txt"),
+            "share/licenses/thesvg/LICENSE.txt",
+        ).step);
         // The command Claude Code runs to reach the browser panel's tools;
         // it only relays Claude's stdio to Sharp's named pipe.
         const bridge = b.addExecutable(.{

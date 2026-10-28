@@ -1,5 +1,5 @@
 //! The tab sidebar's AI section, pinned at its foot: a card per tool
-//! (Claude Code, Codex, OpenCode) with its icon and name, and for each
+//! (Claude Code, Codex, OpenCode) with its logo and name, and for each
 //! plan window how much is left, a bar, and when it resets; OpenCode's
 //! spending as figures. Clicking the section's title folds it.
 const std = @import("std");
@@ -9,6 +9,7 @@ const tab_strip = @import("tab_strip.zig");
 const profiles = @import("profiles.zig");
 const ai_usage = @import("ai_usage.zig");
 const tab_sidebar = @import("tab_sidebar.zig");
+const logos = @import("logos.zig");
 
 const Canvas = canvas_mod.Canvas;
 const Rgb = canvas_mod.Rgb;
@@ -36,9 +37,12 @@ pub const View = struct {
     title_hovered: bool,
     /// Unix seconds, for "resets in".
     now_s: i64,
-    /// Claude Code's, Codex's and OpenCode's program icons, where they
-    /// have one.
-    icons: [3]?w32.HICON = @splat(null),
+};
+
+/// Claude Code's, Codex's and OpenCode's logos, named in profiles.zon.
+const tool_logos = blk: {
+    const names = profiles.data.sidebar.ai.logos;
+    break :blk [3]*const logos.Logo{ logos.find(names[0]), logos.find(names[1]), logos.find(names[2]) };
 };
 
 /// Where and with what to paint; without it walk() only measures.
@@ -60,7 +64,7 @@ const max_rows = ai_usage.max_windows + 1;
 
 const Card = struct {
     name: []const u8,
-    icon: ?w32.HICON,
+    logo: *const logos.Logo,
     rows: [max_rows]Row = undefined,
     len: usize = 0,
 
@@ -76,13 +80,13 @@ fn cards(view: View, out: *[3]Card) []const Card {
     const text = profiles.data.sidebar.ai;
     const u = view.usage;
     var n: usize = 0;
-    for ([_]struct { []const u8, *const ai_usage.Plan, ?w32.HICON }{
-        .{ text.claude, &u.claude, view.icons[0] },
-        .{ text.codex, &u.codex, view.icons[1] },
+    for ([_]struct { []const u8, *const ai_usage.Plan, *const logos.Logo }{
+        .{ text.claude, &u.claude, tool_logos[0] },
+        .{ text.codex, &u.codex, tool_logos[1] },
     }) |tool| {
-        const name, const plan, const icon = tool;
+        const name, const plan, const logo = tool;
         if (!plan.found) continue;
-        var card: Card = .{ .name = name, .icon = icon };
+        var card: Card = .{ .name = name, .logo = logo };
         for (&plan.windows) |*slot| {
             if (slot.*) |*w| card.add(.{ .window = .{ .window = w } });
         }
@@ -94,7 +98,7 @@ fn cards(view: View, out: *[3]Card) []const Card {
         }
     }
     if (u.opencode_found) {
-        var card: Card = .{ .name = text.opencode, .icon = view.icons[2] };
+        var card: Card = .{ .name = text.opencode, .logo = tool_logos[2] };
         if (u.opencode_today) |s| card.add(.{ .spend = .{ .what = text.today, .spend = s } });
         if (u.opencode_week) |s| card.add(.{ .spend = .{ .what = text.this_week, .spend = s } });
         if (card.len > 0) {
@@ -186,17 +190,9 @@ fn paintCard(p: Paint, s: Scale, view: View, card: Card, top: i32, bottom: i32) 
     const right = box.right - s.px(card_pad);
     var y = top + s.px(card_pad);
 
-    // The tool's icon, or its initial where the program has none.
     const size = s.px(icon_size);
-    const icon_top = y + @divTrunc(s.px(header_height) - size, 2);
     c.sync();
-    if (card.icon) |icon| {
-        _ = w32.DrawIconEx(c.hdc, left, icon_top, icon, size, size, 0, null, w32.DI_NORMAL);
-    } else {
-        const square: w32.RECT = .{ .left = left, .top = icon_top, .right = left + size, .bottom = icon_top + size };
-        c.fillRounded(square, s.px(4), pal.strip.mix(pal.contrast, 0.16));
-        c.text(square, card.name[0..1], p.fonts.small, pal.text, .center);
-    }
+    logos.draw(c, card.logo, left, y + @divTrunc(s.px(header_height) - size, 2), size, pal.text);
     c.text(.{ .left = left + size + s.px(8), .top = y, .right = right, .bottom = y + s.px(header_height) }, card.name, p.fonts.item_strong, pal.text, .left);
     y += s.px(header_height);
 

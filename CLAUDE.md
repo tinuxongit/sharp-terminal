@@ -75,6 +75,9 @@ commands and conventions; this file covers what is specific to Sharp.
   grouped by where the shell runs and by folder; layout and painting.
 - `src/apprt/win32/sidebar_usage.zig`: the sidebar's AI section, a card
   per tool with its plan windows or spending.
+- `src/apprt/win32/logos.zon`: the tools' logos as outlines, made by
+  `dist/windows/make_logos.py` from the SVGs in `dist/windows/logos/`
+  (thesvg.org, MIT). `logos.zig` fills them, anti-aliased, at any size.
 - `src/apprt/win32/session.zig`: saves and loads the sidebar layout's
   open tabs (`sharp-session`, beside the config file).
 - `src/apprt/win32/ssh.zig`: finds the server a tab's ssh is connected to.
@@ -256,8 +259,7 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   Addresses are checked before reaching ssh, since a leading `-` would be
   read as an option.
 - **The sidebar shows AI usage, read through each tool's CLI.** An AI
-  section pinned at its foot shows a card per tool, with the program's
-  icon (or its initial): Claude's and Codex's plan windows ("5-hour
+  section pinned at its foot shows a card per tool, with its logo: Claude's and Codex's plan windows ("5-hour
   limit", "71% left", a bar that empties, "Resets in 1h 18m" or "Resets
   Nov 24") and OpenCode's spending today and this week, for whichever is installed
   and switched on in Settings > AI (`ai-usage-claude`, `ai-usage-codex`,

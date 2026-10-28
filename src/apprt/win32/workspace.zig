@@ -91,11 +91,6 @@ pub fn paintSidebar(self: *Window, hdc_screen: w32.HDC, palette: tab_strip.Palet
         },
         .usage_folded = isCollapsed(self, usage_fold_key),
         .now_s = std.Io.Clock.now(.real, global.io()).toSeconds(),
-        .usage_icons = icons: {
-            var icons: [3]?w32.HICON = undefined;
-            for (&icons, profiles.data.sidebar.ai.icons) |*icon, program| icon.* = self.app.profile_icons.get(program, self.tabIconSize());
-            break :icons icons;
-        },
     }, &self.sidebar_spots);
     // Usage is read only once a sidebar is shown, so Tabs mode never runs
     // the CLIs.

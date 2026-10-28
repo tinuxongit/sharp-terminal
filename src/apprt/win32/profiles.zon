@@ -62,12 +62,11 @@
             .warn_percent = 80,
             .warning_color = .{ .r = 0xE5, .g = 0x9B, .b = 0x3E },
             .title = "AI",
-            // A card per tool, with the icon of its program (or its
-            // initial when the program has none).
+            // A card per tool, with its logo from logos.zon.
             .claude = "Claude Code",
             .codex = "Codex",
             .opencode = "OpenCode",
-            .icons = .{ "claude.exe", "codex.exe", "opencode.exe" },
+            .logos = .{ "claude-code", "codex", "opencode" },
             // A plan window reads "5-hour limit   71% left", a bar, then
             // "Resets in 1h 18m" (or "Resets Nov 24" a week or more away).
             // A single model's limit adds its name: "Weekly limit · Fable".
