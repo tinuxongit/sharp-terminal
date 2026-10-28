@@ -42,8 +42,16 @@ pub const data: Data = @import("updates.zon");
 
 comptime {
     if (std.mem.indexOf(u8, data.installer, "{version}") == null) @compileError("updates.zon: installer must contain {version}");
+    if (std.mem.indexOf(u8, data.installer, "{arch}") == null) @compileError("updates.zon: installer must contain {arch}");
     if (data.check_minutes == 0) @compileError("updates.zon: check_minutes must be at least 1");
 }
+
+/// The installers' name for this build's processor.
+const arch = switch (@import("builtin").cpu.arch) {
+    .x86_64 => "x64",
+    .aarch64 => "arm64",
+    else => @compileError("Sharp is released for x64 and arm64"),
+};
 
 /// The running build's version, or null for a local build.
 pub fn current() ?Version {
@@ -213,7 +221,8 @@ fn newest(a: std.mem.Allocator) !?Release {
         // A prerelease is a test, not a release.
         if (json_read.boolean(item, "prerelease") orelse true) continue;
         if (best) |b| if (version.order(b.version) != .gt) continue;
-        const installer_name = try std.mem.replaceOwned(u8, a, data.installer, "{version}", tag[1..]);
+        const versioned = try std.mem.replaceOwned(u8, a, data.installer, "{version}", tag[1..]);
+        const installer_name = try std.mem.replaceOwned(u8, a, versioned, "{arch}", arch);
         var installer_url: ?[]const u8 = null;
         var checksums_url: ?[]const u8 = null;
         const assets = json_read.field(item, "assets") orelse continue;

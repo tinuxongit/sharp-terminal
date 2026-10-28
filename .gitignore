@@ -44,3 +44,4 @@ dist/windows/ghostty-windows-x64-*.zip
 # Packaging and release output (package.sh, release.sh)
 dist/windows/_stage/
 dist/windows/_release/
+zig-out-arm64/

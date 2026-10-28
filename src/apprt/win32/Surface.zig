@@ -602,7 +602,7 @@ pub fn recreateGLContext(self: *Surface) !void {
 fn disableSwapWait() void {
     const SwapInterval = *const fn (c_int) callconv(.winapi) c_int;
     const proc = w32.wglGetProcAddress("wglSwapIntervalEXT") orelse return;
-    const set_interval: SwapInterval = @ptrCast(proc);
+    const set_interval: SwapInterval = @ptrCast(@alignCast(proc));
     _ = set_interval(0);
 }
 

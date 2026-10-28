@@ -112,11 +112,17 @@ pub fn install(self: *const Ghostty) void {
             "share/licenses/conpty/LICENSE.txt",
         ).step);
         // Lets Windows hand new consoles to Sharp when it is the default
-        // terminal; same project and license as ConPTY. Only x64 is pinned.
-        if (target.result.cpu.arch == .x86_64) {
-            const wt = b.lazyDependency("windows_terminal", .{}) orelse return;
+        // terminal; same project and license as ConPTY.
+        // The two zips are laid out differently.
+        const wt_package: ?struct { []const u8, []const u8 } = switch (target.result.cpu.arch) {
+            .x86_64 => .{ "windows_terminal", "terminal-1.24.12741.0/OpenConsoleProxy.dll" },
+            .aarch64 => .{ "windows_terminal_arm64", "OpenConsoleProxy.dll" },
+            else => null,
+        };
+        if (wt_package) |package| {
+            const wt = b.lazyDependency(package[0], .{}) orelse return;
             b.getInstallStep().dependOn(&b.addInstallBinFile(
-                wt.path("terminal-1.24.12741.0/OpenConsoleProxy.dll"),
+                wt.path(package[1]),
                 "OpenConsoleProxy.dll",
             ).step);
         }

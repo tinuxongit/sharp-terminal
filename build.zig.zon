@@ -20,6 +20,11 @@
             .hash = "N-V-__8AAEzQ_gFMnGmUbvE_W_0RtMe2JGwoCcvNzOFPI3hN",
             .lazy = true,
         },
+        .windows_terminal_arm64 = .{
+            .url = "https://github.com/microsoft/terminal/releases/download/v1.24.12741.0/Microsoft.WindowsTerminal_1.24.12741.0_arm64.zip",
+            .hash = "N-V-__8AALwjMgJxWRRHMvO5S37D-uRGX1Ze9fMevHC1BanN",
+            .lazy = true,
+        },
 
         // Zig libs
         .libxev = .{

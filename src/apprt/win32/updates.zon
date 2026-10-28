@@ -9,7 +9,8 @@
     .first_check_seconds = 20,
     // A release's installer and checksums, as dist/windows/release.sh
     // names them.
-    .installer = "Sharp-{version}-x64-setup.exe",
+    // {arch} is x64 or arm64: each copy updates to its own.
+    .installer = "Sharp-{version}-{arch}-setup.exe",
     .checksums = "SHA256SUMS",
     .max_installer_mb = 200,
 

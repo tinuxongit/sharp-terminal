@@ -26,7 +26,6 @@ cd "$REPO_DIR"
 version="$(tr -d '[:space:]' < "$SCRIPT_DIR/VERSION")"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "release.sh: VERSION must be X.Y.Z, not $version" >&2; exit 1; }
 tag="v$version"
-installer="Sharp-$version-x64-setup.exe"
 
 # The tag must name the code that was built, and others must be able to see it.
 if [[ "$dry_run" != --dry-run ]]; then
@@ -40,24 +39,38 @@ if [[ "$dry_run" != --dry-run ]]; then
 fi
 echo "Releasing $tag"
 
-prefix="$OUT_DIR/build"
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
-"$ZIG" build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast \
-    -Dsharp-version="$version" -Dsharp-release=true -p "$prefix"
-"$SCRIPT_DIR/stage.sh" "$prefix" "$OUT_DIR/stage"
+installers=()
 
-# makensis is a Windows program: it takes Windows paths, and its /D
-# switches must not be rewritten by Git Bash.
-MSYS_NO_PATHCONV=1 "$MAKENSIS" -V2 \
-    -DVERSION="$version" -DVERSION4="$version.0" \
-    -DSTAGE="$(cygpath -w "$OUT_DIR/stage")" \
-    -DOUTFILE="$(cygpath -w "$OUT_DIR/$installer")" \
-    "$(cygpath -w "$SCRIPT_DIR/installer.nsi")"
-(cd "$OUT_DIR" && sha256sum "$installer" > SHA256SUMS)
-sha256="$(cut -d' ' -f1 < "$OUT_DIR/SHA256SUMS")"
-sed -e "s/{version}/$version/g" -e "s/{sha256}/$sha256/g" "$SCRIPT_DIR/install.ps1" > "$OUT_DIR/install.ps1"
-echo "Built $OUT_DIR/$installer"
+# One installer per processor, named as updates.zon expects.
+build_arch() {
+    local arch="$1"
+    local target="$2"
+    local prefix="$OUT_DIR/build-$arch"
+    local stage="$OUT_DIR/stage-$arch"
+    local installer="Sharp-$version-$arch-setup.exe"
+    "$ZIG" build -Dapp-runtime=win32 -Dtarget="$target" -Doptimize=ReleaseFast \
+        -Dsharp-version="$version" -Dsharp-release=true -p "$prefix"
+    "$SCRIPT_DIR/stage.sh" "$prefix" "$stage"
+    # makensis is a Windows program: it takes Windows paths, and its /D
+    # switches must not be rewritten by Git Bash.
+    MSYS_NO_PATHCONV=1 "$MAKENSIS" -V2 \
+        -DVERSION="$version" -DVERSION4="$version.0" \
+        -DSTAGE="$(cygpath -w "$stage")" \
+        -DOUTFILE="$(cygpath -w "$OUT_DIR/$installer")" \
+        "$(cygpath -w "$SCRIPT_DIR/installer.nsi")"
+    installers+=("$installer")
+    echo "Built $OUT_DIR/$installer"
+}
+build_arch x64 x86_64-windows-gnu
+build_arch arm64 aarch64-windows-gnu
+
+(cd "$OUT_DIR" && sha256sum "${installers[@]}" > SHA256SUMS)
+sha_x64="$(grep -- "-x64-setup.exe" "$OUT_DIR/SHA256SUMS" | cut -d' ' -f1)"
+sha_arm64="$(grep -- "-arm64-setup.exe" "$OUT_DIR/SHA256SUMS" | cut -d' ' -f1)"
+sed -e "s/{version}/$version/g" -e "s/{sha256_x64}/$sha_x64/g" -e "s/{sha256_arm64}/$sha_arm64/g" \
+    "$SCRIPT_DIR/install.ps1" > "$OUT_DIR/install.ps1"
 
 if [[ "$dry_run" == --dry-run ]]; then
     exit 0
@@ -70,7 +83,7 @@ irm https://github.com/$REPOSITORY/releases/download/$tag/install.ps1 | iex
 \`\`\`
 
 Sharp already installed updates itself."
-gh release create "$tag" -R "$REPOSITORY" "$OUT_DIR/$installer" "$OUT_DIR/SHA256SUMS" "$OUT_DIR/install.ps1" \
+gh release create "$tag" -R "$REPOSITORY" "${installers[@]/#/$OUT_DIR/}" "$OUT_DIR/SHA256SUMS" "$OUT_DIR/install.ps1" \
     --target "$(git rev-parse HEAD)" --title "Sharp $version" \
     --notes "$notes" --generate-notes --latest
 echo "Published $tag"

@@ -1,5 +1,6 @@
 # Installs Sharp from a GitHub release. release.sh fills in {version} and
-# the installer's {sha256} and publishes this script beside the installer,
+# the installers' {sha256_x64} and {sha256_arm64} and publishes this
+# script beside them,
 # so this installs the newest stable release:
 #
 #   irm https://github.com/tinuxongit/sharp-terminal/releases/latest/download/install.ps1 | iex
@@ -14,8 +15,10 @@
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
     $version = '{version}'
-    $sha256 = '{sha256}'
-    $name = "Sharp-$version-x64-setup.exe"
+    # The system's processor, not PowerShell's: on ARM it may run as x64.
+    $arch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'arm64' } else { 'x64' }
+    $sha256 = if ($arch -eq 'arm64') { '{sha256_arm64}' } else { '{sha256_x64}' }
+    $name = "Sharp-$version-$arch-setup.exe"
     $url = "https://github.com/tinuxongit/sharp-terminal/releases/download/v$version/$name"
 
     $dir = Join-Path ([IO.Path]::GetTempPath()) ('sharp-' + [guid]::NewGuid().ToString('N'))

@@ -88,7 +88,7 @@ fn resolve(module: HMODULE, comptime T: type, name: [:0]const u8) Error!T {
         log.err("bundled conpty.dll is missing export {s} err={}", .{ name, windows.GetLastError() });
         return error.ConptyMissingExport;
     };
-    return @ptrCast(address);
+    return @ptrCast(@alignCast(address));
 }
 
 /// Replace the filename in an absolute executable path without allocating or

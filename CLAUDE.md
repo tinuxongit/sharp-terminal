@@ -524,8 +524,8 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   from the bundled ConPTY and puts its program in a job like a shell's.
   The call needs `OpenConsoleProxy.dll`, which Windows won't load from
   Windows Terminal's folder into another app (access denied), so Sharp
-  ships the copy from Windows Terminal 1.24's portable zip, pinned by hash
-  in `build.zig.zon`, x64 only. Switching on remembers the previous
+  ships the copy from Windows Terminal 1.24's portable zips (x64 and
+  arm64), pinned by hash in `build.zig.zon`. Switching on remembers the previous
   choice under `HKCU\Software\Sharp`; switching off, or uninstalling,
   puts it back unless another terminal was chosen since. When Sharp
   isn't running, Windows starts it with `-Embedding`: it restores its
@@ -554,6 +554,12 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   silent install, waiting on a locked `sharp.exe`, a clean uninstall, and
   a local 0.0.9 build that found v0.1.0 on GitHub within 25 s, showed the
   button, and restarted as 0.1.0 about 4 s after the click.
+- **Sharp is released for x64 and ARM64.** `release.sh` builds both
+  (`aarch64-windows-gnu` cross-compiles from x64), with an installer each,
+  `Sharp-<version>-<arch>-setup.exe`. Each copy updates to its own
+  processor's (`{arch}` in `updates.zon`), and `install.ps1` picks by the
+  system's processor (`OSArchitecture`), since PowerShell may run as x64
+  on ARM. ARM64 builds haven't run on ARM hardware yet.
 - **Sharp is installed by a PowerShell command, not a downloaded file.**
   There is no code signing (T3 Code pays for Azure Trusted Signing), and
   SmartScreen stops unsigned programs only when they carry the mark of
