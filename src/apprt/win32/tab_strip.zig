@@ -91,17 +91,24 @@ pub const Layout = struct {
 
     /// The right edge that tabs and buttons may not cross.
     fn limit(self: Layout) i32 {
-        const reserved = if (self.caption_buttons)
-            3 * self.px(caption_button_width) + self.px(drag_space)
+        const buttons: i32 = @intCast(self.rightButtons().len);
+        const gap = if (self.caption_buttons) self.px(drag_space) else self.px(edge_margin);
+        return self.width - buttons * self.px(caption_button_width) - gap;
+    }
+
+    /// The buttons at the right end of the strip, left to right. Settings
+    /// sits beside minimize; without a caption it is alone.
+    pub fn rightButtons(self: Layout) []const Part {
+        return if (self.caption_buttons)
+            &.{ .settings, .minimize, .maximize, .close }
         else
-            self.px(edge_margin);
-        return self.width - reserved;
+            &.{.settings};
     }
 
     pub fn tabWidth(self: Layout) i32 {
         if (self.tab_count == 0) return 0;
         const n: i32 = @intCast(self.tab_count);
-        const buttons = 2 * self.px(round_button_gap + round_button_size);
+        const buttons = self.px(round_button_gap + round_button_size);
         const available = self.limit() - self.tabsLeft() - buttons;
         if (self.frozen_tab_width) |w| {
             if (w * n <= available) return w;
@@ -147,42 +154,32 @@ pub const Layout = struct {
         return .{ .left = left, .top = tab.top, .right = @max(left, right), .bottom = tab.bottom };
     }
 
-    fn roundButtonRect(self: Layout, slot: i32) w32.RECT {
+    pub fn newTabRect(self: Layout) w32.RECT {
         const n: i32 = @intCast(self.tab_count);
         var tabs_right = self.tabsLeft() + n * self.tabWidth();
-        tabs_right = @min(tabs_right, self.limit() - 2 * self.px(round_button_gap + round_button_size));
+        tabs_right = @min(tabs_right, self.limit() - self.px(round_button_gap + round_button_size));
         const size = self.px(round_button_size);
-        const left = tabs_right + self.px(round_button_gap) + slot * (size + self.px(round_button_gap));
+        const left = tabs_right + self.px(round_button_gap);
         const top = self.height() - self.px(tab_height) + @divTrunc(self.px(tab_height) - size, 2);
         return .{ .left = left, .top = top, .right = left + size, .bottom = top + size };
     }
 
-    pub fn newTabRect(self: Layout) w32.RECT {
-        return self.roundButtonRect(0);
-    }
-
-    pub fn settingsRect(self: Layout) w32.RECT {
-        return self.roundButtonRect(1);
-    }
-
-    pub fn captionButtonRect(self: Layout, part: Part) w32.RECT {
+    /// One of rightButtons(), as wide as a Windows caption button.
+    pub fn rightButtonRect(self: Layout, part: Part) w32.RECT {
+        const buttons = self.rightButtons();
         const w = self.px(caption_button_width);
-        const slot: i32 = switch (part) {
-            .close => 1,
-            .maximize => 2,
-            .minimize => 3,
-            else => unreachable,
-        };
-        const right = self.width - (slot - 1) * w;
-        return .{ .left = right - w, .top = 0, .right = right, .bottom = self.height() };
+        const index = for (buttons, 0..) |b, i| {
+            if (b.eql(part)) break i;
+        } else unreachable;
+        const from_right: i32 = @intCast(buttons.len - index);
+        const left = self.width - from_right * w;
+        return .{ .left = left, .top = 0, .right = left + w, .bottom = self.height() };
     }
 
     pub fn hitTest(self: Layout, x: i32, y: i32) Part {
         if (y < 0 or y >= self.height() or x < 0 or x >= self.width) return .none;
-        if (self.caption_buttons) {
-            for ([_]Part{ .minimize, .maximize, .close }) |part| {
-                if (contains(self.captionButtonRect(part), x, y)) return part;
-            }
+        for (self.rightButtons()) |part| {
+            if (contains(self.rightButtonRect(part), x, y)) return part;
         }
         if (self.show_tabs) {
             for (0..self.tab_count) |i| {
@@ -191,7 +188,6 @@ pub const Layout = struct {
                 return .{ .tab = i };
             }
             if (contains(self.newTabRect(), x, y)) return .new_tab;
-            if (contains(self.settingsRect(), x, y)) return .settings;
         }
         return .caption;
     }
@@ -227,7 +223,7 @@ pub const Rgb = struct {
         return .{ .r = lerp(a.r, b.r, t), .g = lerp(a.g, b.g, t), .b = lerp(a.b, b.b, t) };
     }
 
-    fn isDark(self: Rgb) bool {
+    pub fn isDark(self: Rgb) bool {
         const luminance = 0.2126 * @as(f32, @floatFromInt(self.r)) +
             0.7152 * @as(f32, @floatFromInt(self.g)) +
             0.0722 * @as(f32, @floatFromInt(self.b));
@@ -296,19 +292,21 @@ pub const Fonts = struct {
     title: ?*anyopaque = null,
     icons: ?*anyopaque = null,
     icons_small: ?*anyopaque = null,
+    icons_large: ?*anyopaque = null,
 
     /// `hdc` is only used to check which icon font Windows actually picked.
     pub fn init(hdc: w32.HDC, scale: f32) Fonts {
         const icon_face = iconFace(hdc);
         return .{
-            .title = createFont(12, scale, std.unicode.utf8ToUtf16LeStringLiteral("Segoe UI")),
-            .icons = createFont(10, scale, icon_face),
-            .icons_small = createFont(8, scale, icon_face),
+            .title = createFont(12, scale, std.unicode.utf8ToUtf16LeStringLiteral("Segoe UI"), w32.CLEARTYPE_QUALITY),
+            .icons = createFont(10, scale, icon_face, w32.ANTIALIASED_QUALITY),
+            .icons_small = createFont(8, scale, icon_face, w32.ANTIALIASED_QUALITY),
+            .icons_large = createFont(12, scale, icon_face, w32.ANTIALIASED_QUALITY),
         };
     }
 
     pub fn deinit(self: *Fonts) void {
-        inline for (.{ &self.title, &self.icons, &self.icons_small }) |font| {
+        inline for (.{ &self.title, &self.icons, &self.icons_small, &self.icons_large }) |font| {
             if (font.*) |f| _ = w32.DeleteObject(f);
             font.* = null;
         }
@@ -320,7 +318,7 @@ pub const Fonts = struct {
     fn iconFace(hdc: w32.HDC) [*:0]const u16 {
         const fluent = std.unicode.utf8ToUtf16LeStringLiteral("Segoe Fluent Icons");
         const mdl2 = std.unicode.utf8ToUtf16LeStringLiteral("Segoe MDL2 Assets");
-        const probe = createFont(10, 1, fluent) orelse return mdl2;
+        const probe = createFont(10, 1, fluent, w32.ANTIALIASED_QUALITY) orelse return mdl2;
         defer _ = w32.DeleteObject(probe);
         const old = w32.SelectObject(hdc, probe);
         defer _ = w32.SelectObject(hdc, old);
@@ -332,7 +330,9 @@ pub const Fonts = struct {
         return if (std.mem.startsWith(u16, picked, expected)) fluent else mdl2;
     }
 
-    fn createFont(size: f32, scale: f32, face: [*:0]const u16) ?*anyopaque {
+    /// Icons use grayscale smoothing, as Windows' own caption glyphs do:
+    /// ClearType's colored subpixels show as tinted fringes on thin icons.
+    fn createFont(size: f32, scale: f32, face: [*:0]const u16, quality: u32) ?*anyopaque {
         return w32.CreateFontW(
             -@as(i32, @intFromFloat(@round(size * scale))),
             0,
@@ -345,7 +345,7 @@ pub const Fonts = struct {
             w32.DEFAULT_CHARSET,
             0,
             0,
-            w32.CLEARTYPE_QUALITY,
+            quality,
             0,
             face,
         );
@@ -471,35 +471,36 @@ pub fn paint(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, tit
             paintTab(canvas, layout, palette, fonts, titles, view, i);
         }
         paintRoundButton(canvas, layout.newTabRect(), .add, view.hover.eql(.new_tab), palette, fonts);
-        paintRoundButton(canvas, layout.settingsRect(), .settings, view.hover.eql(.settings), palette, fonts);
     }
 
-    if (layout.caption_buttons) {
-        for ([_]Part{ .minimize, .maximize, .close }) |part| {
-            const rect = layout.captionButtonRect(part);
-            const hovered = view.hover.eql(part);
-            const pressed = hovered and view.pressed.eql(part);
-            const is_close = part == .close;
-            canvas.sync();
-            if (hovered) {
-                const color = if (is_close)
-                    (if (pressed) Palette.close_pressed else Palette.close_hover)
-                else if (pressed) palette.pressed else palette.hover;
-                canvas.fill(rect, color);
-            }
-            const glyph: Glyph = switch (part) {
-                .minimize => .minimize,
-                .maximize => if (view.maximized) .restore else .maximize,
-                else => .close,
-            };
-            const color = if (hovered and is_close)
-                Rgb.white
-            else if (view.window_active or hovered)
-                palette.text
-            else
-                palette.text_dim;
-            drawGlyph(canvas.hdc, fonts.icons, glyph, rect, color);
+    for (layout.rightButtons()) |part| {
+        const rect = layout.rightButtonRect(part);
+        const hovered = view.hover.eql(part);
+        // The settings button stays lit while its menu is open.
+        const menu_open = part == .settings and view.pressed.eql(.settings);
+        const pressed = (hovered or menu_open) and view.pressed.eql(part);
+        const is_close = part == .close;
+        canvas.sync();
+        if (hovered or menu_open) {
+            const color = if (is_close)
+                (if (pressed) Palette.close_pressed else Palette.close_hover)
+            else if (pressed) palette.pressed else palette.hover;
+            canvas.fill(rect, color);
         }
+        const glyph: Glyph = switch (part) {
+            .settings => .settings,
+            .minimize => .minimize,
+            .maximize => if (view.maximized) .restore else .maximize,
+            else => .close,
+        };
+        const color = if (hovered and is_close)
+            Rgb.white
+        else if (view.window_active or hovered)
+            palette.text
+        else
+            palette.text_dim;
+        // The gear reads smaller than the caption glyphs at the same size.
+        drawGlyph(canvas.hdc, if (part == .settings) fonts.icons_large else fonts.icons, glyph, rect, color);
     }
     canvas.sync();
 }
@@ -560,7 +561,7 @@ fn paintRoundButton(canvas: Canvas, rect: w32.RECT, glyph: Glyph, hovered: bool,
         canvas.sync();
         canvas.fillRounded(rect, @divTrunc(rect.right - rect.left, 2), palette.hover);
     }
-    drawGlyph(canvas.hdc, fonts.icons, glyph, rect, if (hovered) palette.text else palette.text_dim);
+    drawGlyph(canvas.hdc, fonts.icons_large, glyph, rect, if (hovered) palette.text else palette.text_dim);
 }
 
 fn drawGlyph(hdc: w32.HDC, font: ?*anyopaque, glyph: Glyph, rect: w32.RECT, color: Rgb) void {

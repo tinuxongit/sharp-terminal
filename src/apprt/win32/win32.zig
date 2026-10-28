@@ -1669,3 +1669,15 @@ pub const CLEARTYPE_QUALITY: u32 = 5;
 pub const FW_SEMIBOLD: i32 = 600;
 pub extern "gdi32" fn GdiFlush() callconv(.winapi) i32;
 pub extern "gdi32" fn GetTextExtentPoint32W(hdc: HDC, lpString: [*]const u16, c: i32, psizl: *SIZE) callconv(.winapi) i32;
+
+// Settings menu: submenus with check marks, and availability checks for
+// the programs and fonts its choices need.
+pub const MF_POPUP: u32 = 0x00000010;
+pub const MF_CHECKED: u32 = 0x00000008;
+pub const TPM_RIGHTALIGN: u32 = 0x0008;
+pub const INVALID_FILE_ATTRIBUTES: u32 = 0xFFFFFFFF;
+pub extern "kernel32" fn SearchPathW(lpPath: ?[*:0]const u16, lpFileName: [*:0]const u16, lpExtension: ?[*:0]const u16, nBufferLength: u32, lpBuffer: ?[*]u16, lpFilePart: ?*?[*]u16) callconv(.winapi) u32;
+pub extern "kernel32" fn GetFileAttributesW(lpFileName: [*:0]const u16) callconv(.winapi) u32;
+pub extern "kernel32" fn LoadLibraryW(lpLibFileName: [*:0]const u16) callconv(.winapi) ?HINSTANCE;
+pub extern "kernel32" fn GetProcAddress(hModule: HINSTANCE, lpProcName: [*:0]const u8) callconv(.winapi) ?*const anyopaque;
+pub const ANTIALIASED_QUALITY: u32 = 4;

@@ -15,6 +15,8 @@ const w32 = @import("win32.zig");
 const brand = @import("brand.zig");
 const wide_string = @import("wide_string.zig");
 const tab_strip = @import("tab_strip.zig");
+const settings_menu = @import("settings_menu.zig");
+const config_file = @import("config_file.zig");
 
 const log = std.log.scoped(.win32);
 
@@ -1714,10 +1716,7 @@ fn handleTabBarClick(self: *Window, x: i16, y: i16) void {
             log.err("failed to create new tab: {}", .{err});
         },
         .tab_close => |i| self.closeTabFromStrip(i),
-        // Settings live in Ghostty's config file; this opens it.
-        .settings => _ = self.app.performAction(.app, .open_config, .os_open) catch |err| {
-            log.err("failed to open the config file: {}", .{err});
-        },
+        .settings => self.showSettingsMenu(),
         .tab => |i| {
             self.selectTabIndex(i);
             // Start tracking potential tab drag
@@ -1728,6 +1727,41 @@ fn handleTabBarClick(self: *Window, x: i16, y: i16) void {
             self.invalidateTabBar();
         },
         else => {},
+    }
+}
+
+/// Drop the settings menu below the gear and apply what was picked.
+fn showSettingsMenu(self: *Window) void {
+    const hwnd = self.hwnd orelse return;
+    const button = self.stripLayout().rightButtonRect(.settings);
+    var corner: w32.POINT = .{ .x = button.right, .y = button.bottom };
+    _ = w32.ClientToScreen(hwnd, &corner);
+    const bg = self.app.config.background;
+    const dark = tab_strip.Rgb.isDark(.{ .r = bg.r, .g = bg.g, .b = bg.b });
+
+    self.strip_pressed = .settings;
+    self.invalidateTabBar();
+    const pick = settings_menu.show(self.app.core_app.alloc, hwnd, corner, dark);
+    self.strip_pressed = .none;
+    self.invalidateTabBar();
+
+    const reload: apprt.action.ReloadConfig = .{ .soft = false };
+    switch (pick orelse return) {
+        .set => |change| {
+            config_file.write(self.app.core_app.alloc, change.key, change.value) catch |err| {
+                log.err("failed to save setting {s}: {}", .{ change.key, err });
+                return;
+            };
+            _ = self.app.performAction(.app, .reload_config, reload) catch |err| {
+                log.err("failed to reload config: {}", .{err});
+            };
+        },
+        .edit_file => _ = self.app.performAction(.app, .open_config, .os_open) catch |err| {
+            log.err("failed to open the config file: {}", .{err});
+        },
+        .reload => _ = self.app.performAction(.app, .reload_config, reload) catch |err| {
+            log.err("failed to reload config: {}", .{err});
+        },
     }
 }
 
@@ -1841,6 +1875,9 @@ fn handleTabBarRightClick(self: *Window, x: i16, y: i16) void {
         _ = w32.AppendMenuW(menu, w32.MF_SEPARATOR, 0, null);
     }
     _ = w32.AppendMenuW(menu, w32.MF_STRING, TAB_CTX_NEW_TAB, std.unicode.utf8ToUtf16LeStringLiteral("New Tab"));
+
+    const bg = self.app.config.background;
+    settings_menu.applyMenuTheme(tab_strip.Rgb.isDark(.{ .r = bg.r, .g = bg.g, .b = bg.b }));
 
     // Convert client coords to screen coords for the popup.
     var pt = w32.POINT{ .x = @intCast(x), .y = @intCast(y) };
