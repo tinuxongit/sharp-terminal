@@ -1733,3 +1733,4 @@ pub const MENUINFO = extern struct {
 };
 pub extern "user32" fn SetMenuInfo(hmenu: HMENU, lpmi: *const MENUINFO) callconv(.winapi) i32;
 pub const MB_ICONINFORMATION: u32 = 0x00000040;
+pub extern "kernel32" fn GetTickCount64() callconv(.winapi) u64;

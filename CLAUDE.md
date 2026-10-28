@@ -49,6 +49,11 @@ commands and conventions; this file covers what is specific to Sharp.
   installed, and caches program icons.
 - `src/apprt/win32/new_tab_menu.zig`: the menu behind the arrow beside
   "+", with icons and shortcuts.
+- `src/apprt/win32/tab_sidebar.zig`: tabs as a list beside the terminal,
+  grouped by where the shell runs and by folder; layout and painting.
+- `src/apprt/win32/SearchField.zig`: the search box shared by the settings
+  panel and the tab sidebar.
+- `src/apprt/win32/spots.zig`: clickable regions recorded while painting.
 - `src/apprt/win32/config_file.zig`: reads and changes one key of the
   user's Ghostty config file, leaving the rest of it untouched.
 - `src/font/directwrite.zig`: finds system fonts on Windows.
@@ -119,6 +124,17 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   Settings > Shell dropdown uses the same list.
 - **Ctrl+, opens the settings panel**, not the config file: in Sharp the
   panel is the config UI. The file is under Settings > Advanced.
+- **Tabs can live in a sidebar** (`window-tab-bar-position = sidebar`,
+  off by default), laid out like Citropy's thread list: a search box,
+  sections for local and WSL shells, groups per folder, and per tab its
+  shell icon, title, age, and a red dot after a bell out of sight. A tab
+  is grouped by its folder when the shell reports it (OSC 7), otherwise
+  by its shell's name. The strip stays as the title bar with "+" and the
+  active tab's title.
+- **OSC 7 works on Windows.** Upstream ignored it there. Paths must carry
+  a drive letter, since a Linux path from WSL would break the folder new
+  tabs start in, and the host check ignores case. As on other platforms,
+  new tabs now open in the current tab's folder.
 - **Two tab styles.** `window-tab-style` (a Sharp addition to Ghostty's
   config) picks Chrome's flowing tabs or Windows Terminal's flat ones.
 - **Sharp to people, Ghostty to programs.** The exe, window text, dialogs and
@@ -161,6 +177,8 @@ the scrollback.
 - Replies to programs that probe for image support travel back through
   ConPTY's input side, which reportedly drops APC replies. Tools that
   insist on a reply may not detect image support. Unverified.
+- The sidebar can't reorder tabs by dragging, collapse groups or be
+  resized; the strip still can reorder.
 - Ctrl+Shift+1..9 is taken before Ghostty's keybindings run, so it can't
   be rebound in the config file.
 - Visual Studio is found only in the folders `profiles.zon` lists, not

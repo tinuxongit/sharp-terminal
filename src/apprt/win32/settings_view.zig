@@ -6,6 +6,7 @@ const w32 = @import("win32.zig");
 const canvas_mod = @import("canvas.zig");
 const settings = @import("settings.zig");
 const profiles_mod = @import("profiles.zig");
+const SearchField = @import("SearchField.zig");
 
 const Canvas = canvas_mod.Canvas;
 const Rgb = canvas_mod.Rgb;
@@ -25,29 +26,7 @@ pub const Target = union(enum) {
     }
 };
 
-pub const Spots = struct {
-    items: [160]Spot = undefined,
-    len: usize = 0,
-
-    pub const Spot = struct { rect: w32.RECT, target: Target };
-
-    fn add(self: *Spots, rect: w32.RECT, target: Target) void {
-        if (self.len == self.items.len) return;
-        self.items[self.len] = .{ .rect = rect, .target = target };
-        self.len += 1;
-    }
-
-    /// The topmost spot under a point: later spots were drawn on top.
-    pub fn at(self: *const Spots, x: i32, y: i32) ?Spot {
-        var i = self.len;
-        while (i > 0) {
-            i -= 1;
-            const r = self.items[i].rect;
-            if (x >= r.left and x < r.right and y >= r.top and y < r.bottom) return self.items[i];
-        }
-        return null;
-    }
-};
+pub const Spots = @import("spots.zig").Spots(Target, 160);
 
 /// Panel colors derived from the terminal's, like the tab strip's, plus
 /// the Windows accent color for switched-on toggles.
@@ -126,19 +105,16 @@ pub const Fonts = struct {
 
 pub const State = struct {
     category: usize,
-    query: []const u8,
     scroll: i32,
     hover: Target,
     focused: bool,
-    search_focused: bool,
-    caret_visible: bool,
+    search: *const SearchField,
     config_text: []const u8,
     /// Installed shells, for the Shell dropdown's label.
     profiles: *const profiles_mod.List,
 };
 
 /// Segoe Fluent Icons code points used by the panel.
-const icon_search = 0xE721;
 const icon_close = 0xE8BB;
 const icon_chevron = 0xE70D;
 const icon_restore = 0xE72C;
@@ -218,7 +194,8 @@ fn paintBody(p: *Painter) i32 {
     const top = body.top + p.px(24) - p.state.scroll;
     var y = top;
 
-    if (p.state.query.len == 0) {
+    const query = p.state.search.text();
+    if (query.len == 0) {
         const category = settings.data.categories[p.state.category];
         for (category.sections, 0..) |section, s| {
             var refs: [32]settings.Ref = undefined;
@@ -236,7 +213,7 @@ fn paintBody(p: *Painter) i32 {
             var n: usize = 0;
             for (category.sections, 0..) |section, s| {
                 for (section.settings, 0..) |setting, i| {
-                    if (n < refs.len and settings.matches(setting, p.state.query)) {
+                    if (n < refs.len and settings.matches(setting, query)) {
                         refs[n] = .{ .category = c, .section = s, .setting = i };
                         n += 1;
                     }
@@ -335,7 +312,7 @@ fn paintHeader(p: *Painter, content: w32.RECT) void {
 
     // Breadcrumb: "Settings / General", or "Settings / Search".
     const title = settings.data.title;
-    const current = if (p.state.query.len > 0) settings.data.search_placeholder else settings.data.categories[p.state.category].name;
+    const current = if (p.state.search.len > 0) settings.data.search_placeholder else settings.data.categories[p.state.category].name;
     var x = header.left + p.px(24);
     const line: w32.RECT = .{ .left = x, .top = header.top, .right = header.right, .bottom = header.bottom - 1 };
     p.c.text(line, title, p.fonts.crumb, pal.text_dim, .left);
@@ -366,26 +343,17 @@ fn paintSidebar(p: *Painter, side: w32.RECT) void {
     p.spots.add(side, .none);
 
     const search: w32.RECT = .{ .left = side.left + p.px(12), .top = side.top + p.px(12), .right = side.right - p.px(12), .bottom = side.top + p.px(48) };
-    const searching = p.state.query.len > 0;
-    const search_fill = if (p.state.search_focused)
-        pal.selected
-    else if (p.state.hover.eql(.search)) pal.hover else pal.sidebar.mix(pal.text, 0.05);
-    p.c.fillRounded(search, p.px(8), search_fill);
-    p.c.glyph(.{ .left = search.left + p.px(8), .top = search.top, .right = search.left + p.px(30), .bottom = search.bottom }, icon_search, p.fonts.icons_small, pal.text_dim);
-    const text_rect: w32.RECT = .{ .left = search.left + p.px(36), .top = search.top, .right = search.right - p.px(8), .bottom = search.bottom };
-    if (searching) {
-        p.c.text(text_rect, p.state.query, p.fonts.body, pal.text, .left);
-    } else {
-        p.c.text(text_rect, settings.data.search_placeholder, p.fonts.body, pal.text_dim, .left);
-    }
-    if (p.state.search_focused and p.state.focused and p.state.caret_visible) {
-        // With no query the caret sits just before the placeholder.
-        const after = if (searching) p.c.textWidth(p.state.query, p.fonts.body) + 1 else -p.px(3);
-        const caret_x = @min(text_rect.left + after, text_rect.right);
-        const h = p.px(16);
-        const t = search.top + @divTrunc(search.bottom - search.top - h, 2);
-        p.c.fill(.{ .left = caret_x, .top = t, .right = caret_x + @max(1, p.px(1)), .bottom = t + h }, pal.text);
-    }
+    const searching = p.state.search.len > 0;
+    p.state.search.paint(p.c, search, p.scale, .{
+        .fill = pal.sidebar.mix(pal.text, 0.05),
+        .hover = pal.hover,
+        .focused = pal.selected,
+        .text = pal.text,
+        .text_dim = pal.text_dim,
+        .font = p.fonts.body,
+        .icon_font = p.fonts.icons_small,
+        .placeholder = settings.data.search_placeholder,
+    }, p.state.hover.eql(.search), p.state.focused);
     p.spots.add(search, .search);
 
     var y = search.bottom + p.px(14);

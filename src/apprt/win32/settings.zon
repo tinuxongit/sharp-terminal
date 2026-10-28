@@ -89,6 +89,15 @@
                             },
                         },
                         .{
+                            .label = "Tabs",
+                            .description = "Along the top, or in a searchable list at the side.",
+                            .key = "window-tab-bar-position",
+                            .choices = .{
+                                .{ .label = "Top", .value = "" },
+                                .{ .label = "Sidebar", .value = "sidebar" },
+                            },
+                        },
+                        .{
                             .label = "Tab style",
                             .description = "Chrome's flowing tabs, or Windows Terminal's flat ones.",
                             .key = "window-tab-style",

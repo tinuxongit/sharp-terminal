@@ -93,9 +93,11 @@ pub const Layout = struct {
     caption_buttons: bool,
     /// Width held while tabs are closed with the mouse; see Window.
     frozen_tab_width: ?i32 = null,
+    /// Tabs live in the sidebar: the strip shows "+" and the active title.
+    sidebar: bool = false,
 
     pub fn height(self: Layout) i32 {
-        if (!self.show_tabs and !self.caption_buttons) return 0;
+        if (!self.show_tabs and !self.caption_buttons and !self.sidebar) return 0;
         return self.px(strip_height);
     }
 
@@ -182,7 +184,7 @@ pub const Layout = struct {
 
     /// "+" and the profile arrow form one split button after the last tab.
     fn newTabGroupRect(self: Layout) w32.RECT {
-        const n: i32 = @intCast(self.tab_count);
+        const n: i32 = if (self.sidebar) 0 else @intCast(self.tab_count);
         const width = self.px(new_tab_width + new_tab_menu_width);
         var tabs_right = self.tabsLeft() + n * self.tabWidth();
         tabs_right = @min(tabs_right, self.limit() - self.px(new_tab_gap) - width);
@@ -227,6 +229,8 @@ pub const Layout = struct {
                 if (self.showsClose(i) and contains(self.tabCloseRect(i), x, y)) return .{ .tab_close = i };
                 return .{ .tab = i };
             }
+        }
+        if (self.show_tabs or self.sidebar) {
             if (contains(self.newTabRect(), x, y)) return .new_tab;
             if (contains(self.newTabMenuRect(), x, y)) return .new_tab_menu;
         }
@@ -342,6 +346,14 @@ pub fn paint(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, tit
             paintTab(canvas, layout, palette, fonts, titles, view, i);
         }
         paintNewTabButton(canvas, layout, palette, fonts, view);
+    } else if (layout.sidebar) {
+        paintNewTabButton(canvas, layout, palette, fonts, view);
+        // With tabs in the sidebar, the strip names the active one.
+        if (layout.active < titles.lens.len) {
+            const group = layout.newTabGroupRect();
+            const title: w32.RECT = .{ .left = group.right + layout.px(12), .top = 0, .right = layout.limit(), .bottom = layout.height() };
+            canvas.textWide(title, titles.text[layout.active][0..titles.lens[layout.active]], fonts.title, if (view.window_active) palette.text else palette.text_dim, .left, w32.DT_END_ELLIPSIS);
+        }
     }
 
     for (layout.rightButtons()) |part| {

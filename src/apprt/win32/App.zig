@@ -598,7 +598,23 @@ pub fn performAction(
             return true;
         },
 
+        .pwd => {
+            switch (target) {
+                .app => {},
+                .surface => |core_surface| {
+                    core_surface.rt_surface.setFolder(value.pwd);
+                    core_surface.rt_surface.parent_window.invalidateTabBar();
+                },
+            }
+            return true;
+        },
+
         .ring_bell => {
+            // A bell from a tab out of sight marks it in the tab sidebar.
+            switch (target) {
+                .app => {},
+                .surface => |core_surface| core_surface.rt_surface.parent_window.noteBell(core_surface.rt_surface),
+            }
             // Audio bell.
             _ = w32.MessageBeep(0xFFFFFFFF);
             // Visual bell: flash the taskbar button if the window owning
@@ -1129,7 +1145,6 @@ pub fn performAction(
         // The core handles the logic; we just confirm receipt.
         .key_sequence,
         .key_table,
-        .pwd,
         .cell_size,
         .readonly,
         // Platform-specific actions that don't apply on Windows:

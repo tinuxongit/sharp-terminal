@@ -33,3 +33,19 @@ pub fn fromUtf8(dest: []u16, utf8: []const u8) usize {
     dest[len] = 0;
     return len;
 }
+
+/// Convert as much of `utf16` as fits in `dest`, without splitting a
+/// character. Unpaired surrogates become U+FFFD. Returns the bytes written.
+pub fn toUtf8(dest: []u8, utf16: []const u16) usize {
+    var len: usize = 0;
+    var it = std.unicode.Utf16LeIterator.init(utf16);
+    while (true) {
+        const cp = it.nextCodepoint() catch 0xFFFD orelse break;
+        var buf: [4]u8 = undefined;
+        const n = std.unicode.utf8Encode(cp, &buf) catch continue;
+        if (len + n > dest.len) break;
+        @memcpy(dest[len..][0..n], buf[0..n]);
+        len += n;
+    }
+    return len;
+}

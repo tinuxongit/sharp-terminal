@@ -6,6 +6,7 @@ const wide_string = @import("wide_string.zig");
 const config_file = @import("config_file.zig");
 const menu_theme = @import("menu_theme.zig");
 const profiles = @import("profiles.zig");
+const SearchField = @import("SearchField.zig");
 
 pub const Choice = struct {
     label: []const u8,
@@ -113,16 +114,7 @@ pub fn currentLabel(setting: Setting, config_text: []const u8, list: *const prof
 /// Whether a search query matches a setting's label or description.
 pub fn matches(setting: Setting, query: []const u8) bool {
     if (query.len == 0) return true;
-    return containsIgnoreCase(setting.label, query) or containsIgnoreCase(setting.description, query);
-}
-
-fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
-    if (needle.len > haystack.len) return false;
-    var i: usize = 0;
-    while (i + needle.len <= haystack.len) : (i += 1) {
-        if (std.ascii.eqlIgnoreCase(haystack[i..][0..needle.len], needle)) return true;
-    }
-    return false;
+    return SearchField.matches(setting.label, query) or SearchField.matches(setting.description, query);
 }
 
 /// Show a dropdown's choices as a menu with its top-left corner at

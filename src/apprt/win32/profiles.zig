@@ -21,10 +21,17 @@ pub const Menu = struct {
     profile_shortcut: []const u8,
 };
 
+pub const Sidebar = struct {
+    search_placeholder: []const u8,
+    local: []const u8,
+    wsl: []const u8,
+};
+
 pub const Data = struct {
     visual_studio: []const []const u8,
     hidden_wsl_prefixes: []const []const u8,
     profiles: []const Template,
+    sidebar: Sidebar,
     menu: Menu,
 };
 
@@ -50,6 +57,7 @@ pub const Profile = struct {
     command: Text,
     icon: Text,
     default: bool,
+    source: Source,
 };
 
 /// A string inside List.text, stored as a position so the list can be
@@ -109,7 +117,7 @@ pub const List = struct {
                 return;
             }
         }
-        self.items[self.len] = .{ .name = name_, .command = command_, .icon = icon_, .default = t.default };
+        self.items[self.len] = .{ .name = name_, .command = command_, .icon = icon_, .default = t.default, .source = t.source };
         self.len += 1;
     }
 

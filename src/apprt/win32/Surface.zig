@@ -48,6 +48,17 @@ parent_window: *Window = undefined,
 /// The shell profile's icon shown on this surface's tab, owned by App.
 icon: ?w32.HICON = null,
 
+/// What the tab sidebar shows about this surface: where its shell runs,
+/// its folder (from OSC 7, when the shell reports it), when it opened and
+/// whether it rang the bell while out of sight.
+profile_name: [64]u8 = undefined,
+profile_name_len: u8 = 0,
+wsl: bool = false,
+folder: [128]u8 = undefined,
+folder_len: u8 = 0,
+opened_ms: u64 = 0,
+attention: bool = false,
+
 /// Last title reported by the core for getTitle/copy-title consumers.
 title_len: usize = 0,
 title: [4096]u8 = std.mem.zeroes([4096]u8),
@@ -223,6 +234,10 @@ pub const InitOptions = struct {
     title: ?[:0]const u8 = null,
     /// The shell profile's icon, owned by App's icon cache.
     icon: ?w32.HICON = null,
+    /// The shell profile's name, copied: the sidebar's fallback group.
+    profile_name: []const u8 = "",
+    /// Whether the shell runs in WSL, for the sidebar's sections.
+    wsl: bool = false,
 };
 
 /// Initialize a surface with optional per-surface config overrides. The
@@ -238,7 +253,11 @@ pub fn initWithOptions(
         .app = app,
         .parent_window = parent,
         .icon = options.icon,
+        .wsl = options.wsl,
+        .opened_ms = w32.GetTickCount64(),
     };
+    self.profile_name_len = @intCast(@min(options.profile_name.len, self.profile_name.len));
+    @memcpy(self.profile_name[0..self.profile_name_len], options.profile_name[0..self.profile_name_len]);
 
     // Create a manual-reset event for synchronizing resize with the
     // renderer thread. Manual-reset so we control exactly when it's reset.
@@ -1023,6 +1042,24 @@ pub fn defaultTermioEnv(self: *const Surface) !std.process.Environ.Map {
     // logic (checking for terminfo, resources_dir, etc.). Do not set them here.
 
     return env;
+}
+
+/// Remember the last folder of the shell's working directory, which the
+/// tab sidebar groups by. `pwd` may be a path or a file:// URL path.
+pub fn setFolder(self: *Surface, pwd: []const u8) void {
+    const trimmed = std.mem.trimEnd(u8, pwd, "/\\");
+    const start = if (std.mem.lastIndexOfAny(u8, trimmed, "/\\")) |i| i + 1 else 0;
+    const name = trimmed[start..];
+    self.folder_len = @intCast(@min(name.len, self.folder.len));
+    @memcpy(self.folder[0..self.folder_len], name[0..self.folder_len]);
+}
+
+pub fn folderName(self: *const Surface) []const u8 {
+    return self.folder[0..self.folder_len];
+}
+
+pub fn profileName(self: *const Surface) []const u8 {
+    return self.profile_name[0..self.profile_name_len];
 }
 
 /// Set the window title. Called from performAction(.set_title).

@@ -49,6 +49,12 @@
         },
         .{ .name = "{distro}", .source = .wsl, .command = "wsl.exe -d {distro}", .icon = "wsl.exe" },
     },
+    // The tab sidebar's text. Tabs are listed by where their shell runs.
+    .sidebar = .{
+        .search_placeholder = "Search",
+        .local = "Local",
+        .wsl = "WSL",
+    },
     .menu = .{
         // Shown after a profile's name: the 3rd profile is Ctrl+Shift+3.
         .profile_shortcut = "Ctrl+Shift+",

@@ -2363,6 +2363,19 @@ else
 /// Currently only supported on Windows.
 @"window-tab-style": WindowTabStyle = .chrome,
 
+/// Where the tabs are. Valid values:
+///
+///  - `top` *(default)*
+///
+///    In the tab bar at the top of the window.
+///
+///  - `sidebar`
+///
+///    In a list beside the terminal, grouped by folder, with a search box.
+///
+/// Currently only supported on Windows.
+@"window-tab-bar-position": WindowTabBarPosition = .top,
+
 /// Background color for the window titlebar. This only takes effect if
 /// window-theme is set to ghostty. Currently only supported in the GTK app
 /// runtime.
@@ -9543,6 +9556,12 @@ pub const WindowShowTabBar = enum {
     always,
     auto,
     never,
+};
+
+/// See window-tab-bar-position
+pub const WindowTabBarPosition = enum {
+    top,
+    sidebar,
 };
 
 /// See window-tab-style
