@@ -151,6 +151,8 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/mark_mode.zig`: selecting with the keyboard and
   block selection; `shell_open.zig` shows a folder in Explorer.
 - `src/apprt/win32/startup.zig`: starting Sharp at sign-in.
+- `src/apprt/win32/ipc.zig`: `sharp +new-tab` and `+new-window` reaching
+  a running Sharp.
 - `src/apprt/win32/closed_tabs.zig`: the last ten closed tabs, for
   reopening.
 - `src/apprt/win32/user_environment.zig`: the variables a new tab starts
@@ -282,6 +284,13 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   folder, and the Local and WSL titles, show "+" (default shell) and an
   arrow (shell menu) on hover. On a title they ask for the folder first,
   with Windows' own picker.
+- **`sharp +new-tab` and `+new-window` open in the running Sharp**, as
+  `wt -w 0 nt` does. Ghostty's CLI actions call `performIpc`; on Windows
+  the command sends its arguments (`-e`, `--command`,
+  `--working-directory`, `--title`, read as GTK reads them) with
+  WM_COPYDATA to a running Sharp's message window, letting it come to the
+  front. With none running, or only an elevated one Windows keeps it from
+  reaching, it starts Sharp with those arguments. Checked 2026-10-28.
 - **Startup works as in Windows Terminal.** Settings > General >
   Startup: Start with Windows (`start-at-login`, a value under the
   user's Run key), Reopen tabs (Ghostty's `window-save-state = always`,

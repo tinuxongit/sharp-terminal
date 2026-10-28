@@ -61,6 +61,7 @@ const mcp_server = @import("mcp_server.zig");
 const default_terminal = @import("default_terminal.zig");
 const terminal_handoff = @import("terminal_handoff.zig");
 const elevation = @import("elevation.zig");
+const ipc = @import("ipc.zig");
 
 comptime {
     // Exports the exe's load configuration; nothing references it.
@@ -602,14 +603,45 @@ pub fn wakeup(self: *App) void {
     }
 }
 
-/// IPC from external processes. Not yet implemented for Win32.
+/// `sharp +new-tab` and `+new-window`, sent to a running Sharp (ipc.zig).
 pub fn performIpc(
-    _: Allocator,
+    alloc: Allocator,
     _: apprt.ipc.Target,
     comptime action: apprt.ipc.Action.Key,
-    _: apprt.ipc.Action.Value(action),
+    value: apprt.ipc.Action.Value(action),
 ) !bool {
-    return false;
+    switch (action) {
+        .new_tab => try ipc.send(alloc, MSG_CLASS_NAME, .new_tab, value.arguments),
+        .new_window => try ipc.send(alloc, MSG_CLASS_NAME, .new_window, value.arguments),
+        else => return false,
+    }
+    return true;
+}
+
+/// Open what another `sharp +new-tab` or `+new-window` asked for.
+fn openFromIpc(self: *App, lparam: isize) bool {
+    var arena: std.heap.ArenaAllocator = .init(self.core_app.alloc);
+    defer arena.deinit();
+    const request = ipc.receive(arena.allocator(), lparam) orelse return false;
+    const o = request.overrides;
+    var options: Window.AddTabOptions = .{
+        .context = .tab,
+        .command = if (o.command) |*c| c else null,
+        .working_directory = o.working_directory,
+        .title = o.title,
+    };
+    const window = switch (request.kind) {
+        .new_tab => self.newestWindow(),
+        .new_window => null,
+    };
+    if (window) |w| {
+        _ = w.addTabWithOptions(options) catch return false;
+        if (w.hwnd) |h| _ = w32.SetForegroundWindow(h);
+    } else {
+        options.context = .window;
+        self.openWindowWithTab(options) catch return false;
+    }
+    return true;
 }
 
 /// The core asks the app to act; actions.zig carries each action out.
@@ -1210,6 +1242,10 @@ fn msgWndProc(
     if (msg == WM_APP_AI_USAGE) {
         for (app.windows.items) |window| window.invalidateTabBar();
         return 0;
+    }
+
+    if (msg == ipc.WM_COPYDATA) {
+        return if (app.openFromIpc(lparam)) 1 else 0;
     }
 
     if (msg == WM_APP_HANDOFF) {
