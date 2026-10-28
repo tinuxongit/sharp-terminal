@@ -157,6 +157,8 @@ commands and conventions; this file covers what is specific to Sharp.
   `command_line.zig` quotes one argument of a Windows command line.
 - `src/apprt/win32/prompt_marks.zig`: where prompts start, for the
   scrollbar's ticks.
+- `src/apprt/win32/profile_config.zig`: settings per shell, from
+  `profiles\<shell name>.ghostty` beside the config file.
 - `src/apprt/win32/closed_tabs.zig`: the last ten closed tabs, for
   reopening.
 - `src/apprt/win32/user_environment.zig`: the variables a new tab starts
@@ -269,6 +271,13 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   `ESC _Gi=31;OK ESC \` reply on input, so tools that wait for one detect
   image support. `chafa` picks it automatically via `TERM_PROGRAM`.
   Ghostty has no Sixel support.
+- **Each shell can have its own settings, as Windows Terminal's
+  profiles do.** Ghostty's config has no sections, so a file per shell,
+  `profiles\<shell name>.ghostty` beside the config file, holds any
+  options for that shell's tabs; its tabs open from a config built like
+  Sharp's own with that file loaded last. A reload gives every tab the
+  user's config first, so Sharp then reapplies each shell's file to its
+  tabs. Settings > Advanced > Shell settings opens the folder.
 - **Shell profiles work like Windows Terminal's.** The arrow beside "+"
   lists installed shells with their icons; Ctrl+Shift+1..9 opens the Nth
   in a new tab (unless the config binds that chord to something else),

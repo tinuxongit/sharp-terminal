@@ -166,6 +166,9 @@ pub fn performAction(
                 self.config = new_config;
                 self.configureUpdater();
                 self.configureDefaultTerminal(new_config.@"default-terminal" != default_terminal_was);
+                // Tabs of a shell with its own settings get them back, once
+                // the core has given every tab the user's config.
+                if (self.msg_hwnd) |h| _ = w32.PostMessageW(h, App.WM_APP_SHELL_SETTINGS, 0, 0);
                 if (new_config.@"start-at-login" != start_at_login_was) startup.set(new_config.@"start-at-login");
 
                 // The browser switch also connects Claude Code to Sharp.

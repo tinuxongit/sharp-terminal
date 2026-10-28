@@ -3,6 +3,7 @@
 const Surface = @This();
 
 const std = @import("std");
+const profile_config = @import("profile_config.zig");
 const mark_mode = @import("mark_mode.zig");
 const canvas = @import("canvas.zig");
 const Allocator = std.mem.Allocator;
@@ -379,8 +380,12 @@ pub fn initWithOptions(
     try app.core_app.addSurface(self);
     errdefer app.core_app.deleteSurface(self);
 
-    // Create a config copy for this surface.
-    var config = try apprt.surface.newConfig(app.core_app, &app.config, options.context);
+    // Create a config copy for this surface, from its shell's own settings
+    // when it has some (profile_config.zig). The copy shares that config's
+    // memory, so it lives until the core surface has taken its values.
+    var shell_config = profile_config.load(alloc, options.profile_name);
+    defer if (shell_config) |*c| c.deinit();
+    var config = try apprt.surface.newConfig(app.core_app, if (shell_config) |*c| c else &app.config, options.context);
     defer config.deinit();
 
     if (options.command) |command| {

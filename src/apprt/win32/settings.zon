@@ -427,6 +427,12 @@
                             .button = "Open",
                         },
                         .{
+                            .label = "Shell settings",
+                            .description = "A file per shell, named after it (Git Bash.ghostty), with any options for its tabs.",
+                            .action = .shell_settings,
+                            .button = "Open folder",
+                        },
+                        .{
                             .label = "Reload config",
                             .description = "Apply changes you made to the file by hand.",
                             .action = .reload,

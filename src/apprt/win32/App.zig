@@ -63,6 +63,7 @@ const terminal_handoff = @import("terminal_handoff.zig");
 const elevation = @import("elevation.zig");
 const ipc = @import("ipc.zig");
 const jump_list = @import("jump_list.zig");
+const profile_config = @import("profile_config.zig");
 
 comptime {
     // Exports the exe's load configuration; nothing references it.
@@ -91,6 +92,9 @@ pub const WM_APP_AI_USAGE: u32 = w32.WM_APP + 5;
 
 /// Posted by updater.zig's thread when an update's state changes.
 pub const WM_APP_UPDATE: u32 = w32.WM_APP + 7;
+
+/// Posted after a config reload, to give tabs their shell's own settings.
+pub const WM_APP_SHELL_SETTINGS: u32 = w32.WM_APP + 9;
 
 /// Posted by terminal_handoff.zig when Windows hands Sharp a console.
 const WM_APP_HANDOFF: u32 = w32.WM_APP + 8;
@@ -730,6 +734,22 @@ fn handoffWindow(self: *App) !*Window {
     return self.newEmptyWindow();
 }
 
+/// Give each tab of a shell with its own settings file those settings
+/// again, after a reload gave every tab the user's config.
+fn applyShellSettings(self: *App) void {
+    for (self.windows.items) |w| for (0..w.tab_count) |t| {
+        var panes = w.tab_trees[t].iterator();
+        while (panes.next()) |entry| {
+            const pane = entry.view;
+            if (!pane.core_surface_ready) continue;
+            var shell = profile_config.load(self.core_app.alloc, pane.profileName()) orelse continue;
+            defer shell.deinit();
+            pane.core_surface.handleMessage(.{ .change_config = &shell }) catch |err|
+                log.warn("could not apply a shell's settings: {}", .{err});
+        }
+    };
+}
+
 /// The most recently opened ordinary window, if any is open.
 pub fn newestWindow(self: *App) ?*Window {
     var i = self.windows.items.len;
@@ -1245,6 +1265,11 @@ fn msgWndProc(
 
     if (msg == WM_APP_AI_USAGE) {
         for (app.windows.items) |window| window.invalidateTabBar();
+        return 0;
+    }
+
+    if (msg == WM_APP_SHELL_SETTINGS) {
+        app.applyShellSettings();
         return 0;
     }
 

@@ -274,6 +274,7 @@ fn useControl(self: *SettingsPanel, ref: settings.Ref, rect: w32.RECT) void {
         .action => switch (setting.action.?) {
             .edit_file => self.host.edit_file(self.host.ctx),
             .check_updates => @import("updater.zig").checkNow(),
+            .shell_settings => openShellSettings(),
             .reload => {
                 self.host.reload(self.host.ctx);
                 self.refresh();
@@ -412,4 +413,13 @@ fn wndProc(hwnd: w32.HWND, msg: u32, wparam: usize, lparam: isize) callconv(.win
         },
         else => return w32.DefWindowProcW(hwnd, msg, wparam, lparam),
     }
+}
+
+/// Open the folder of the shells' own settings, making it first.
+fn openShellSettings() void {
+    const alloc = std.heap.smp_allocator;
+    const dir = @import("profile_config.zig").folder(alloc) catch return;
+    defer alloc.free(dir);
+    std.Io.Dir.cwd().createDirPath(@import("../../global.zig").io(), dir) catch return;
+    @import("shell_open.zig").folder(dir);
 }

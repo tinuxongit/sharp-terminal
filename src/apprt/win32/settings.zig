@@ -14,7 +14,7 @@ pub const Choice = struct {
     requires_font: ?[]const u8 = null,
 };
 
-pub const Action = enum { edit_file, reload, check_updates };
+pub const Action = enum { edit_file, reload, check_updates, shell_settings };
 
 pub const Setting = struct {
     label: []const u8,
