@@ -36,37 +36,7 @@ pub fn moveTabTo(self: *Window, from: usize, to: usize) void {
     // would otherwise point at the wrong tab after the move.
     tab_rename.cancelTabRename(self);
 
-    // Save the source tab state
-    const saved_tree = self.tab_trees[from];
-    const saved_surface = self.tab_active_surface[from];
-    const saved_title = self.tab_titles[from];
-    const saved_title_len = self.tab_title_lens[from];
-
-    if (from < to) {
-        // Shift left: move [from+1..to+1] to [from..to]
-        var i: usize = from;
-        while (i < to) : (i += 1) {
-            self.tab_trees[i] = self.tab_trees[i + 1];
-            self.tab_active_surface[i] = self.tab_active_surface[i + 1];
-            self.tab_titles[i] = self.tab_titles[i + 1];
-            self.tab_title_lens[i] = self.tab_title_lens[i + 1];
-        }
-    } else {
-        // Shift right: move [to..from] to [to+1..from+1]
-        var i: usize = from;
-        while (i > to) : (i -= 1) {
-            self.tab_trees[i] = self.tab_trees[i - 1];
-            self.tab_active_surface[i] = self.tab_active_surface[i - 1];
-            self.tab_titles[i] = self.tab_titles[i - 1];
-            self.tab_title_lens[i] = self.tab_title_lens[i - 1];
-        }
-    }
-
-    // Place the saved tab at the destination
-    self.tab_trees[to] = saved_tree;
-    self.tab_active_surface[to] = saved_surface;
-    self.tab_titles[to] = saved_title;
-    self.tab_title_lens[to] = saved_title_len;
+    self.putTab(to, self.takeTab(from));
 
     self.active_tab = to;
     self.invalidateTabBar();

@@ -680,22 +680,11 @@ pub fn addTabWithOptions(self: *Window, options: AddTabOptions) !*Surface {
         .end => self.tab_count,
     };
 
-    // Shift elements right to make room at pos.
-    var i: usize = self.tab_count;
-    while (i > pos) : (i -= 1) {
-        self.tab_trees[i] = self.tab_trees[i - 1];
-        self.tab_active_surface[i] = self.tab_active_surface[i - 1];
-        self.tab_titles[i] = self.tab_titles[i - 1];
-        self.tab_title_lens[i] = self.tab_title_lens[i - 1];
-    }
-    self.tab_trees[pos] = tree;
-    self.tab_active_surface[pos] = surface;
-    self.tab_count += 1;
-
-    // Set default title.
+    var tab: Tab = .{ .tree = tree, .active = surface, .title = undefined, .title_len = 0 };
     const default_title = std.unicode.utf8ToUtf16LeStringLiteral(brand.name);
-    @memcpy(self.tab_titles[pos][0..default_title.len], default_title);
-    self.tab_title_lens[pos] = @intCast(default_title.len);
+    @memcpy(tab.title[0..default_title.len], default_title);
+    tab.title_len = @intCast(default_title.len);
+    self.putTab(pos, tab);
 
     if (self.tab_count == 1) {
         // First tab — show the parent window now that the terminal is ready.
@@ -759,6 +748,50 @@ pub fn tabIndexByKey(self: *const Window, key: usize) ?usize {
     return null;
 }
 
+/// One tab's state, as the tab_* arrays hold it.
+pub const Tab = struct {
+    tree: SplitTree(Surface),
+    active: *Surface,
+    title: [256]u16,
+    title_len: u16,
+};
+
+/// Take tab `index` out, closing the gap; the caller owns its tree.
+pub fn takeTab(self: *Window, index: usize) Tab {
+    const tab: Tab = .{
+        .tree = self.tab_trees[index],
+        .active = self.tab_active_surface[index],
+        .title = self.tab_titles[index],
+        .title_len = self.tab_title_lens[index],
+    };
+    var i = index;
+    while (i + 1 < self.tab_count) : (i += 1) {
+        self.tab_trees[i] = self.tab_trees[i + 1];
+        self.tab_active_surface[i] = self.tab_active_surface[i + 1];
+        self.tab_titles[i] = self.tab_titles[i + 1];
+        self.tab_title_lens[i] = self.tab_title_lens[i + 1];
+    }
+    self.tab_count -= 1;
+    return tab;
+}
+
+/// Put `tab` in at `index`, moving later tabs right; the window owns its
+/// tree from then on.
+pub fn putTab(self: *Window, index: usize, tab: Tab) void {
+    var i = self.tab_count;
+    while (i > index) : (i -= 1) {
+        self.tab_trees[i] = self.tab_trees[i - 1];
+        self.tab_active_surface[i] = self.tab_active_surface[i - 1];
+        self.tab_titles[i] = self.tab_titles[i - 1];
+        self.tab_title_lens[i] = self.tab_title_lens[i - 1];
+    }
+    self.tab_trees[index] = tab.tree;
+    self.tab_active_surface[index] = tab.active;
+    self.tab_titles[index] = tab.title;
+    self.tab_title_lens[index] = tab.title_len;
+    self.tab_count += 1;
+}
+
 pub fn tabId(self: *Window, index: usize) u64 {
     return self.tab_active_surface[index].core_surface.id;
 }
@@ -814,16 +847,8 @@ fn closeTabByIndex(self: *Window, idx: usize) void {
     // Cancel any in-progress rename (the edit control may belong to this tab).
     tab_rename.cancelTabRename(self);
     closed_tabs.remember(workspace.sessionTab(self.tab_active_surface[idx]));
-    var tree = self.tab_trees[idx];
-    tree.deinit(); // This unrefs all surfaces → Surface.unref frees when ref_count=0
-    var i: usize = idx;
-    while (i + 1 < self.tab_count) : (i += 1) {
-        self.tab_trees[i] = self.tab_trees[i + 1];
-        self.tab_active_surface[i] = self.tab_active_surface[i + 1];
-        self.tab_titles[i] = self.tab_titles[i + 1];
-        self.tab_title_lens[i] = self.tab_title_lens[i + 1];
-    }
-    self.tab_count -= 1;
+    var closed = self.takeTab(idx);
+    closed.tree.deinit(); // This unrefs all surfaces → Surface.unref frees when ref_count=0
     // Before `closing` is set: closing the last tab by hand empties the
     // session, unlike closing the window, which keeps it.
     self.app.saveSession();
@@ -1172,29 +1197,15 @@ pub fn moveTabToNewWindow(self: *Window, surface: *Surface) !bool {
     // Move child HWNDs and owned popups before mutating either tab array.
     try reparentTabWindows(&moved_tree, self.hwnd.?, destination_hwnd);
 
-    const moved_active = self.tab_active_surface[tab_idx];
-    const moved_title = self.tab_titles[tab_idx];
-    const moved_title_len = self.tab_title_lens[tab_idx];
-
-    var i = tab_idx;
-    while (i + 1 < self.tab_count) : (i += 1) {
-        self.tab_trees[i] = self.tab_trees[i + 1];
-        self.tab_active_surface[i] = self.tab_active_surface[i + 1];
-        self.tab_titles[i] = self.tab_titles[i + 1];
-        self.tab_title_lens[i] = self.tab_title_lens[i + 1];
-    }
-    self.tab_count -= 1;
+    const moved = self.takeTab(tab_idx);
+    const moved_active = moved.active;
     if (self.active_tab > tab_idx) {
         self.active_tab -= 1;
     } else if (self.active_tab >= self.tab_count) {
         self.active_tab = self.tab_count - 1;
     }
 
-    destination.tab_trees[0] = moved_tree;
-    destination.tab_active_surface[0] = moved_active;
-    destination.tab_titles[0] = moved_title;
-    destination.tab_title_lens[0] = moved_title_len;
-    destination.tab_count = 1;
+    destination.putTab(0, moved);
     destination.active_tab = 0;
 
     var it = destination.tab_trees[0].iterator();
