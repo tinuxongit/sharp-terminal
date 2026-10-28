@@ -1751,6 +1751,10 @@ pub extern "kernel32" fn LoadLibraryExW(lpLibFileName: [*:0]const u16, hFile: ?H
 /// Search only System32, never the program's folder or the current one.
 pub const LOAD_LIBRARY_SEARCH_SYSTEM32: u32 = 0x00000800;
 pub extern "kernel32" fn GetProcAddress(hModule: HINSTANCE, lpProcName: [*:0]const u8) callconv(.winapi) ?*const anyopaque;
+/// With an absolute path, also search that DLL's own folder for its imports.
+pub const LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR: u32 = 0x00000100;
+pub extern "kernel32" fn GetModuleFileNameW(hModule: ?HINSTANCE, lpFilename: [*]u16, nSize: u32) callconv(.winapi) u32;
+pub extern "kernel32" fn GetEnvironmentVariableW(lpName: [*:0]const u16, lpBuffer: ?[*]u16, nSize: u32) callconv(.winapi) u32;
 pub const ANTIALIASED_QUALITY: u32 = 4;
 pub const DT_RIGHT: u32 = 0x2;
 pub extern "dwmapi" fn DwmGetColorizationColor(pcrColorization: *u32, pfOpaqueBlend: *i32) callconv(.winapi) i32;

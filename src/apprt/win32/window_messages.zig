@@ -152,6 +152,7 @@ pub fn windowWndProc(
         },
         w32.WM_MOVE => {
             if (window.settings_panel) |panel| panel.place(window.settingsArea());
+            if (window.browser) |panel| panel.parentMoved();
             // Top-level move: child surface HWNDs do NOT receive WM_MOVE
             // (their position relative to the parent is unchanged), but the
             // scrollbar is a screen-positioned popup that must follow its

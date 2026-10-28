@@ -6,6 +6,7 @@ const tab_strip = @import("tab_strip.zig");
 const menu_theme = @import("menu_theme.zig");
 const workspace = @import("workspace.zig");
 const tab_rename = @import("tab_rename.zig");
+const browser_dock = @import("browser_dock.zig");
 const log = std.log.scoped(.win32);
 const Window = @import("Window.zig");
 
@@ -193,6 +194,7 @@ pub fn handleTabBarClick(self: *Window, x: i16, y: i16) void {
         },
         .tab_close => |i| Window.strip_mouse.closeTabFromStrip(self, i),
         .settings => self.openSettings(),
+        .browser => browser_dock.toggle(self),
         .new_tab_menu => self.showNewTabMenu(),
         .tab => |i| {
             self.selectTabIndex(i);

@@ -1,0 +1,17 @@
+// The browser panel beside the terminal, opened from the globe in the tab
+// strip while Settings > AI > Tools > Browser is on. Checked when Sharp is
+// compiled.
+.{
+    // The panel's share of the window, in percent (10 to 80), and its
+    // narrowest width in pixels at 96 DPI.
+    .width_percent = 40,
+    .min_width = 360,
+    // The page a new panel opens.
+    .home = "https://www.google.com/",
+    // Where text typed in the address box that isn't an address goes; the
+    // words follow it, encoded.
+    .search = "https://www.google.com/search?q=",
+    .address_placeholder = "Search or enter address",
+    // Shown in the panel when Windows has no WebView2 runtime.
+    .unavailable = "The browser needs Microsoft Edge WebView2 Runtime.",
+}

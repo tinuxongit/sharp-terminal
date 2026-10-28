@@ -1,7 +1,7 @@
 //! A one-line text box for Sharp's own UI (searching the settings panel and
-//! the tab sidebar, and the sidebar's server address): the text typed so
-//! far, its focus and blinking caret, and how it is drawn. The caret always
-//! sits at the end of the text.
+//! the tab sidebar, the sidebar's server address, the browser's address):
+//! the text typed so far, its focus and blinking caret, and how it is
+//! drawn. The caret always sits at the end of the text.
 const SearchField = @This();
 
 const std = @import("std");
@@ -11,7 +11,8 @@ const canvas_mod = @import("canvas.zig");
 const Canvas = canvas_mod.Canvas;
 const Rgb = canvas_mod.Rgb;
 
-buf: [64]u8 = undefined,
+/// Long enough for the addresses the browser panel shows.
+buf: [2048]u8 = undefined,
 len: usize = 0,
 focused: bool = false,
 caret_visible: bool = true,
@@ -27,6 +28,14 @@ pub fn text(self: *const SearchField) []const u8 {
 
 pub fn clear(self: *SearchField) void {
     self.len = 0;
+}
+
+/// Replace the text, cut at a whole character if it doesn't fit.
+pub fn set(self: *SearchField, value: []const u8) void {
+    var n = @min(value.len, self.buf.len);
+    while (n < value.len and n > 0 and value[n] & 0xC0 == 0x80) n -= 1;
+    @memcpy(self.buf[0..n], value[0..n]);
+    self.len = n;
 }
 
 /// Take or release keyboard focus. The caret blinks on `hwnd`'s timer,

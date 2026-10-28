@@ -12,6 +12,8 @@ zig-cache/
 zig-pkg/
 zig-out/
 zig-out-bench/
+zig-out-test/
+__pycache__/
 zig-pkg/
 build-cmake/
 CMakeCache.txt

@@ -15,6 +15,8 @@ const brand = @import("brand.zig");
 const wide_string = @import("wide_string.zig");
 const tab_strip = @import("tab_strip.zig");
 const SettingsPanel = @import("SettingsPanel.zig");
+const BrowserPanel = @import("BrowserPanel.zig");
+const browser_dock = @import("browser_dock.zig");
 const profiles = @import("profiles.zig");
 const new_tab_menu = @import("new_tab_menu.zig");
 const tab_sidebar = @import("tab_sidebar.zig");
@@ -73,6 +75,11 @@ frozen_tab_width: ?i32 = null,
 
 /// The settings panel, while it is open.
 settings_panel: ?*SettingsPanel = null,
+
+/// The browser panel, from the first click on the globe until the window
+/// closes or the setting is switched off; see browser_dock.
+browser: ?*BrowserPanel = null,
+browser_shown: bool = false,
 
 /// The tab sidebar's state, used when `window-tab-bar-position = sidebar`.
 sidebar_fonts: tab_sidebar.Fonts = .{},
@@ -271,6 +278,7 @@ pub fn onConfigChange(self: *Window) void {
         applyBackgroundBlur(hwnd, self.app.config.@"background-blur".enabled());
     }
     self.tab_overview.updateAppearance();
+    if (!browser_dock.enabled(self)) browser_dock.close(self);
     // The strip's colors come from the terminal's, so a new theme repaints
     // it, and the tabs may have moved between the strip and the sidebar.
     self.updateTabBarVisibility();
@@ -409,6 +417,7 @@ pub fn deinit(self: *Window) void {
     self.tab_overview.deinit();
     // Close all tab surfaces.
     self.cleanupAllSurfaces();
+    browser_dock.close(self);
 
     self.strip_fonts.deinit();
 
@@ -450,8 +459,16 @@ pub fn stripLayout(self: *const Window) tab_strip.Layout {
         .show_tabs = self.tab_bar_visible and !self.sidebarMode(),
         .sidebar = self.sidebarMode(),
         .caption_buttons = self.integratedTitleBar(),
+        .browser = browser_dock.enabled(self),
         .frozen_tab_width = self.frozen_tab_width,
     };
+}
+
+/// The strip's colors, which the browser panel's toolbar shares.
+pub fn stripPalette(self: *const Window) tab_strip.Palette {
+    const bg = self.app.config.background;
+    const fg = self.app.config.foreground;
+    return .fromTerminal(.{ .r = bg.r, .g = bg.g, .b = bg.b }, .{ .r = fg.r, .g = fg.g, .b = fg.b });
 }
 
 pub fn loadStripFonts(self: *Window) void {
@@ -566,6 +583,7 @@ pub fn surfaceRect(self: *const Window) w32.RECT {
     }
     rect.top += self.tabBarHeight();
     rect.left += self.sidebarWidth();
+    rect.right -= browser_dock.width(self);
     return rect;
 }
 
@@ -1331,9 +1349,7 @@ pub fn paintTabBar(self: *Window) void {
         _ = w32.DeleteObject(mem_bmp);
     }
 
-    const bg = self.app.config.background;
-    const fg = self.app.config.foreground;
-    var palette: tab_strip.Palette = .fromTerminal(.{ .r = bg.r, .g = bg.g, .b = bg.b }, .{ .r = fg.r, .g = fg.g, .b = fg.b });
+    var palette = self.stripPalette();
     // The settings panel dims the terminal; the active tab is part of the
     // same surface, so it dims with it.
     if (self.settings_panel != null) {
@@ -1357,6 +1373,7 @@ pub fn paintTabBar(self: *Window) void {
             .hover = self.strip_hover,
             // The gear stays lit while its panel is open.
             .pressed = if (self.settings_panel != null) .settings else self.strip_pressed,
+            .browser_open = self.browser_shown,
             .window_active = self.window_active,
             .maximized = w32.IsZoomed(hwnd) != 0,
         },
@@ -1515,6 +1532,7 @@ pub const SIDEBAR_TIMER_MS = 3_000;
 
 pub fn handleResize(self: *Window) void {
     if (self.settings_panel) |panel| panel.place(self.settingsArea());
+    browser_dock.place(self);
     self.layoutSplits();
     self.invalidateTabBar();
     self.showResizeOverlay();
@@ -1778,6 +1796,7 @@ pub fn close(self: *Window) void {
     self.tab_overview.deinit();
     // First, cleanly shut down all surfaces (renderer/IO threads, WGL, DC).
     self.cleanupAllSurfaces();
+    browser_dock.close(self);
 
     // Now safe to destroy the parent HWND (children already cleaned up).
     if (self.hwnd) |hwnd| {

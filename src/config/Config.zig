@@ -2415,6 +2415,13 @@ else
 /// Currently only supported on Windows.
 @"ai-usage-opencode": bool = true,
 
+/// A browser panel beside the terminal, shown and hidden with the globe in
+/// the tab strip, that Claude can read and use. While this is off Sharp
+/// loads no browser at all.
+///
+/// Currently only supported on Windows.
+@"ai-tools-browser": bool = false,
+
 /// Background color for the window titlebar. This only takes effect if
 /// window-theme is set to ghostty. Currently only supported in the GTK app
 /// runtime.

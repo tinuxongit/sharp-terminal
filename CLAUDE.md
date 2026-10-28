@@ -81,6 +81,13 @@ commands and conventions; this file covers what is specific to Sharp.
   the sidebar's AI section.
 - `src/apprt/win32/servers.zig`: the servers the sidebar offers (hosts in
   `~/.ssh/config` and recent ones), and which addresses ssh may be given.
+- `src/apprt/win32/BrowserPanel.zig`: the browser panel, a child window
+  with Sharp's toolbar (back, forward, reload, address) over a WebView2
+  page. Its sizes and text are in `browser.zon`.
+- `src/apprt/win32/browser_dock.zig`: a window's side of the panel: the
+  globe, where the panel sits, and opening, hiding and freeing it.
+- `src/apprt/win32/webview2.zig`: the WebView2 COM interfaces the panel
+  calls, and loading `WebView2Loader.dll` (pinned in `pkg/webview2/`).
 - `src/apprt/win32/folder_picker.zig`: Windows' folder picker, behind the
   buttons on a sidebar section's title.
 - `src/termio/cmd_prompt.zig`: makes cmd.exe report its folder (OSC 7)
@@ -245,6 +252,18 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   `app-server` answers the JSON-RPC request `account/rateLimits/read`.
   OpenCode answers `opencode stats --json --cost --standalone`, which
   leaves no background service behind.
+- **A browser beside the terminal, off until switched on.** Settings > AI
+  > Tools > Browser (`ai-tools-browser`, off by default) adds a globe
+  beside the gear, and its first click creates the panel. Until then Sharp
+  loads no browser at all: checked 2026-10-28, no `WebView2Loader.dll` in
+  the process and no `msedgewebview2.exe`. The page is WebView2, the Edge
+  runtime Windows ships, driven through its COM API with the loader
+  pinned and loaded by full path like ConPTY; Electron or CEF would ship a
+  second Chromium. Sharp draws the toolbar. Hiding the panel keeps its
+  page, switching the setting off frees it, and logins stay in
+  `%LOCALAPPDATA%\Sharp\Browser`, apart from Edge's. Links that open a
+  window open in the panel. The design follows Citropy's browser rather
+  than T3 Code's, which is a preview of a dev server.
 - **OSC 7 works on Windows.** Upstream ignored it there. Paths must carry
   a drive letter, since a Linux path from WSL would break the folder new
   tabs start in, and the host check ignores case. As on other platforms,

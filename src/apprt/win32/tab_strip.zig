@@ -23,6 +23,8 @@ pub const Part = union(enum) {
     new_tab,
     /// The arrow beside "+" that opens the shell profile menu.
     new_tab_menu,
+    /// The globe that shows or hides the browser panel.
+    browser,
     settings,
     minimize,
     maximize,
@@ -96,6 +98,8 @@ pub const Layout = struct {
     /// Tabs live in the sidebar: the strip shows only the active title, and
     /// new tabs open from the sidebar's folders.
     sidebar: bool = false,
+    /// Settings > AI > Tools > Browser is on, so the globe shows.
+    browser: bool = false,
 
     pub fn height(self: Layout) i32 {
         if (!self.show_tabs and !self.caption_buttons and !self.sidebar) return 0;
@@ -118,12 +122,15 @@ pub const Layout = struct {
     }
 
     /// The buttons at the right end of the strip, left to right. Settings
-    /// sits beside minimize; without a caption it is alone.
+    /// sits beside minimize, with the globe before it.
     pub fn rightButtons(self: Layout) []const Part {
-        return if (self.caption_buttons)
-            &.{ .settings, .minimize, .maximize, .close }
-        else
-            &.{.settings};
+        if (self.caption_buttons) {
+            return if (self.browser)
+                &.{ .browser, .settings, .minimize, .maximize, .close }
+            else
+                &.{ .settings, .minimize, .maximize, .close };
+        }
+        return if (self.browser) &.{ .browser, .settings } else &.{.settings};
     }
 
     pub fn tabWidth(self: Layout) i32 {
@@ -293,6 +300,7 @@ const Glyph = enum(u16) {
     add = 0xE710,
     chevron_down = 0xE70D,
     settings = 0xE713,
+    globe = 0xE774,
 };
 
 pub const Fonts = struct {
@@ -326,6 +334,8 @@ pub const View = struct {
     pressed: Part = .none,
     window_active: bool = true,
     maximized: bool = false,
+    /// The globe stays lit while the browser panel shows.
+    browser_open: bool = false,
 };
 
 pub const Titles = struct {
@@ -358,8 +368,10 @@ pub fn paint(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, tit
     for (layout.rightButtons()) |part| {
         const rect = layout.rightButtonRect(part);
         const hovered = view.hover.eql(part);
-        // The settings button stays lit while its menu is open.
-        const menu_open = part == .settings and view.pressed.eql(.settings);
+        // The settings button stays lit while its panel is open, and the
+        // globe while the browser shows.
+        const menu_open = (part == .settings and view.pressed.eql(.settings)) or
+            (part == .browser and view.browser_open);
         const pressed = (hovered or menu_open) and view.pressed.eql(part);
         const is_close = part == .close;
         canvas.sync();
@@ -371,6 +383,7 @@ pub fn paint(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, tit
         }
         const glyph: Glyph = switch (part) {
             .settings => .settings,
+            .browser => .globe,
             .minimize => .minimize,
             .maximize => if (view.maximized) .restore else .maximize,
             else => .close,
@@ -382,7 +395,8 @@ pub fn paint(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, tit
         else
             palette.text_dim;
         // The gear reads smaller than the caption glyphs at the same size.
-        canvas.glyph(rect, @backingInt(glyph), if (part == .settings) fonts.icons_large else fonts.icons, color);
+        const large = part == .settings or part == .browser;
+        canvas.glyph(rect, @backingInt(glyph), if (large) fonts.icons_large else fonts.icons, color);
     }
     canvas.sync();
 }
