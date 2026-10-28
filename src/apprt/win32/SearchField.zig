@@ -1,6 +1,7 @@
-//! A one-line search box for Sharp's own UI (the settings panel and the
-//! tab sidebar): the text typed so far, its focus and blinking caret, and
-//! how it is drawn. The caret always sits at the end of the text.
+//! A one-line text box for Sharp's own UI (searching the settings panel and
+//! the tab sidebar, and the sidebar's server address): the text typed so
+//! far, its focus and blinking caret, and how it is drawn. The caret always
+//! sits at the end of the text.
 const SearchField = @This();
 
 const std = @import("std");
@@ -108,6 +109,7 @@ pub const Look = struct {
     font: ?*anyopaque,
     icon_font: ?*anyopaque,
     placeholder: []const u8,
+    icon: u16 = icon_search,
 };
 
 /// Draw the field. `window_focused` hides the caret while another window
@@ -120,7 +122,7 @@ pub fn paint(self: *const SearchField, c: Canvas, rect: w32.RECT, scale: f32, lo
     }.f;
     const fill = if (self.focused) look.focused else if (hovered) look.hover else look.fill;
     c.fillRounded(rect, px(8, scale), fill);
-    c.glyph(.{ .left = rect.left + px(8, scale), .top = rect.top, .right = rect.left + px(30, scale), .bottom = rect.bottom }, icon_search, look.icon_font, look.text_dim);
+    c.glyph(.{ .left = rect.left + px(8, scale), .top = rect.top, .right = rect.left + px(30, scale), .bottom = rect.bottom }, look.icon, look.icon_font, look.text_dim);
 
     const text_rect: w32.RECT = .{ .left = rect.left + px(36, scale), .top = rect.top, .right = rect.right - px(8, scale), .bottom = rect.bottom };
     if (self.len > 0) {

@@ -1,6 +1,7 @@
-//! The menu behind the arrow beside "+": the installed shell profiles with
-//! their icons and Ctrl+Shift+N shortcuts, as in Windows Terminal. The
-//! shortcuts themselves are handled by App; this only shows them.
+//! The menus behind the arrows beside "+": the installed shell profiles
+//! with their icons and Ctrl+Shift+N shortcuts, as in Windows Terminal, and
+//! for the sidebar's Servers the SSH servers to connect to. The shortcuts
+//! themselves are handled by App; this only shows them.
 const std = @import("std");
 const w32 = @import("win32.zig");
 const profiles = @import("profiles.zig");
@@ -43,6 +44,34 @@ pub fn show(owner: w32.HWND, point: w32.POINT, list: *const profiles.List, selec
     const id: u32 = @intCast(picked);
     if (id < id_profile_base or id - id_profile_base >= list.len) return null;
     return id - id_profile_base;
+}
+
+/// Show the servers from the SSH config, then those used recently, with
+/// the top-left corner at `point`. Returns the one picked.
+pub fn showServers(owner: w32.HWND, point: w32.POINT, configured: []const []const u8, recent: []const []const u8, dark: bool) ?[]const u8 {
+    const menu = w32.CreatePopupMenu() orelse return null;
+    defer _ = w32.DestroyMenu(menu);
+
+    var position: u32 = 0;
+    for (configured, 0..) |name, i| insert(menu, &position, id_profile_base + @as(u32, @intCast(i)), name, null, false);
+    if (configured.len > 0 and recent.len > 0) {
+        _ = w32.AppendMenuW(menu, w32.MF_SEPARATOR, 0, null);
+        position += 1;
+    }
+    for (recent, 0..) |name, i| insert(menu, &position, id_profile_base + @as(u32, @intCast(configured.len + i)), name, null, false);
+    if (position == 0) {
+        var label: [160]u16 = undefined;
+        _ = wide_string.fromUtf8(&label, profiles.data.sidebar.no_servers);
+        _ = w32.AppendMenuW(menu, w32.MF_GRAYED, 0, @ptrCast(&label));
+    }
+
+    menu_theme.apply(dark);
+    const picked = w32.TrackPopupMenuEx(menu, w32.TPM_LEFTALIGN | w32.TPM_TOPALIGN | w32.TPM_RETURNCMD, point.x, point.y, owner, null);
+    if (picked < id_profile_base) return null;
+    const i: usize = @intCast(picked - id_profile_base);
+    if (i < configured.len) return configured[i];
+    if (i - configured.len < recent.len) return recent[i - configured.len];
+    return null;
 }
 
 fn insert(menu: w32.HMENU, position: *u32, id: u32, label: []const u8, bitmap: ?*anyopaque, bold: bool) void {

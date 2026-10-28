@@ -37,12 +37,13 @@ pub const Processes = struct {
         return self;
     }
 
-    /// The host the shell `shell_pid` is connected to through ssh, written
-    /// into `out`, or null when it isn't running ssh.
+    /// Where the shell `shell_pid` is connected to through ssh ("user@host"
+    /// or "host"), written into `out`, or null when it isn't running ssh.
+    /// A tab opened on a server runs ssh as its shell.
     pub fn host(self: *const Processes, shell_pid: u32, out: []u8) ?[]const u8 {
         const procs = self.items[0..self.len];
         for (procs) |p| {
-            if (!p.ssh or !descends(procs, p, shell_pid)) continue;
+            if (!p.ssh or (p.pid != shell_pid and !descends(procs, p, shell_pid))) continue;
             var line: [2048]u8 = undefined;
             const command_line = commandLine(p.pid, &line) orelse continue;
             const destination = parseDestination(command_line) orelse continue;
@@ -86,33 +87,33 @@ fn commandLine(pid: u32, out: []u8) ?[]const u8 {
     return out[0..len];
 }
 
-/// The destination host from an ssh command line: the first argument
-/// that isn't an option, without "user@", "ssh://" or a port.
+/// The destination from an ssh command line: the first argument that
+/// isn't an option, without "ssh://" or a port.
 pub fn parseDestination(command_line: []const u8) ?[]const u8 {
     // ssh options that take a value, per its manual.
     const with_value = "BbcDEeFIiJLlmOoPpQRSWw";
     var args = Args{ .rest = command_line };
     _ = args.next() orelse return null; // the program itself
     while (args.next()) |arg| {
-        if (std.mem.eql(u8, arg, "--")) return hostPart(args.next() orelse return null);
+        if (std.mem.eql(u8, arg, "--")) return destinationPart(args.next() orelse return null);
         if (arg.len >= 2 and arg[0] == '-') {
             // "-p 22" takes the next argument; "-p22" carries its value.
             if (arg.len == 2 and std.mem.indexOfScalar(u8, with_value, arg[1]) != null) _ = args.next();
             continue;
         }
-        return hostPart(arg);
+        return destinationPart(arg);
     }
     return null;
 }
 
-fn hostPart(destination: []const u8) ?[]const u8 {
+fn destinationPart(destination: []const u8) ?[]const u8 {
     var d = destination;
     if (std.mem.startsWith(u8, d, "ssh://")) {
         d = d["ssh://".len..];
-        if (std.mem.indexOfScalar(u8, d, ':')) |i| d = d[0..i];
         if (std.mem.indexOfScalar(u8, d, '/')) |i| d = d[0..i];
+        const host_start = if (std.mem.lastIndexOfScalar(u8, d, '@')) |i| i + 1 else 0;
+        if (std.mem.indexOfScalarPos(u8, d, host_start, ':')) |i| d = d[0..i];
     }
-    if (std.mem.lastIndexOfScalar(u8, d, '@')) |i| d = d[i + 1 ..];
     return if (d.len == 0) null else d;
 }
 

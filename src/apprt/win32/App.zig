@@ -20,6 +20,7 @@ const SettingsPanel = @import("SettingsPanel.zig");
 const canvas = @import("canvas.zig");
 const profiles = @import("profiles.zig");
 const session = @import("session.zig");
+const servers = @import("servers.zig");
 const SplitTree = @import("../../datastruct/split_tree.zig").SplitTree;
 const w32 = @import("win32.zig");
 const brand = @import("brand.zig");
@@ -97,6 +98,9 @@ profile_icons: profiles.Icons = .{},
 /// Set while reopening saved tabs, so they don't rewrite the session one
 /// at a time.
 restoring_session: bool = false,
+
+/// SSH servers connected to, offered by the sidebar's Servers menu.
+recent_servers: servers.Recent = .{},
 msg_class_atom: u16 = 0,
 
 /// List of active Window containers (tabbed windows).
@@ -1565,10 +1569,12 @@ pub fn saveSession(self: *App) void {
     if (count == 0 and any_closing) return;
     const first = if (self.windows.items.len > 0) self.windows.items[0] else return;
     var collapsed: [Window.max_collapsed][]const u8 = undefined;
+    var recent: [servers.Recent.capacity][]const u8 = undefined;
     session.save(self.core_app.alloc, .{
         .windows = windows[0..count],
         .width = first.sidebar_width,
         .collapsed = first.collapsedGroups(&collapsed),
+        .servers = self.recent_servers.names(&recent),
     }) catch |err| log.warn("failed to save the session: {}", .{err});
 }
 
@@ -1580,6 +1586,12 @@ fn restoreSession(self: *App, first: *Window) !bool {
     var loaded = (try session.load(alloc, first.sidebar_width)) orelse return false;
     defer loaded.deinit();
     const saved = loaded.session;
+    // Oldest first, so the most recent ends up on top.
+    var n = saved.servers.len;
+    while (n > 0) {
+        n -= 1;
+        _ = self.recent_servers.add(saved.servers[n]);
+    }
     if (saved.windows.len == 0 or saved.windows[0].tabs.len == 0) return false;
 
     self.restoring_session = true;
@@ -1600,7 +1612,7 @@ fn restoreSession(self: *App, first: *Window) !bool {
             break :window w;
         };
         window.restoreSidebar(saved.width, saved.collapsed);
-        for (saved_window.tabs) |tab| window.openSavedTab(tab.profile, tab.folder);
+        for (saved_window.tabs) |tab| window.openSavedTab(tab);
         if (window.tab_count == 0) {
             _ = try window.addTab();
         } else {

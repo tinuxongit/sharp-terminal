@@ -54,6 +54,8 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/session.zig`: saves and loads the sidebar layout's
   open tabs (`sharp-session`, beside the config file).
 - `src/apprt/win32/ssh.zig`: finds the server a tab's ssh is connected to.
+- `src/apprt/win32/servers.zig`: the servers the sidebar offers (hosts in
+  `~/.ssh/config` and recent ones), and which addresses ssh may be given.
 - `src/apprt/win32/folder_picker.zig`: Windows' folder picker, behind the
   buttons on a sidebar section's title.
 - `src/termio/cmd_prompt.zig`: makes cmd.exe report its folder (OSC 7)
@@ -149,13 +151,21 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   folder, and the Local and WSL titles, show "+" (default shell) and an
   arrow (shell menu) on hover. On a title they ask for the folder first,
   with Windows' own picker.
-- **The sidebar layout reopens what was open.** Tabs (profile and folder),
-  the active tab, folded groups and the width are saved as they change.
+- **The sidebar layout reopens what was open.** Tabs (profile, folder and
+  server), the active tab, folded groups, the width and recent servers are
+  saved as they change. A tab that was on a server reconnects.
   Closing a window keeps its tabs for next time; closing the last tab by
   hand empties the session.
 - **SSH sessions are found by polling.** Windows doesn't announce them, so
   every 3 seconds one process snapshot is searched for ssh.exe below each
   tab's shell and its command line parsed for the destination.
+- **Servers open from the sidebar.** Local, WSL (when installed) and
+  Servers always show. Servers' "+" opens a box for `user@host`, and its
+  arrow lists the hosts in `~/.ssh/config` and the servers used recently,
+  including ones reached by typing ssh. The tab runs `ssh.exe` directly,
+  as Windows Terminal's SSH profiles do, so it ends with the connection.
+  Addresses are checked before reaching ssh, since a leading `-` would be
+  read as an option.
 - **OSC 7 works on Windows.** Upstream ignored it there. Paths must carry
   a drive letter, since a Linux path from WSL would break the folder new
   tabs start in, and the host check ignores case. As on other platforms,

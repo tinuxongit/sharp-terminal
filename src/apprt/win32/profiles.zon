@@ -56,6 +56,8 @@
         .wsl = "WSL",
         .servers = "Servers",
         .pick_folder = "Open a tab in folder",
+        .server_placeholder = "user@host",
+        .no_servers = "No servers in ~/.ssh/config yet",
     },
     .menu = .{
         // Shown after a profile's name: the 3rd profile is Ctrl+Shift+3.

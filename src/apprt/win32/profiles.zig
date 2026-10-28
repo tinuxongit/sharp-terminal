@@ -28,6 +28,10 @@ pub const Sidebar = struct {
     servers: []const u8,
     /// The title of the folder picker behind a section's "+".
     pick_folder: []const u8,
+    /// The hint in the box Servers' "+" opens.
+    server_placeholder: []const u8,
+    /// The Servers menu when there is nothing to list.
+    no_servers: []const u8,
 };
 
 pub const Data = struct {
@@ -76,6 +80,14 @@ pub const List = struct {
     used: usize = 0,
 
     pub const max_profiles = 32;
+
+    /// The first profile from `source`, such as the first WSL distribution.
+    pub fn first(self: *const List, source: Source) ?usize {
+        for (self.items[0..self.len], 0..) |item, i| {
+            if (item.source == source) return i;
+        }
+        return null;
+    }
 
     pub fn str(self: *const List, t: Text) []const u8 {
         return self.text[t.start..][0..t.len];

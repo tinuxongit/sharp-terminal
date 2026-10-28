@@ -25,6 +25,7 @@ const canvas_mod = @import("canvas.zig");
 const SearchField = @import("SearchField.zig");
 const ssh = @import("ssh.zig");
 const session = @import("session.zig");
+const servers = @import("servers.zig");
 const configpkg = @import("../../config.zig");
 
 const log = std.log.scoped(.win32);
@@ -75,6 +76,10 @@ settings_panel: ?*SettingsPanel = null,
 /// The tab sidebar's state, used when `window-tab-bar-position = sidebar`.
 sidebar_fonts: tab_sidebar.Fonts = .{},
 sidebar_search: SearchField = .{},
+/// The address box Servers' "+" opens; shown while it has the keyboard.
+server_field: SearchField = .{},
+/// Whether WSL is installed, so the sidebar always shows its section.
+has_wsl: bool = false,
 sidebar_hover: tab_sidebar.Target = .none,
 /// The sidebar arrow whose shell menu is open.
 sidebar_pressed: tab_sidebar.Target = .none,
@@ -454,6 +459,7 @@ fn loadStripFonts(self: *Window) void {
     self.strip_fonts = .init(hdc, self.scale);
     self.sidebar_fonts.deinit();
     self.sidebar_fonts = .init(hdc, self.scale);
+    self.has_wsl = profiles.detect().first(.wsl) != null;
 }
 
 fn setStripHover(self: *Window, part: tab_strip.Part) void {
@@ -643,19 +649,49 @@ pub fn sessionWindow(self: *Window, buf: *[64]session.Tab) session.Window {
     const n = @min(self.tab_count, buf.len);
     for (0..n) |i| {
         const surface = self.tab_active_surface[i];
-        buf[i] = .{ .profile = surface.profileName(), .folder = surface.folderPath() };
+        buf[i] = .{ .profile = surface.profileName(), .folder = surface.folderPath(), .server = surface.sshHost() };
     }
     return .{ .tabs = buf[0..n], .active = self.active_tab };
 }
 
-/// Reopen a saved tab: its profile (or the default one, if that shell is
-/// gone) in its folder (or the usual one, if the folder is gone).
-pub fn openSavedTab(self: *Window, profile_name: []const u8, folder: []const u8) void {
+/// Reopen a saved tab: its server, or its profile (or the default one, if
+/// that shell is gone) in its folder (or the usual one, if the folder is
+/// gone).
+pub fn openSavedTab(self: *Window, tab: session.Tab) void {
+    const folder = if (profiles.programExists(tab.folder)) tab.folder else null;
+    if (tab.server.len > 0) return self.openServer(tab.server, folder);
     const list = profiles.detect();
     const index = for (0..list.len) |i| {
-        if (std.mem.eql(u8, list.name(i), profile_name)) break i;
+        if (std.mem.eql(u8, list.name(i), tab.profile)) break i;
     } else list.selected(self.configuredCommand()) orelse return;
-    self.openProfileIn(&list, index, if (profiles.programExists(folder)) folder else null, false);
+    self.openProfileIn(&list, index, folder, false);
+}
+
+/// A new tab running ssh to `destination`, from `folder` when given.
+pub fn openServer(self: *Window, destination: []const u8, folder: ?[]const u8) void {
+    // The address may come from a file or a process, and must not be
+    // read by ssh as an option.
+    if (!servers.valid(destination)) {
+        log.warn("not an ssh destination: {s}", .{destination});
+        return;
+    }
+    var buf: [servers.max_len + 16]u8 = undefined;
+    const text = std.fmt.bufPrintSentinel(&buf, "ssh.exe {s}", .{destination}, 0) catch return;
+    const command: configpkg.Command = .{ .shell = text };
+    const surface = self.addTabWithOptions(.{
+        .context = .tab,
+        .command = &command,
+        .working_directory = folder,
+        .icon = self.app.profile_icons.get("ssh.exe", self.tabIconSize()),
+        .profile_name = "SSH",
+    }) catch |err| {
+        log.err("failed to open ssh to {s}: {}", .{ destination, err });
+        return;
+    };
+    // File it under Servers now, not at the next poll.
+    _ = surface.setSshHost(destination);
+    if (self.app.recent_servers.add(destination)) self.app.saveSession();
+    self.invalidateTabBar();
 }
 
 /// Poll each tab for an SSH session, so the sidebar can file it under
@@ -669,9 +705,14 @@ fn refreshServers(self: *Window) void {
         const pid = surface.core_surface.io.processId() orelse continue;
         var buf: [128]u8 = undefined;
         const host = procs.host(pid, &buf) orelse "";
-        if (surface.setSshHost(host)) changed = true;
+        if (!surface.setSshHost(host)) continue;
+        changed = true;
+        // Servers reached by typing ssh are offered again later.
+        _ = self.app.recent_servers.add(host);
     }
-    if (changed) self.invalidateTabBar();
+    if (!changed) return;
+    self.invalidateTabBar();
+    self.app.saveSession();
 }
 
 /// Ask for a folder, then open a tab there: profile `index` when given,
@@ -688,10 +729,7 @@ fn pickFolderAndOpen(self: *Window, section: tab_sidebar.Section, index: ?usize)
 /// `section`: the first WSL distribution for WSL, else the configured shell.
 fn openInSection(self: *Window, section: tab_sidebar.Section, index: ?usize, folder: []const u8) void {
     const list = profiles.detect();
-    const wsl_index = for (0..list.len) |i| {
-        if (list.items[i].source == .wsl) break i;
-    } else null;
-    const default = (if (section == .wsl) wsl_index else null) orelse list.selected(self.configuredCommand()) orelse return;
+    const default = (if (section == .wsl) list.first(.wsl) else null) orelse list.selected(self.configuredCommand()) orelse return;
     self.openProfileIn(&list, index orelse default, folder, false);
 }
 
@@ -699,20 +737,42 @@ fn openInSection(self: *Window, section: tab_sidebar.Section, index: ?usize, fol
 /// profile picked.
 fn sidebarProfileMenu(self: *Window, arrow: tab_sidebar.Target, list: *const profiles.List) ?usize {
     const hwnd = self.hwnd orelse return null;
+    const corner = self.pressSidebarArrow(arrow) orelse return null;
+    defer self.releaseSidebarArrow();
+    return new_tab_menu.show(hwnd, corner, list, list.selected(self.configuredCommand()), &self.app.profile_icons, self.scale, self.menusDark());
+}
+
+/// The server menu dropped below Servers' arrow. Returns the server picked.
+fn sidebarServerMenu(self: *Window, arrow: tab_sidebar.Target) ?servers.Name {
+    const hwnd = self.hwnd orelse return null;
+    const corner = self.pressSidebarArrow(arrow) orelse return null;
+    defer self.releaseSidebarArrow();
+    const configured = servers.Configured.read(self.app.core_app.alloc);
+    var configured_names: [servers.Configured.capacity][]const u8 = undefined;
+    var recent_names: [servers.Recent.capacity][]const u8 = undefined;
+    const picked = new_tab_menu.showServers(hwnd, corner, configured.names(&configured_names), self.app.recent_servers.names(&recent_names), self.menusDark()) orelse return null;
+    // The menu's names live in lists that end with this call.
+    return .init(picked);
+}
+
+/// Light `arrow` while its menu is open, and return where the menu drops,
+/// in screen pixels.
+fn pressSidebarArrow(self: *Window, arrow: tab_sidebar.Target) ?w32.POINT {
+    const hwnd = self.hwnd orelse return null;
     const spot = for (self.sidebar_spots.items[0..self.sidebar_spots.len]) |spot| {
         if (spot.target.eql(arrow)) break spot;
     } else return null;
     const sidebar = self.sidebarRect();
     var corner: w32.POINT = .{ .x = sidebar.left + spot.rect.left, .y = sidebar.top + spot.rect.bottom + @as(i32, @intFromFloat(@round(4 * self.scale))) };
     _ = w32.ClientToScreen(hwnd, &corner);
-
     self.sidebar_pressed = arrow;
     self.invalidateTabBar();
-    defer {
-        self.sidebar_pressed = .none;
-        self.invalidateTabBar();
-    }
-    return new_tab_menu.show(hwnd, corner, list, list.selected(self.configuredCommand()), &self.app.profile_icons, self.scale, self.menusDark());
+    return corner;
+}
+
+fn releaseSidebarArrow(self: *Window) void {
+    self.sidebar_pressed = .none;
+    self.invalidateTabBar();
 }
 
 /// The sidebar's rectangle in client coordinates.
@@ -774,7 +834,7 @@ pub fn addTabWithOptions(self: *Window, options: AddTabOptions) !*Surface {
 
     // Tabs without a picked profile belong to the profile `command` runs.
     const list = profiles.detect();
-    const with_icon = if (options.icon != null)
+    const with_icon = if (options.icon != null or options.profile_name.len > 0)
         options
     else if (list.selected(self.configuredCommand())) |i|
         self.profileOptions(&list, i, options)
@@ -1838,6 +1898,8 @@ fn paintSidebar(self: *Window, hdc_screen: w32.HDC, palette: tab_strip.Palette) 
         .collapsed = self.collapsedGroups(&collapsed),
         .dragging = if (self.sidebar_dragging) self.sidebar_drag else null,
         .pressed = self.sidebar_pressed,
+        .has_wsl = self.has_wsl,
+        .server_field = if (self.server_field.focused) &self.server_field else null,
     }, &self.sidebar_spots);
     canvas.sync();
     _ = w32.BitBlt(hdc_screen, rect.left, rect.top, width, height, mem_dc, 0, 0, w32.SRCCOPY);
@@ -1875,10 +1937,27 @@ fn setSidebarHover(self: *Window, target: tab_sidebar.Target) void {
     self.invalidateTabBar();
 }
 
+/// The sidebar's text box that has the keyboard, if any.
+fn sidebarField(self: *Window) ?*SearchField {
+    if (self.sidebar_search.focused) return &self.sidebar_search;
+    if (self.server_field.focused) return &self.server_field;
+    return null;
+}
+
 fn focusSidebarSearch(self: *Window, focused: bool) void {
+    self.focusSidebarField(&self.sidebar_search, focused);
+}
+
+/// Open or close the server address box; it shows only while focused.
+fn focusServerField(self: *Window, focused: bool) void {
+    if (!focused) self.server_field.clear();
+    self.focusSidebarField(&self.server_field, focused);
+}
+
+fn focusSidebarField(self: *Window, field: *SearchField, focused: bool) void {
     const hwnd = self.hwnd orelse return;
-    if (self.sidebar_search.focused == focused) return;
-    self.sidebar_search.focus(hwnd, focused);
+    if (field.focused == focused) return;
+    field.focus(hwnd, focused);
     if (focused) {
         _ = w32.SetFocus(hwnd);
     } else if (self.getActiveSurface()) |surface| {
@@ -1890,6 +1969,7 @@ fn focusSidebarSearch(self: *Window, focused: bool) void {
 fn sidebarClick(self: *Window, x: i32, y: i32) void {
     const target = self.sidebarTarget(x, y);
     if (target != .search) self.focusSidebarSearch(false);
+    if (target != .server_field) self.focusServerField(false);
     const hwnd = self.hwnd orelse return;
     switch (target) {
         .none => {},
@@ -1917,12 +1997,21 @@ fn sidebarClick(self: *Window, x: i32, y: i32) void {
             const index = self.sidebarProfileMenu(target, &list) orelse return;
             self.openProfileIn(&list, index, self.tab_active_surface[i].folderPath(), false);
         },
-        .section => {},
-        .section_new => |section| self.pickFolderAndOpen(section, null),
-        .section_menu => |section| {
-            const list = profiles.detect();
-            const index = self.sidebarProfileMenu(target, &list) orelse return;
-            self.pickFolderAndOpen(section, index);
+        .section, .server_field => {},
+        .section_new => |section| switch (section) {
+            .servers => self.focusServerField(true),
+            else => self.pickFolderAndOpen(section, null),
+        },
+        .section_menu => |section| switch (section) {
+            .servers => {
+                const destination = self.sidebarServerMenu(target) orelse return;
+                self.openServer(destination.text(), null);
+            },
+            else => {
+                const list = profiles.detect();
+                const index = self.sidebarProfileMenu(target, &list) orelse return;
+                self.pickFolderAndOpen(section, index);
+            },
         },
     }
 }
@@ -1957,6 +2046,20 @@ fn sidebarKey(self: *Window, vk: u16) void {
             self.sidebar_scroll = 0;
             self.invalidateTabBar();
         },
+    }
+}
+
+/// Keys typed in the server address box. Enter connects; Escape closes it.
+fn serverFieldKey(self: *Window, vk: u16) void {
+    const hwnd = self.hwnd orelse return;
+    switch (vk) {
+        w32.VK_ESCAPE => self.focusServerField(false),
+        w32.VK_RETURN => {
+            const typed = servers.Name.init(std.mem.trim(u8, self.server_field.text(), " "));
+            self.focusServerField(false);
+            if (typed.len > 0) self.openServer(typed.text(), null);
+        },
+        else => if (self.server_field.key(hwnd, vk)) self.invalidateTabBar(),
     }
 }
 
@@ -2863,7 +2966,7 @@ pub fn windowWndProc(
         },
         w32.WM_TIMER => {
             if (wparam == SearchField.caret_timer) {
-                window.sidebar_search.blink();
+                if (window.sidebarField()) |field| field.blink();
                 window.invalidateTabBar();
                 return 0;
             }
@@ -3079,19 +3182,26 @@ pub fn windowWndProc(
                 window.sidebarKey(@truncate(wparam));
                 return 0;
             }
+            if (window.server_field.focused) {
+                window.serverFieldKey(@truncate(wparam));
+                return 0;
+            }
             return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
         },
         w32.WM_CHAR => {
             if (window.sidebar_search.focused and window.sidebar_search.typeChar(@truncate(wparam))) {
                 window.sidebar_scroll = 0;
                 window.invalidateTabBar();
+            } else if (window.server_field.focused and window.server_field.typeChar(@truncate(wparam))) {
+                window.invalidateTabBar();
             }
             return 0;
         },
         w32.WM_KILLFOCUS => {
-            // Clicking the terminal moves the keyboard away from the search.
-            if (window.sidebar_search.focused) {
-                window.sidebar_search.focus(hwnd, false);
+            // Clicking the terminal moves the keyboard away from the boxes.
+            if (window.sidebarField()) |field| {
+                field.focus(hwnd, false);
+                window.server_field.clear();
                 window.invalidateTabBar();
             }
             return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
@@ -3107,8 +3217,8 @@ pub fn windowWndProc(
             return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
         },
         w32.WM_SETFOCUS => {
-            // The sidebar's search box keeps the keyboard on this window.
-            if (window.sidebar_search.focused) return 0;
+            // The sidebar's text boxes keep the keyboard on this window.
+            if (window.sidebarField() != null) return 0;
             // Forward keyboard focus to the active child surface.
             // Without this, keyboard input stays on the parent and
             // is never delivered to the terminal.
@@ -3192,7 +3302,7 @@ pub fn windowWndProc(
                     window.showTabMenu(i, x, y);
                     return 0;
                 },
-                .none, .search, .resize, .group, .group_new, .group_menu, .section, .section_new, .section_menu => {},
+                .none, .search, .resize, .group, .group_new, .group_menu, .section, .section_new, .section_menu, .server_field => {},
             }
             return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
         },
@@ -3206,7 +3316,7 @@ pub fn windowWndProc(
             }
             switch (window.sidebarTarget(x, y)) {
                 .tab, .close => |i| window.requestCloseTabs(&.{window.tabId(i)}),
-                .none, .search, .resize, .group, .group_new, .group_menu, .section, .section_new, .section_menu => {},
+                .none, .search, .resize, .group, .group_new, .group_menu, .section, .section_new, .section_menu, .server_field => {},
             }
             return 0;
         },

@@ -75,8 +75,11 @@ pub const Target = union(enum) {
     section: Section,
     /// The "+" on a section title: a new tab in a folder the user picks.
     section_new: Section,
-    /// The arrow beside it: the shell menu, then the folder picker.
+    /// The arrow beside it: the shell menu then the folder picker, or for
+    /// Servers the server menu.
     section_menu: Section,
+    /// The box Servers' "+" opens, where an address is typed.
+    server_field,
 
     pub fn eql(a: Target, b: Target) bool {
         return std.meta.eql(a, b);
@@ -128,6 +131,10 @@ pub const State = struct {
     dragging: ?usize = null,
     /// The arrow whose menu is open, which stays lit.
     pressed: Target = .none,
+    /// Whether WSL is installed, so its section shows even when empty.
+    has_wsl: bool = false,
+    /// The address box under Servers, while open.
+    server_field: ?*const SearchField = null,
 };
 
 /// How a folded group is remembered: the same folder can hold both local
@@ -172,8 +179,13 @@ pub fn paint(c: Canvas, scale: f32, palette: tab_strip.Palette, fonts: Fonts, st
     // The list first, so the search area covers what scrolls under it.
     var y = list_top - state.scroll;
     for ([_]Section{ .local, .wsl, .servers }) |section| {
-        if (!sectionHasItems(state, section)) continue;
+        // Empty sections stay, so their buttons can open the first tab.
+        const always = state.search.len == 0 and (section != .wsl or state.has_wsl);
+        if (!always and !sectionHasItems(state, section)) continue;
         y = paintSection(&p, section, y);
+        if (section == .servers) {
+            if (state.server_field) |field| y = paintServerField(&p, field, y);
+        }
         // Groups in the order their first tab appears.
         for (state.items, 0..) |first, i| {
             if (first.section != section or !visible(state, first)) continue;
@@ -248,7 +260,8 @@ fn groupHoldsActive(state: State, group: Item) bool {
 }
 
 /// A section title followed by a rule to the right edge, and while
-/// hovered a "+" that opens a tab in a chosen folder.
+/// hovered a "+" and an arrow that open a tab in a chosen folder, or on
+/// Servers, on a chosen server.
 fn paintSection(p: *Painter, section: Section, y: i32) i32 {
     const title = switch (section) {
         .local => profiles.data.sidebar.local,
@@ -260,19 +273,36 @@ fn paintSection(p: *Painter, section: Section, y: i32) i32 {
     const row: w32.RECT = .{ .left = p.px(pad), .top = y, .right = p.c.width - p.px(pad), .bottom = y + h };
     p.c.text(.{ .left = left, .top = y, .right = row.right, .bottom = y + h }, title, p.fonts.small, p.palette.text_dim, .left);
 
-    // A server's tabs come from SSH itself, so it has no buttons.
-    const can_add = section != .servers;
     const buttons: NewTabButtons = .{ .plus = .{ .section_new = section }, .menu = .{ .section_menu = section } };
-    const hovered = can_add and (p.state.hover.eql(.{ .section = section }) or buttons.lit(p.state));
+    const hovered = p.state.hover.eql(.{ .section = section }) or buttons.lit(p.state);
 
     const rule_left = left + p.c.textWidth(title, p.fonts.small) + p.px(10);
     const rule_right = (if (hovered) newTabButtonsLeft(p, row) else row.right) - p.px(6);
     const mid = y + @divTrunc(h, 2);
     if (rule_right > rule_left) p.c.fill(.{ .left = rule_left, .top = mid, .right = rule_right, .bottom = mid + 1 }, p.palette.separator);
 
-    if (can_add) p.spots.add(clip(row, p.list_top), .{ .section = section });
+    p.spots.add(clip(row, p.list_top), .{ .section = section });
     if (hovered) paintNewTabButtons(p, row, buttons, p.palette.strip);
     return y + h;
+}
+
+/// The box for a server's address, as tall as the search box.
+fn paintServerField(p: *Painter, field: *const SearchField, y: i32) i32 {
+    const h = p.px(search_height);
+    const rect: w32.RECT = .{ .left = p.px(pad), .top = y, .right = p.c.width - p.px(pad), .bottom = y + h };
+    field.paint(p.c, rect, p.s, .{
+        .fill = p.palette.strip.mix(p.palette.contrast, 0.06),
+        .hover = p.palette.hover,
+        .focused = p.palette.hover.mix(p.palette.contrast, 0.05),
+        .text = p.palette.text,
+        .text_dim = p.palette.text_dim,
+        .font = p.fonts.item,
+        .icon_font = p.fonts.icons_small,
+        .placeholder = profiles.data.sidebar.server_placeholder,
+        .icon = icon_server,
+    }, false, p.state.window_focused);
+    p.spots.add(clip(rect, p.list_top), .server_field);
+    return y + h + p.px(4);
 }
 
 fn paintGroup(p: *Painter, first: Item, folded: bool, y: i32) i32 {
