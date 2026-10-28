@@ -25,6 +25,8 @@ const session = @import("session.zig");
 const servers = @import("servers.zig");
 const configpkg = @import("../../config.zig");
 const workspace = @import("workspace.zig");
+const tab_rename = @import("tab_rename.zig");
+const splits = @import("splits.zig");
 
 const log = std.log.scoped(.win32);
 
@@ -432,7 +434,7 @@ fn integratedTitleBar(self: *const Window) bool {
     return (w32.GetWindowLongW(hwnd, w32.GWL_STYLE) & w32.WS_CAPTION) == w32.WS_CAPTION;
 }
 
-fn stripLayout(self: *const Window) tab_strip.Layout {
+pub fn stripLayout(self: *const Window) tab_strip.Layout {
     var client: w32.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
     if (self.hwnd) |hwnd| _ = w32.GetClientRect(hwnd, &client);
     return .{
@@ -598,7 +600,7 @@ pub fn findTabIndex(self: *Window, surface: *Surface) ?usize {
 }
 
 /// Find the Node.Handle for a surface in a given tab's tree.
-fn findHandle(self: *Window, tab_idx: usize, surface: *Surface) ?SplitTree(Surface).Node.Handle {
+pub fn findHandle(self: *Window, tab_idx: usize, surface: *Surface) ?SplitTree(Surface).Node.Handle {
     var it = self.tab_trees[tab_idx].iterator();
     while (it.next()) |entry| {
         if (entry.view == surface) return entry.handle;
@@ -618,7 +620,7 @@ pub const AddTabOptions = Surface.InitOptions;
 pub fn addTabWithOptions(self: *Window, options: AddTabOptions) !*Surface {
     if (self.closing) return error.WindowClosing;
     if (self.tab_count >= MAX_TABS) return error.TooManyTabs;
-    self.cancelTabRename();
+    tab_rename.cancelTabRename(self);
     self.frozen_tab_width = null;
 
     // Tabs without a picked profile belong to the profile `command` runs.
@@ -765,7 +767,7 @@ pub fn closeTab(self: *Window, surface: *Surface) void {
 fn closeTabByIndex(self: *Window, idx: usize) void {
     if (idx >= self.tab_count) return;
     // Cancel any in-progress rename (the edit control may belong to this tab).
-    self.cancelTabRename();
+    tab_rename.cancelTabRename(self);
     var tree = self.tab_trees[idx];
     tree.deinit(); // This unrefs all surfaces → Surface.unref frees when ref_count=0
     var i: usize = idx;
@@ -891,7 +893,7 @@ fn setActiveTabVisible(self: *Window, visible: bool) void {
 
 pub fn selectTabIndex(self: *Window, idx: usize) void {
     if (idx >= self.tab_count) return;
-    self.cancelTabRename();
+    tab_rename.cancelTabRename(self);
     // Clear any in-progress tab drag
     if (self.drag_tab >= 0) {
         self.drag_tab = -1;
@@ -944,7 +946,7 @@ pub fn layoutSplits(self: *Window) void {
     if (self.hwnd) |hwnd| {
         const hdc = w32.GetDC(hwnd);
         if (hdc) |dc| {
-            self.paintDividers(dc);
+            splits.paintDividers(self, dc);
             _ = w32.ReleaseDC(hwnd, dc);
         }
     }
@@ -1048,283 +1050,6 @@ fn layoutNode(self: *Window, tree: SplitTree(Surface), handle: SplitTree(Surface
             }
         },
     }
-}
-
-/// Paint divider lines between split panes in the active tab.
-fn paintDividers(self: *Window, hdc: w32.HDC) void {
-    if (self.tab_count == 0) return;
-    const tree = self.tab_trees[self.active_tab];
-    if (!tree.isSplit()) return;
-    if (tree.zoomed != null) return;
-    const rect = self.surfaceRect();
-    self.paintDividerNode(hdc, tree, .root, rect);
-}
-
-fn paintDividerNode(self: *Window, hdc: w32.HDC, tree: SplitTree(Surface), handle: SplitTree(Surface).Node.Handle, rect: w32.RECT) void {
-    if (handle.idx() >= tree.nodes.len) return;
-    switch (tree.nodes[handle.idx()]) {
-        .leaf => {},
-        .split => |s| {
-            const gap: i32 = @intFromFloat(@round(5.0 * self.scale));
-            const line_w: i32 = @max(@as(i32, @intFromFloat(@round(1.0 * self.scale))), 1);
-
-            const pen = w32.CreatePen(0, line_w, 0x00808080) orelse return;
-            defer _ = w32.DeleteObject(pen);
-            const old_pen = w32.SelectObject(hdc, pen);
-            defer _ = w32.SelectObject(hdc, old_pen);
-
-            if (s.layout == .horizontal) {
-                const total_w = rect.right - rect.left;
-                const split_x = rect.left + @as(i32, @intFromFloat(@as(f32, @floatCast(s.ratio)) * @as(f32, @floatFromInt(total_w))));
-                _ = w32.MoveToEx(hdc, split_x, rect.top, null);
-                _ = w32.LineTo(hdc, split_x, rect.bottom);
-                const left_rect = w32.RECT{ .left = rect.left, .top = rect.top, .right = split_x - @divTrunc(gap, 2), .bottom = rect.bottom };
-                const right_rect = w32.RECT{ .left = split_x + @divTrunc(gap + 1, 2), .top = rect.top, .right = rect.right, .bottom = rect.bottom };
-                self.paintDividerNode(hdc, tree, s.left, left_rect);
-                self.paintDividerNode(hdc, tree, s.right, right_rect);
-            } else {
-                const total_h = rect.bottom - rect.top;
-                const split_y = rect.top + @as(i32, @intFromFloat(@as(f32, @floatCast(s.ratio)) * @as(f32, @floatFromInt(total_h))));
-                _ = w32.MoveToEx(hdc, rect.left, split_y, null);
-                _ = w32.LineTo(hdc, rect.right, split_y);
-                const top_rect = w32.RECT{ .left = rect.left, .top = rect.top, .right = rect.right, .bottom = split_y - @divTrunc(gap, 2) };
-                const bottom_rect = w32.RECT{ .left = rect.left, .top = split_y + @divTrunc(gap + 1, 2), .right = rect.right, .bottom = rect.bottom };
-                self.paintDividerNode(hdc, tree, s.left, top_rect);
-                self.paintDividerNode(hdc, tree, s.right, bottom_rect);
-            }
-        },
-    }
-}
-
-const DividerHit = struct {
-    handle: SplitTree(Surface).Node.Handle,
-    layout: SplitTree(Surface).Split.Layout,
-};
-
-fn hitTestDivider(self: *Window, x: i32, y: i32) ?DividerHit {
-    if (self.tab_count == 0) return null;
-    const tree = self.tab_trees[self.active_tab];
-    if (!tree.isSplit()) return null;
-    if (tree.zoomed != null) return null;
-    const rect = self.surfaceRect();
-    return self.hitTestDividerNode(tree, .root, rect, x, y);
-}
-
-fn hitTestDividerNode(
-    self: *Window,
-    tree: SplitTree(Surface),
-    handle: SplitTree(Surface).Node.Handle,
-    rect: w32.RECT,
-    x: i32,
-    y: i32,
-) ?DividerHit {
-    if (handle.idx() >= tree.nodes.len) return null;
-    switch (tree.nodes[handle.idx()]) {
-        .leaf => return null,
-        .split => |s| {
-            const gap: i32 = @as(i32, @intFromFloat(@round(5.0 * self.scale)));
-            const hit_area: i32 = @max(@as(i32, @intFromFloat(@round(3.0 * self.scale))), 3);
-
-            if (s.layout == .horizontal) {
-                const total_w = rect.right - rect.left;
-                const split_x = rect.left + @as(i32, @intFromFloat(@as(f32, @floatCast(s.ratio)) * @as(f32, @floatFromInt(total_w))));
-                if (x >= split_x - hit_area and x <= split_x + hit_area and y >= rect.top and y <= rect.bottom) {
-                    return .{ .handle = handle, .layout = .horizontal };
-                }
-                const left_rect = w32.RECT{ .left = rect.left, .top = rect.top, .right = split_x - @divTrunc(gap, 2), .bottom = rect.bottom };
-                const right_rect = w32.RECT{ .left = split_x + @divTrunc(gap + 1, 2), .top = rect.top, .right = rect.right, .bottom = rect.bottom };
-                return self.hitTestDividerNode(tree, s.left, left_rect, x, y) orelse
-                    self.hitTestDividerNode(tree, s.right, right_rect, x, y);
-            } else {
-                const total_h = rect.bottom - rect.top;
-                const split_y = rect.top + @as(i32, @intFromFloat(@as(f32, @floatCast(s.ratio)) * @as(f32, @floatFromInt(total_h))));
-                if (y >= split_y - hit_area and y <= split_y + hit_area and x >= rect.left and x <= rect.right) {
-                    return .{ .handle = handle, .layout = .vertical };
-                }
-                const top_rect = w32.RECT{ .left = rect.left, .top = rect.top, .right = rect.right, .bottom = split_y - @divTrunc(gap, 2) };
-                const bottom_rect = w32.RECT{ .left = rect.left, .top = split_y + @divTrunc(gap + 1, 2), .right = rect.right, .bottom = rect.bottom };
-                return self.hitTestDividerNode(tree, s.left, top_rect, x, y) orelse
-                    self.hitTestDividerNode(tree, s.right, bottom_rect, x, y);
-            }
-        },
-    }
-}
-
-fn startDividerDrag(self: *Window, handle: SplitTree(Surface).Node.Handle, layout: SplitTree(Surface).Split.Layout) void {
-    self.dragging_split = true;
-    self.drag_split_handle = handle;
-    self.drag_split_layout = layout;
-    self.drag_start_rect = self.surfaceRect();
-    if (self.hwnd) |hwnd| _ = w32.SetCapture(hwnd);
-}
-
-fn updateDividerDrag(self: *Window, x: i32, y: i32) void {
-    if (!self.dragging_split) return;
-    const rect = self.drag_start_rect;
-    const handle = self.drag_split_handle;
-
-    const new_ratio: f16 = switch (self.drag_split_layout) {
-        .horizontal => ratio: {
-            const total: f32 = @floatFromInt(@max(rect.right - rect.left, 1));
-            const pos: f32 = @floatFromInt(x - rect.left);
-            break :ratio @floatCast(std.math.clamp(pos / total, 0.1, 0.9));
-        },
-        .vertical => ratio: {
-            const total: f32 = @floatFromInt(@max(rect.bottom - rect.top, 1));
-            const pos: f32 = @floatFromInt(y - rect.top);
-            break :ratio @floatCast(std.math.clamp(pos / total, 0.1, 0.9));
-        },
-    };
-
-    self.tab_trees[self.active_tab].resizeInPlace(handle, new_ratio);
-    self.layoutSplits();
-}
-
-fn endDividerDrag(self: *Window) void {
-    if (!self.dragging_split) return;
-    self.dragging_split = false;
-    _ = w32.ReleaseCapture();
-}
-
-/// Create a new split in the active tab.
-pub fn newSplit(self: *Window, direction: SplitTree(Surface).Split.Direction) !void {
-    if (self.tab_count == 0) return;
-    const alloc = self.app.core_app.alloc;
-    const tab = self.active_tab;
-
-    const active_surface = self.tab_active_surface[tab];
-    const handle = self.findHandle(tab, active_surface) orelse return;
-
-    // Create new surface.
-    const new_surface = try alloc.create(Surface);
-    errdefer {
-        new_surface.deinit();
-        alloc.destroy(new_surface);
-    }
-    try new_surface.init(self.app, self, .split);
-
-    // Create a single-node tree for the new surface.
-    var insert_tree = try SplitTree(Surface).init(alloc, new_surface);
-    defer insert_tree.deinit();
-
-    // Split the current tree at the active surface.
-    const new_tree = try self.tab_trees[tab].split(
-        alloc,
-        handle,
-        direction,
-        @as(f16, 0.5),
-        &insert_tree,
-    );
-
-    // Replace old tree.
-    var old_tree = self.tab_trees[tab];
-    old_tree.deinit();
-    self.tab_trees[tab] = new_tree;
-
-    // Focus the new surface.
-    self.tab_active_surface[tab] = new_surface;
-
-    self.layoutSplits();
-    if (new_surface.hwnd) |h| _ = w32.SetFocus(h);
-}
-
-/// Navigate to a split in the given direction.
-pub fn gotoSplit(self: *Window, goto_target: apprt.action.GotoSplit) void {
-    if (self.tab_count == 0) return;
-    const alloc = self.app.core_app.alloc;
-    const tab = self.active_tab;
-    const tree = &self.tab_trees[tab];
-
-    const active_surface = self.tab_active_surface[tab];
-    const handle = self.findHandle(tab, active_surface) orelse return;
-
-    const target: SplitTree(Surface).Goto = switch (goto_target) {
-        .previous => .previous,
-        .next => .next,
-        .up => .{ .spatial = .up },
-        .down => .{ .spatial = .down },
-        .left => .{ .spatial = .left },
-        .right => .{ .spatial = .right },
-    };
-
-    const dest_handle = (tree.goto(alloc, handle, target) catch return) orelse return;
-
-    switch (tree.nodes[dest_handle.idx()]) {
-        .leaf => |surface| {
-            self.tab_active_surface[tab] = surface;
-            if (surface.hwnd) |h| _ = w32.SetFocus(h);
-        },
-        .split => {},
-    }
-}
-
-/// Resize the nearest split in the given direction by the given pixel amount.
-pub fn resizeSplit(self: *Window, rs: apprt.action.ResizeSplit) void {
-    if (self.tab_count == 0) return;
-    const alloc = self.app.core_app.alloc;
-    const tab = self.active_tab;
-    const tree = &self.tab_trees[tab];
-
-    const active_surface = self.tab_active_surface[tab];
-    const handle = self.findHandle(tab, active_surface) orelse return;
-
-    const layout: SplitTree(Surface).Split.Layout = switch (rs.direction) {
-        .left, .right => .horizontal,
-        .up, .down => .vertical,
-    };
-
-    const rect = self.surfaceRect();
-    const dimension: f32 = switch (layout) {
-        .horizontal => @floatFromInt(@max(rect.right - rect.left, 1)),
-        .vertical => @floatFromInt(@max(rect.bottom - rect.top, 1)),
-    };
-    const sign: f32 = switch (rs.direction) {
-        .left, .up => -1.0,
-        .right, .down => 1.0,
-    };
-    const delta: f16 = @floatCast(sign * @as(f32, @floatFromInt(rs.amount)) / dimension);
-
-    const new_tree = tree.resize(alloc, handle, layout, delta) catch return;
-    var old_tree = self.tab_trees[tab];
-    old_tree.deinit();
-    self.tab_trees[tab] = new_tree;
-    self.layoutSplits();
-}
-
-/// Equalize all splits in the active tab.
-pub fn equalizeSplits(self: *Window) void {
-    if (self.tab_count == 0) return;
-    const alloc = self.app.core_app.alloc;
-    const tab = self.active_tab;
-
-    const new_tree = self.tab_trees[tab].equalize(alloc) catch return;
-    var old_tree = self.tab_trees[tab];
-    old_tree.deinit();
-    self.tab_trees[tab] = new_tree;
-    self.layoutSplits();
-}
-
-/// Toggle zoom on the active split surface.
-pub fn toggleSplitZoom(self: *Window) void {
-    if (self.tab_count == 0) return;
-    const tab = self.active_tab;
-    var tree = &self.tab_trees[tab];
-
-    if (!tree.isSplit()) return;
-
-    const active_surface = self.tab_active_surface[tab];
-    const handle = self.findHandle(tab, active_surface) orelse return;
-
-    if (tree.zoomed) |z| {
-        if (z == handle) {
-            tree.zoom(null);
-        } else {
-            tree.zoom(handle);
-        }
-    } else {
-        tree.zoom(handle);
-    }
-    self.layoutSplits();
 }
 
 /// Navigate to a tab by GotoTab target (previous, next, last, or index).
@@ -1501,7 +1226,7 @@ test "detached tab rolls back child and popup transfers" {
 }
 
 /// Update the top-level window title to match the active tab's title.
-fn updateWindowTitle(self: *Window) void {
+pub fn updateWindowTitle(self: *Window) void {
     const hwnd = self.hwnd orelse return;
     if (self.tab_count == 0) return;
     const len = self.window_title_override_len orelse
@@ -2067,7 +1792,7 @@ fn moveTabTo(self: *Window, from: usize, to: usize) void {
 
     // Cancel any in-progress rename: the edit control's tab index
     // would otherwise point at the wrong tab after the move.
-    self.cancelTabRename();
+    tab_rename.cancelTabRename(self);
 
     // Save the source tab state
     const saved_tree = self.tab_trees[from];
@@ -2219,177 +1944,6 @@ fn handleTabBarMouseLeave(self: *Window) void {
     workspace.setSidebarHover(self, .none);
     // Caption buttons are tracked by WM_NCMOUSELEAVE instead.
     if (!self.strip_hover.isCaptionButton()) self.setStripHover(.none);
-}
-
-/// Rename edit control child ID.
-const RENAME_EDIT_ID: u16 = 300;
-
-/// Start inline editing of a tab title. Creates a small Edit control
-/// overlay on the tab and pre-fills it with the current title.
-pub fn startTabRename(self: *Window, tab_idx: usize) void {
-    // Cancel any existing rename
-    self.cancelTabRename();
-    self.rename_window = false;
-
-    const hwnd = self.hwnd orelse return;
-    const rect = rect: {
-        if (self.tab_bar_visible) break :rect self.stripLayout().tabRect(tab_idx);
-
-        // A single-tab window has no tab bar. Use a compact editor at the
-        // top of the client area so prompt_*_title remains usable.
-        var client: w32.RECT = undefined;
-        if (w32.GetClientRect(hwnd, &client) == 0) return;
-        break :rect w32.RECT{
-            .left = 8,
-            .top = 8,
-            .right = @max(168, client.right - 8),
-            .bottom = 38,
-        };
-    };
-
-    // tab_titles stores only `tab_title_lens` valid u16s; the rest is
-    // uninitialized. CreateWindowExW reads a NUL-terminated wide string,
-    // so a NUL-terminated copy avoids the Edit displaying garbage past
-    // the real title.
-    var title_buf: [257]u16 = undefined;
-    const tlen = self.tab_title_lens[tab_idx];
-    @memcpy(title_buf[0..tlen], self.tab_titles[tab_idx][0..tlen]);
-    title_buf[tlen] = 0;
-
-    // Create an Edit control overlaid on the tab
-    const edit = w32.CreateWindowExW(
-        0,
-        std.unicode.utf8ToUtf16LeStringLiteral("EDIT"),
-        @ptrCast(&title_buf),
-        w32.WS_CHILD | w32.WS_VISIBLE_STYLE | w32.ES_AUTOHSCROLL | w32.WS_BORDER,
-        rect.left + 2,
-        rect.top + 2,
-        rect.right - rect.left - 4,
-        rect.bottom - rect.top - 4,
-        hwnd,
-        @ptrFromInt(@as(usize, RENAME_EDIT_ID)),
-        self.app.hinstance,
-        null,
-    ) orelse return;
-
-    // Apply dark theme
-    const dark_mode: u32 = 1;
-    _ = w32.DwmSetWindowAttribute(
-        edit,
-        w32.DWMWA_USE_IMMERSIVE_DARK_MODE,
-        @ptrCast(&dark_mode),
-        @sizeOf(u32),
-    );
-    _ = w32.SetWindowTheme(
-        edit,
-        std.unicode.utf8ToUtf16LeStringLiteral("DarkMode_Explorer"),
-        null,
-    );
-
-    // Set font — stored for cleanup
-    self.rename_font = w32.CreateFontW(
-        -@as(i32, @intFromFloat(@round(12.0 * self.scale))),
-        0,
-        0,
-        0,
-        400,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        std.unicode.utf8ToUtf16LeStringLiteral("Segoe UI"),
-    );
-    if (self.rename_font) |f| {
-        _ = w32.SendMessageW(edit, w32.WM_SETFONT, @intFromPtr(f), 1);
-    }
-
-    // Select all text
-    _ = w32.SendMessageW(edit, 0x00B1, 0, -1); // EM_SETSEL(0, -1)
-
-    _ = w32.SetFocus(edit);
-    self.rename_edit = edit;
-    self.rename_tab = tab_idx;
-}
-
-/// Prompt for an explicit top-level window title using the same lightweight
-/// inline editor as tab renaming.
-pub fn startWindowRename(self: *Window) void {
-    self.startTabRename(self.active_tab);
-    const edit = self.rename_edit orelse return;
-    self.rename_window = true;
-
-    var title: [257]u16 = undefined;
-    const len: usize = if (self.window_title_override_len) |override_len| len: {
-        @memcpy(title[0..override_len], self.window_title_override[0..override_len]);
-        break :len override_len;
-    } else @intCast(w32.GetWindowTextW(self.hwnd.?, &title, 256));
-    title[len] = 0;
-    _ = w32.SetWindowTextW(edit, @ptrCast(&title));
-    _ = w32.SendMessageW(edit, 0x00B1, 0, -1); // EM_SETSEL(0, -1)
-}
-
-/// Apply the edit text as the new tab title and destroy the edit control.
-pub fn finishTabRename(self: *Window) void {
-    const edit = self.rename_edit orelse return;
-    const tab_idx = self.rename_tab;
-
-    // Read the edit control text
-    var wbuf: [256]u16 = undefined;
-    const wlen: usize = @intCast(w32.GetWindowTextW(edit, &wbuf, 256));
-    if (self.rename_window) {
-        if (wlen == 0) {
-            self.window_title_override_len = null;
-        } else {
-            const len: u16 = @intCast(@min(wlen, 255));
-            @memcpy(self.window_title_override[0..len], wbuf[0..len]);
-            self.window_title_override_len = len;
-        }
-        self.updateWindowTitle();
-    } else if (wlen > 0) {
-        const len: u16 = @intCast(@min(wlen, 255));
-        @memcpy(self.tab_titles[tab_idx][0..len], wbuf[0..len]);
-        self.tab_title_lens[tab_idx] = len;
-        if (tab_idx == self.active_tab) self.updateWindowTitle();
-    }
-
-    // Clear our state BEFORE DestroyWindow: the Edit synchronously emits
-    // EN_KILLFOCUS as it's torn down, which re-enters this function via
-    // the WM_COMMAND handler. The early `orelse return` then makes that
-    // re-entrant call a no-op.
-    self.rename_edit = null;
-    self.rename_window = false;
-    _ = w32.DestroyWindow(edit);
-    if (self.rename_font) |f| {
-        _ = w32.DeleteObject(f);
-        self.rename_font = null;
-    }
-    self.invalidateTabBar();
-
-    // Return focus to the active surface
-    if (self.getActiveSurface()) |s| {
-        if (s.hwnd) |h| _ = w32.SetFocus(h);
-    }
-}
-
-/// Cancel inline rename without applying changes.
-pub fn cancelTabRename(self: *Window) void {
-    if (self.rename_edit) |edit| {
-        // Same re-entry concern as finishTabRename: null before destroy.
-        self.rename_edit = null;
-        self.rename_window = false;
-        _ = w32.DestroyWindow(edit);
-        if (self.rename_font) |f| {
-            _ = w32.DeleteObject(f);
-            self.rename_font = null;
-        }
-        if (self.getActiveSurface()) |s| {
-            if (s.hwnd) |h| _ = w32.SetFocus(h);
-        }
-    }
 }
 
 /// Return true if it is safe to close this whole window. If any tab still
@@ -2736,8 +2290,8 @@ pub fn windowWndProc(
             // convention, matches Explorer file rename and Edge tabs).
             // Esc still cancels via the message-loop intercept that
             // catches VK_ESCAPE before it reaches the Edit.
-            if (control_id == RENAME_EDIT_ID and notification == w32.EN_KILLFOCUS) {
-                window.finishTabRename();
+            if (control_id == tab_rename.RENAME_EDIT_ID and notification == w32.EN_KILLFOCUS) {
+                tab_rename.finishTabRename(window);
                 return 0;
             }
             return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
@@ -2806,8 +2360,8 @@ pub fn windowWndProc(
         w32.WM_LBUTTONDOWN => {
             const x: i32 = @as(i16, @truncate(lparam & 0xFFFF));
             const y: i32 = @as(i16, @truncate((lparam >> 16) & 0xFFFF));
-            if (window.hitTestDivider(x, y)) |hit| {
-                window.startDividerDrag(hit.handle, hit.layout);
+            if (splits.hitTestDivider(window, x, y)) |hit| {
+                splits.startDividerDrag(window, hit.handle, hit.layout);
                 return 0;
             }
             if (workspace.inSidebar(window, x, y)) {
@@ -2821,7 +2375,7 @@ pub fn windowWndProc(
         },
         w32.WM_LBUTTONUP => {
             if (window.dragging_split) {
-                window.endDividerDrag();
+                splits.endDividerDrag(window);
                 return 0;
             }
             if (window.sidebar_resizing) {
@@ -2853,12 +2407,12 @@ pub fn windowWndProc(
             // Double-click on tab bar starts inline rename
             if (y < window.tabBarHeight()) {
                 switch (window.stripLayout().hitTest(x, y)) {
-                    .tab => |i| window.startTabRename(i),
+                    .tab => |i| tab_rename.startTabRename(window, i),
                     else => {},
                 }
                 return 0;
             }
-            if (window.hitTestDivider(x, y)) |hit| {
+            if (splits.hitTestDivider(window, x, y)) |hit| {
                 window.tab_trees[window.active_tab].resizeInPlace(hit.handle, @as(f16, 0.5));
                 window.layoutSplits();
                 return 0;
@@ -2899,7 +2453,7 @@ pub fn windowWndProc(
             const x: i32 = @as(i16, @truncate(lparam & 0xFFFF));
             const y: i32 = @as(i16, @truncate((lparam >> 16) & 0xFFFF));
             if (window.dragging_split) {
-                window.updateDividerDrag(x, y);
+                splits.updateDividerDrag(window, x, y);
                 return 0;
             }
             if (window.sidebar_resizing) {
@@ -2966,7 +2520,7 @@ pub fn windowWndProc(
                     if (w32.LoadCursorW(null, w32.IDC_SIZEWE)) |cursor| _ = w32.SetCursor(cursor);
                     return 1;
                 }
-                if (window.hitTestDivider(pt.x, pt.y)) |hit| {
+                if (splits.hitTestDivider(window, pt.x, pt.y)) |hit| {
                     const cursor_id: usize = if (hit.layout == .horizontal) w32.IDC_SIZEWE else w32.IDC_SIZENS;
                     if (w32.LoadCursorW(null, cursor_id)) |cursor| {
                         _ = w32.SetCursor(cursor);

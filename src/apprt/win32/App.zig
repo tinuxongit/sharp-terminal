@@ -43,6 +43,8 @@ const ime = @import("ime.zig");
 const win32_input = @import("win32_input.zig");
 const clipboard = @import("clipboard.zig");
 const workspace = @import("workspace.zig");
+const tab_rename = @import("tab_rename.zig");
+const splits = @import("splits.zig");
 
 comptime {
     // Exports the exe's load configuration; nothing references it.
@@ -384,9 +386,9 @@ pub fn run(self: *App) !void {
                 for (self.windows.items) |win| {
                     if (win.rename_edit != null and win.rename_edit.? == msg.hwnd) {
                         if (vk == w32.VK_RETURN) {
-                            win.finishTabRename();
+                            tab_rename.finishTabRename(win);
                         } else {
-                            win.cancelTabRename();
+                            tab_rename.cancelTabRename(win);
                         }
                         continue :loop;
                     }
@@ -420,7 +422,7 @@ pub fn run(self: *App) !void {
                     // takes focus away saves the typed title.
                     for (self.windows.items) |win| {
                         if (win.rename_edit != null and win.rename_edit.? == msg.hwnd) {
-                            win.finishTabRename();
+                            tab_rename.finishTabRename(win);
                             break :blk win.getActiveSurface();
                         }
                     }
@@ -1448,7 +1450,7 @@ pub fn performAction(
                         .up => .up,
                         .down => .down,
                     };
-                    core_surface.rt_surface.parent_window.newSplit(dir) catch |err| {
+                    splits.newSplit(core_surface.rt_surface.parent_window, dir) catch |err| {
                         log.err("failed to create split: {}", .{err});
                     };
                 },
@@ -1460,7 +1462,7 @@ pub fn performAction(
             switch (target) {
                 .app => {},
                 .surface => |core_surface| {
-                    core_surface.rt_surface.parent_window.gotoSplit(value);
+                    splits.gotoSplit(core_surface.rt_surface.parent_window, value);
                 },
             }
             return true;
@@ -1470,7 +1472,7 @@ pub fn performAction(
             switch (target) {
                 .app => {},
                 .surface => |core_surface| {
-                    core_surface.rt_surface.parent_window.resizeSplit(value);
+                    splits.resizeSplit(core_surface.rt_surface.parent_window, value);
                 },
             }
             return true;
@@ -1480,7 +1482,7 @@ pub fn performAction(
             switch (target) {
                 .app => {},
                 .surface => |core_surface| {
-                    core_surface.rt_surface.parent_window.equalizeSplits();
+                    splits.equalizeSplits(core_surface.rt_surface.parent_window);
                 },
             }
             return true;
@@ -1490,7 +1492,7 @@ pub fn performAction(
             switch (target) {
                 .app => {},
                 .surface => |core_surface| {
-                    core_surface.rt_surface.parent_window.toggleSplitZoom();
+                    splits.toggleSplitZoom(core_surface.rt_surface.parent_window);
                 },
             }
             return true;
@@ -1502,8 +1504,8 @@ pub fn performAction(
                 .surface => |core_surface| blk: {
                     const window = core_surface.rt_surface.parent_window;
                     switch (value) {
-                        .surface, .tab => window.startTabRename(window.active_tab),
-                        .window => window.startWindowRename(),
+                        .surface, .tab => tab_rename.startTabRename(window, window.active_tab),
+                        .window => tab_rename.startWindowRename(window),
                     }
                     break :blk true;
                 },

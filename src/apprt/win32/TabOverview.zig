@@ -8,6 +8,7 @@ const w32 = @import("win32.zig");
 const brand = @import("brand.zig");
 const find_bar = @import("find_bar.zig");
 const command_palette = @import("command_palette.zig");
+const tab_rename = @import("tab_rename.zig");
 
 pub const class_name = std.unicode.utf8ToUtf16LeStringLiteral(brand.name ++ "TabOverview");
 pub const search_id = 1001;
@@ -72,7 +73,7 @@ pub fn toggle(self: *TabOverview, owner: *Window) !void {
     if (owner.closing or owner.is_quick_terminal or owner.tab_count == 0) return;
     try self.create(owner);
     // Other popups must not retain focus or float over the overview.
-    owner.cancelTabRename();
+    tab_rename.cancelTabRename(owner);
     if (owner.getActiveSurface()) |surface| {
         if (surface.search_active) find_bar.setSearchActive(surface, false, "");
         if (surface.palette_active) command_palette.setCommandPaletteActive(surface, false);
