@@ -44,6 +44,8 @@ const actions = @import("actions.zig");
 const pane_messages = @import("pane_messages.zig");
 const window_messages = @import("window_messages.zig");
 const global_hotkey = @import("global_hotkey.zig");
+const browser_remote = @import("browser_remote.zig");
+const mcp_server = @import("mcp_server.zig");
 
 comptime {
     // Exports the exe's load configuration; nothing references it.
@@ -291,6 +293,10 @@ pub fn init(
 
     // Register global hotkey for quick terminal (if configured).
     global_hotkey.registerGlobalHotkey(self);
+
+    // Claude's browser tools, only while the browser is switched on.
+    browser_remote.target = self.msg_hwnd;
+    mcp_server.setEnabled(self.config.@"ai-tools-browser");
 
     // Builds without Zig's segfault handler (ReleaseFast) crash through
     // here; the handler and panics are covered in main_ghostty.zig.
@@ -1072,6 +1078,11 @@ fn msgWndProc(
 
     if (msg == WM_APP_AI_USAGE) {
         for (app.windows.items) |window| window.invalidateTabBar();
+        return 0;
+    }
+
+    if (msg == browser_remote.message) {
+        browser_remote.serve(app, @ptrFromInt(wparam));
         return 0;
     }
 

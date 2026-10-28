@@ -21,6 +21,8 @@ const splits = @import("splits.zig");
 const log = std.log.scoped(.win32);
 const App = @import("App.zig");
 const global_hotkey = @import("global_hotkey.zig");
+const mcp_server = @import("mcp_server.zig");
+const claude_mcp = @import("claude_mcp.zig");
 const pane_mouse = @import("pane_mouse.zig");
 
 pub fn performAction(
@@ -142,8 +144,15 @@ pub fn performAction(
         .config_change => {
             // Update our stored config with the new one.
             if (value.config.clone(self.core_app.alloc)) |new_config| {
+                const browser_was = self.config.@"ai-tools-browser";
                 self.config.deinit();
                 self.config = new_config;
+
+                // The browser switch also connects Claude Code to Sharp.
+                if (new_config.@"ai-tools-browser" != browser_was) {
+                    mcp_server.setEnabled(new_config.@"ai-tools-browser");
+                    claude_mcp.register(new_config.@"ai-tools-browser");
+                }
 
                 // Recreate the background brush from the new config.
                 if (self.bg_brush) |old_brush| {

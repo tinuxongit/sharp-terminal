@@ -287,7 +287,7 @@
                     .settings = .{
                         .{
                             .label = "Browser",
-                            .description = "A browser beside the terminal, opened with the globe, that Claude can see and use. Nothing loads while this is off.",
+                            .description = "A browser beside the terminal that Claude can see and use.",
                             .key = "ai-tools-browser",
                             .on = "true",
                             .off = "",

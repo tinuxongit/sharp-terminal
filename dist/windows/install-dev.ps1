@@ -14,7 +14,7 @@ if ($InstallRoot.StartsWith('\\')) {
 }
 
 $requiredFiles = @(
-    'bin\sharp.exe', 'bin\conpty.dll', 'bin\OpenConsole.exe', 'bin\WebView2Loader.dll',
+    'bin\sharp.exe', 'bin\conpty.dll', 'bin\OpenConsole.exe', 'bin\WebView2Loader.dll', 'bin\sharp-mcp.exe',
     'share\terminfo\ghostty.terminfo', 'share\licenses\conpty\LICENSE.txt',
     'share\licenses\sharp\LICENSE.txt', 'share\licenses\webview2\LICENSE.txt'
 )

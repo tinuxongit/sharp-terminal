@@ -82,12 +82,26 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/servers.zig`: the servers the sidebar offers (hosts in
   `~/.ssh/config` and recent ones), and which addresses ssh may be given.
 - `src/apprt/win32/BrowserPanel.zig`: the browser panel, a child window
-  with Sharp's toolbar (back, forward, reload, address) over a WebView2
-  page. Its sizes and text are in `browser.zon`.
+  hosting a WebView2 page, its toolbar's input, and the page's DevTools
+  calls and log. Its sizes and text are in `browser.zon`.
+- `src/apprt/win32/browser_toolbar.zig`: the panel's toolbar (back,
+  forward, reload, address box), its layout and painting.
+- `src/apprt/win32/browser_log.zig`: what the page logged (console,
+  uncaught errors, failed loads) for Claude.
 - `src/apprt/win32/browser_dock.zig`: a window's side of the panel: the
   globe, where the panel sits, and opening, hiding and freeing it.
 - `src/apprt/win32/webview2.zig`: the WebView2 COM interfaces the panel
   calls, and loading `WebView2Loader.dll` (pinned in `pkg/webview2/`).
+- `src/apprt/win32/browser_tools.zon`: the tools Claude is offered (names,
+  descriptions, input schemas). `browser_tools.zig` runs them,
+  `browser_snapshot.zig` turns the accessibility tree into Claude's text,
+  and `browser_remote.zig` carries their calls to the UI thread.
+- `src/apprt/win32/mcp_server.zig`: Sharp's MCP server (JSON-RPC over a
+  per-user named pipe, `mcp_pipe.zig`). `mcp_bridge.zig` builds
+  `sharp-mcp.exe`, the command Claude Code runs, which relays its stdio to
+  that pipe.
+- `src/apprt/win32/claude_mcp.zig`: adds Sharp to Claude Code's MCP
+  servers, or removes it, when the browser setting changes.
 - `src/apprt/win32/folder_picker.zig`: Windows' folder picker, behind the
   buttons on a sidebar section's title.
 - `src/termio/cmd_prompt.zig`: makes cmd.exe report its folder (OSC 7)
@@ -264,6 +278,22 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   `%LOCALAPPDATA%\Sharp\Browser`, apart from Edge's. Links that open a
   window open in the panel. The design follows Citropy's browser rather
   than T3 Code's, which is a preview of a dev server.
+- **Claude reaches the browser over MCP, only while the switch is on.**
+  Turning Settings > AI > Tools > Browser on starts Sharp's MCP server
+  and runs `claude mcp add --scope user sharp -- <dir>\sharp-mcp.exe`;
+  turning it off stops the server and runs `claude mcp remove`. That is
+  the only change Sharp makes to Claude Code's configuration. Claude Code
+  runs `sharp-mcp.exe`, which relays its stdio to a named pipe named after
+  the Windows user, created first-instance-only and closed to remote
+  clients, so the tools act on the panel the user sees. The tools are
+  Citropy's core: `browser_open`, `browser_snapshot` (the accessibility
+  tree with `[ref=N]` handles, plus a JPEG in the same CSS pixels clicks
+  use), `browser_action` (navigate, back, forward, reload, click, hover,
+  type, press, scroll, wait, evaluate) and `browser_logs`, all through
+  DevTools calls on the page. Citropy's tabs, iframes, uploads, dialogs,
+  mobile emulation and connected accounts are left out; the panel has
+  one page. Checked 2026-10-28 through the real protocol and against a
+  throwaway Claude Code config (`claude mcp list`: connected).
 - **OSC 7 works on Windows.** Upstream ignored it there. Paths must carry
   a drive letter, since a Linux path from WSL would break the folder new
   tabs start in, and the host check ignores case. As on other platforms,

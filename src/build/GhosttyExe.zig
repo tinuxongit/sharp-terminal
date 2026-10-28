@@ -112,6 +112,18 @@ pub fn install(self: *const Ghostty) void {
             webview2.namedLazyPath("license"),
             "share/licenses/webview2/LICENSE.txt",
         ).step);
+        // The command Claude Code runs to reach the browser panel's tools;
+        // it only relays Claude's stdio to Sharp's named pipe.
+        const bridge = b.addExecutable(.{
+            .name = "sharp-mcp",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/apprt/win32/mcp_bridge.zig"),
+                .target = target,
+                .optimize = self.exe.root_module.optimize orelse .ReleaseFast,
+                .strip = self.exe.root_module.strip,
+            }),
+        });
+        b.getInstallStep().dependOn(&b.addInstallArtifact(bridge, .{}).step);
     }
 }
 

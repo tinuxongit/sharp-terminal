@@ -13,6 +13,8 @@ const tab_strip = @import("tab_strip.zig");
 const webview2 = @import("webview2.zig");
 const wide_string = @import("wide_string.zig");
 const SearchField = @import("SearchField.zig");
+const browser_log = @import("browser_log.zig");
+const toolbar = @import("browser_toolbar.zig");
 
 const log = std.log.scoped(.win32);
 
@@ -35,18 +37,7 @@ comptime {
 const class_name = std.unicode.utf8ToUtf16LeStringLiteral(brand.name ++ "Browser");
 var class_atom: u16 = 0;
 
-/// Sizes in pixels at 96 DPI.
-const toolbar_height = 40.0;
-const button_width = 32.0;
-const button_height = 28.0;
-const gap = 6.0;
-
-const glyph_back = 0xE72B;
-const glyph_forward = 0xE72A;
-const glyph_reload = 0xE72C;
-const glyph_globe = 0xE774;
-
-const Target = enum { none, back, forward, reload, address };
+const Target = toolbar.Target;
 
 hwnd: w32.HWND,
 scale: f32,
@@ -64,6 +55,8 @@ can_forward: bool = false,
 hover: Target = .none,
 pressed: Target = .none,
 tracking_mouse: bool = false,
+/// What the page reported, for Claude's browser_logs.
+page_log: browser_log.Log = .{},
 
 /// Create the panel over `rect` (the parent's client pixels) and start
 /// WebView2, which arrives later through onController.
@@ -121,8 +114,12 @@ pub fn destroy(self: *BrowserPanel, alloc: Allocator) void {
     alloc.destroy(self);
 }
 
-/// The panel behind `hwnd`, or null once it is gone. WebView2 calls back
-/// with the window, which may have closed in the meantime.
+/// The panel behind a handler's context, its window, or null once it is
+/// gone: WebView2 may call back after the window closed.
+fn fromContext(context: usize) ?*BrowserPanel {
+    return fromHwnd(@ptrFromInt(context));
+}
+
 fn fromHwnd(hwnd: w32.HWND) ?*BrowserPanel {
     if (@as(u16, @truncate(w32.GetClassLongW(hwnd, w32.GCW_ATOM))) != class_atom) return null;
     const userdata = w32.GetWindowLongPtrW(hwnd, w32.GWLP_USERDATA);
@@ -171,7 +168,7 @@ fn placePage(self: *BrowserPanel) void {
     var client: w32.RECT = undefined;
     if (w32.GetClientRect(self.hwnd, &client) == 0) return;
     // One pixel on the left stays the panel's, as the line beside the terminal.
-    _ = c.vtable.put_Bounds(c, .{ .left = @max(1, self.px(1)), .top = self.px(toolbar_height), .right = client.right, .bottom = client.bottom });
+    _ = c.vtable.put_Bounds(c, .{ .left = @max(1, self.px(1)), .top = self.toolbarLayout().height(), .right = client.right, .bottom = client.bottom });
 }
 
 // ---- WebView2 ----------------------------------------------------------
@@ -181,12 +178,35 @@ const ControllerDone = webview2.Handler(webview2.iid_controller_completed, w32.H
 const SourceChanged = webview2.Handler(webview2.iid_source_changed, *webview2.WebView, ?*anyopaque, onSourceChanged);
 const HistoryChanged = webview2.Handler(webview2.iid_history_changed, *webview2.WebView, ?*anyopaque, onHistoryChanged);
 const NewWindow = webview2.Handler(webview2.iid_new_window, *webview2.WebView, *webview2.NewWindowArgs, onNewWindow);
+const IgnoreDevtools = webview2.Handler(webview2.iid_cdp_completed, w32.HRESULT, ?[*:0]const u16, ignoreDevtools);
+
+fn LogEvent(comptime event: browser_log.Event) type {
+    return webview2.Handler(webview2.iid_cdp_event, *webview2.WebView, *webview2.EventArgs, struct {
+        fn f(context: usize, _: *webview2.WebView, args: *webview2.EventArgs) void {
+            const self = fromContext(context) orelse return;
+            var json: ?[*:0]u16 = null;
+            if (args.vtable.get_ParameterObjectAsJson(args, &json) < 0) return;
+            defer w32.CoTaskMemFree(json);
+            const alloc = std.heap.smp_allocator;
+            const utf8 = std.unicode.utf16LeToUtf8Alloc(alloc, std.mem.span(json orelse return)) catch return;
+            defer alloc.free(utf8);
+            self.page_log.addEvent(alloc, w32.GetTickCount64(), event, utf8);
+        }
+    }.f);
+}
+
+/// The DevTools events the page's log listens to.
+const log_events = [_]struct { [:0]const u16, browser_log.Event }{
+    .{ std.unicode.utf8ToUtf16LeStringLiteral("Runtime.consoleAPICalled"), .console },
+    .{ std.unicode.utf8ToUtf16LeStringLiteral("Runtime.exceptionThrown"), .exception },
+    .{ std.unicode.utf8ToUtf16LeStringLiteral("Log.entryAdded"), .browser },
+};
 
 fn startWebView(self: *BrowserPanel) void {
     // WebView2 runs its callbacks through this thread's message loop.
     _ = w32.CoInitializeEx(null, w32.COINIT_APARTMENTTHREADED);
     var folder: [1024]u16 = undefined;
-    const handler = EnvironmentDone.create(self.hwnd) orelse return self.fail();
+    const handler = EnvironmentDone.create(@intFromPtr(self.hwnd)) orelse return self.fail();
     defer _ = handler.release();
     webview2.createEnvironment(userDataFolder(&folder) orelse return self.fail(), handler) catch |err| {
         log.warn("browser panel could not start WebView2: {}", .{err});
@@ -210,18 +230,18 @@ fn fail(self: *BrowserPanel) void {
     _ = w32.InvalidateRect(self.hwnd, null, 0);
 }
 
-fn onEnvironment(hwnd: w32.HWND, result: w32.HRESULT, environment: ?*webview2.Environment) void {
-    const self = fromHwnd(hwnd) orelse return;
+fn onEnvironment(context: usize, result: w32.HRESULT, environment: ?*webview2.Environment) void {
+    const self = fromContext(context) orelse return;
     const env = environment orelse return self.fail();
     if (result < 0) return self.fail();
-    const handler = ControllerDone.create(hwnd) orelse return self.fail();
+    const handler = ControllerDone.create(context) orelse return self.fail();
     defer _ = handler.release();
-    if (env.vtable.CreateCoreWebView2Controller(env, hwnd, handler) < 0) self.fail();
+    if (env.vtable.CreateCoreWebView2Controller(env, self.hwnd, handler) < 0) self.fail();
 }
 
-fn onController(hwnd: w32.HWND, result: w32.HRESULT, created: ?*webview2.Controller) void {
+fn onController(context: usize, result: w32.HRESULT, created: ?*webview2.Controller) void {
     // When the panel is gone, not taking a reference lets WebView2 drop it.
-    const self = fromHwnd(hwnd) orelse return;
+    const self = fromContext(context) orelse return;
     const controller = created orelse return self.fail();
     if (result < 0) return self.fail();
     var view: ?*webview2.WebView = null;
@@ -232,31 +252,32 @@ fn onController(hwnd: w32.HWND, result: w32.HRESULT, created: ?*webview2.Control
     self.webview = webview;
 
     var token: webview2.Token = undefined;
-    if (SourceChanged.create(hwnd)) |h| {
+    if (SourceChanged.create(context)) |h| {
         _ = webview.vtable.add_SourceChanged(webview, h, &token);
         _ = h.release();
     }
-    if (HistoryChanged.create(hwnd)) |h| {
+    if (HistoryChanged.create(context)) |h| {
         _ = webview.vtable.add_HistoryChanged(webview, h, &token);
         _ = h.release();
     }
-    if (NewWindow.create(hwnd)) |h| {
+    if (NewWindow.create(context)) |h| {
         _ = webview.vtable.add_NewWindowRequested(webview, h, &token);
         _ = h.release();
     }
+    self.listenToLog(context);
     self.placePage();
     _ = controller.vtable.put_IsVisible(controller, @intFromBool(self.shown));
     self.navigate(data.home);
 }
 
-fn onSourceChanged(hwnd: w32.HWND, webview: *webview2.WebView, _: ?*anyopaque) void {
-    const self = fromHwnd(hwnd) orelse return;
+fn onSourceChanged(context: usize, webview: *webview2.WebView, _: ?*anyopaque) void {
+    const self = fromContext(context) orelse return;
     if (self.address.focused) return;
     self.showSource(webview);
 }
 
-fn onHistoryChanged(hwnd: w32.HWND, webview: *webview2.WebView, _: ?*anyopaque) void {
-    const self = fromHwnd(hwnd) orelse return;
+fn onHistoryChanged(context: usize, webview: *webview2.WebView, _: ?*anyopaque) void {
+    const self = fromContext(context) orelse return;
     var back: c_int = 0;
     var forward: c_int = 0;
     _ = webview.vtable.get_CanGoBack(webview, &back);
@@ -268,13 +289,52 @@ fn onHistoryChanged(hwnd: w32.HWND, webview: *webview2.WebView, _: ?*anyopaque) 
 
 /// Links that would open a window open in the panel instead, which has
 /// no tabs.
-fn onNewWindow(hwnd: w32.HWND, webview: *webview2.WebView, args: *webview2.NewWindowArgs) void {
-    if (fromHwnd(hwnd) == null) return;
+fn onNewWindow(context: usize, webview: *webview2.WebView, args: *webview2.NewWindowArgs) void {
+    if (fromContext(context) == null) return;
     var uri: ?[*:0]u16 = null;
     if (args.vtable.get_Uri(args, &uri) < 0) return;
     defer w32.CoTaskMemFree(uri);
     _ = args.vtable.put_Handled(args, 1);
     _ = webview.vtable.Navigate(webview, uri orelse return);
+}
+
+/// Record the page's console, errors and failed loads from the start, so
+/// Claude can read what happened before it asked.
+fn listenToLog(self: *BrowserPanel, context: usize) void {
+    const webview = self.webview orelse return;
+    inline for (log_events) |entry| {
+        const name, const event = entry;
+        var receiver: ?*webview2.EventReceiver = null;
+        if (webview.vtable.GetDevToolsProtocolEventReceiver(webview, name, &receiver) >= 0) {
+            if (receiver) |r| {
+                defer r.release();
+                if (LogEvent(event).create(context)) |h| {
+                    var token: webview2.Token = undefined;
+                    _ = r.vtable.add_DevToolsProtocolEventReceived(r, h, &token);
+                    _ = h.release();
+                }
+            }
+        }
+    }
+    for ([_][]const u8{ "Runtime.enable", "Log.enable" }) |method| {
+        const handler = IgnoreDevtools.create(0) orelse return;
+        defer _ = handler.release();
+        _ = self.devtools(method, "{}", handler);
+    }
+}
+
+fn ignoreDevtools(_: usize, _: w32.HRESULT, _: ?[*:0]const u16) void {}
+
+/// Call a DevTools Protocol method; `handler` gets its answer. False when
+/// the page isn't ready, and then the handler is never called.
+pub fn devtools(self: *BrowserPanel, method: []const u8, params: []const u8, handler: *anyopaque) bool {
+    const webview = self.webview orelse return false;
+    const alloc = std.heap.smp_allocator;
+    const method_w = std.unicode.utf8ToUtf16LeAllocZ(alloc, method) catch return false;
+    defer alloc.free(method_w);
+    const params_w = std.unicode.utf8ToUtf16LeAllocZ(alloc, params) catch return false;
+    defer alloc.free(params_w);
+    return webview.vtable.CallDevToolsProtocolMethod(webview, method_w, params_w, handler) >= 0;
 }
 
 /// Put the page's address in the address box.
@@ -299,7 +359,8 @@ pub fn navigate(self: *BrowserPanel, typed: []const u8) void {
     _ = webview.vtable.Navigate(webview, @ptrCast(&wide));
 }
 
-fn addressFor(typed: []const u8, out: []u8) ?[]const u8 {
+/// The page an address box (or Claude) means by `typed`.
+pub fn addressFor(typed: []const u8, out: []u8) ?[]const u8 {
     if (typed.len == 0) return null;
     var w: std.Io.Writer = .fixed(out);
     const has_scheme = std.mem.indexOf(u8, typed, "://") != null or
@@ -329,44 +390,32 @@ fn addressFor(typed: []const u8, out: []u8) ?[]const u8 {
 
 // ---- Toolbar -----------------------------------------------------------
 
-fn rectOf(self: *const BrowserPanel, target: Target, width: i32) w32.RECT {
-    const top = @divTrunc(self.px(toolbar_height) - self.px(button_height), 2);
-    const bottom = top + self.px(button_height);
-    const slot: i32 = switch (target) {
-        .back => 0,
-        .forward => 1,
-        .reload => 2,
-        .address => {
-            const left = self.px(gap) + 3 * self.px(button_width) + self.px(gap);
-            return .{ .left = left, .top = top, .right = @max(left, width - self.px(gap)), .bottom = bottom };
-        },
-        .none => return .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
-    };
-    const left = self.px(gap) + slot * self.px(button_width);
-    return .{ .left = left, .top = top, .right = left + self.px(button_width), .bottom = bottom };
+fn toolbarLayout(self: *const BrowserPanel) toolbar.Layout {
+    var client: w32.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+    _ = w32.GetClientRect(self.hwnd, &client);
+    return .{ .scale = self.scale, .width = client.right };
 }
 
-fn targetAt(self: *const BrowserPanel, x: i32, y: i32) Target {
-    var client: w32.RECT = undefined;
-    if (w32.GetClientRect(self.hwnd, &client) == 0) return .none;
-    for ([_]Target{ .back, .forward, .reload, .address }) |t| {
-        const r = self.rectOf(t, client.right);
-        if (x >= r.left and x < r.right and y >= r.top and y < r.bottom) return t;
-    }
-    return .none;
+fn toolbarView(self: *const BrowserPanel) toolbar.View {
+    return .{
+        .palette = self.palette,
+        .fonts = self.fonts,
+        .address = &self.address,
+        .placeholder = data.address_placeholder,
+        .hover = self.hover,
+        .pressed = self.pressed,
+        .can_back = self.can_back,
+        .can_forward = self.can_forward,
+        .ready = self.webview != null,
+    };
 }
 
 fn enabled(self: *const BrowserPanel, target: Target) bool {
-    return switch (target) {
-        .back => self.can_back,
-        .forward => self.can_forward,
-        .reload, .address => self.webview != null,
-        .none => false,
-    };
+    return self.toolbarView().enabled(target);
 }
 
 fn invalidateToolbar(self: *BrowserPanel) void {
-    var rect: w32.RECT = .{ .left = 0, .top = 0, .right = 100000, .bottom = self.px(toolbar_height) };
+    var rect: w32.RECT = .{ .left = 0, .top = 0, .right = 100000, .bottom = self.toolbarLayout().height() };
     _ = w32.InvalidateRect(self.hwnd, &rect, 0);
 }
 
@@ -408,8 +457,9 @@ fn paint(self: *BrowserPanel) void {
     defer _ = w32.EndPaint(self.hwnd, &ps);
     var client: w32.RECT = undefined;
     if (w32.GetClientRect(self.hwnd, &client) == 0) return;
-    const width = client.right;
-    const height = self.px(toolbar_height);
+    const bar = self.toolbarLayout();
+    const width = bar.width;
+    const height = bar.height();
     if (width <= 0) return;
 
     // Until the page shows, and when it can't, the area below is the
@@ -436,40 +486,14 @@ fn paint(self: *BrowserPanel) void {
         _ = w32.DeleteObject(bitmap);
     }
     const c: canvas_mod.Canvas = .{ .hdc = mem_dc, .pixels = @ptrCast(@alignCast(bits orelse return)), .width = width, .height = height };
-    const pal = self.palette;
-    c.fill(.{ .left = 0, .top = 0, .right = width, .bottom = height }, pal.strip);
-    _ = w32.SetBkMode(mem_dc, w32.TRANSPARENT);
-
-    for ([_]struct { Target, u16 }{ .{ .back, glyph_back }, .{ .forward, glyph_forward }, .{ .reload, glyph_reload } }) |button| {
-        const target, const glyph = button;
-        const rect = self.rectOf(target, width);
-        const on = self.enabled(target);
-        c.sync();
-        if (on and self.hover == target) {
-            c.fillRounded(rect, self.px(4), if (self.pressed == target) pal.pressed else pal.hover);
-        }
-        c.glyph(rect, glyph, self.fonts.icons, if (on) pal.text else pal.text_dim.mix(pal.strip, 0.5));
-    }
-    c.sync();
-    self.address.paint(c, self.rectOf(.address, width), self.scale, .{
-        .fill = pal.strip.mix(pal.contrast, 0.06),
-        .hover = pal.hover,
-        .focused = pal.hover.mix(pal.contrast, 0.05),
-        .text = pal.text,
-        .text_dim = pal.text_dim,
-        .font = self.fonts.title,
-        .icon_font = self.fonts.icons_small,
-        .placeholder = data.address_placeholder,
-        .icon = glyph_globe,
-    }, self.hover == .address, true);
-    c.sync();
+    toolbar.paint(c, bar, self.toolbarView());
     _ = w32.BitBlt(hdc, 0, 0, width, height, mem_dc, 0, 0, w32.SRCCOPY);
 
     if (self.failed) {
         _ = w32.SetBkMode(hdc, w32.TRANSPARENT);
         const old_font = w32.SelectObject(hdc, self.fonts.title);
         defer _ = w32.SelectObject(hdc, old_font);
-        _ = w32.SetTextColor(hdc, pal.text_dim.ref());
+        _ = w32.SetTextColor(hdc, self.palette.text_dim.ref());
         var wide: [256]u16 = undefined;
         const len = wide_string.fromUtf8(&wide, data.unavailable);
         _ = w32.DrawTextW(hdc, @ptrCast(&wide), @intCast(len), &below, w32.DT_CENTER | w32.DT_VCENTER | w32.DT_SINGLELINE);
@@ -496,7 +520,7 @@ fn wndProc(hwnd: w32.HWND, msg: u32, wparam: usize, lparam: isize) callconv(.win
                 _ = w32.TrackMouseEvent(&tme);
                 self.tracking_mouse = true;
             }
-            const target = self.targetAt(x, y);
+            const target = self.toolbarLayout().hit(x, y);
             self.setHover(if (self.enabled(target)) target else .none);
             return 0;
         },
@@ -506,7 +530,7 @@ fn wndProc(hwnd: w32.HWND, msg: u32, wparam: usize, lparam: isize) callconv(.win
             return 0;
         },
         w32.WM_LBUTTONDOWN => {
-            const target = self.targetAt(x, y);
+            const target = self.toolbarLayout().hit(x, y);
             if (!self.enabled(target)) return 0;
             if (target == .address) {
                 if (!self.address.focused) self.editAddress();
@@ -523,7 +547,7 @@ fn wndProc(hwnd: w32.HWND, msg: u32, wparam: usize, lparam: isize) callconv(.win
             if (pressed == .none) return 0;
             self.pressed = .none;
             _ = w32.ReleaseCapture();
-            if (self.targetAt(x, y) == pressed) self.act(pressed);
+            if (self.toolbarLayout().hit(x, y) == pressed) self.act(pressed);
             self.invalidateToolbar();
             return 0;
         },

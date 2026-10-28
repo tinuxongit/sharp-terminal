@@ -71,15 +71,39 @@ pub const WebView = extern struct {
         add_HistoryChanged: *const fn (*WebView, *anyopaque, *Token) callconv(.winapi) HRESULT,
         _14: [17]Unused,
         Reload: *const fn (*WebView) callconv(.winapi) HRESULT,
-        _32: [6]Unused,
+        _32: [4]Unused,
+        /// Chrome DevTools Protocol, which Claude's tools read and drive the
+        /// page through.
+        CallDevToolsProtocolMethod: *const fn (*WebView, [*:0]const u16, [*:0]const u16, *anyopaque) callconv(.winapi) HRESULT,
+        _37: Unused,
         get_CanGoBack: *const fn (*WebView, *BOOL) callconv(.winapi) HRESULT,
         get_CanGoForward: *const fn (*WebView, *BOOL) callconv(.winapi) HRESULT,
         GoBack: *const fn (*WebView) callconv(.winapi) HRESULT,
         GoForward: *const fn (*WebView) callconv(.winapi) HRESULT,
-        _42: [2]Unused,
+        GetDevToolsProtocolEventReceiver: *const fn (*WebView, [*:0]const u16, *?*EventReceiver) callconv(.winapi) HRESULT,
+        _43: Unused,
         add_NewWindowRequested: *const fn (*WebView, *anyopaque, *Token) callconv(.winapi) HRESULT,
     },
     pub const release = Iunknown(WebView).release;
+};
+
+pub const EventReceiver = extern struct {
+    vtable: *const extern struct {
+        QueryInterface: Unused,
+        AddRef: Unused,
+        Release: *const fn (*EventReceiver) callconv(.winapi) u32,
+        add_DevToolsProtocolEventReceived: *const fn (*EventReceiver, *anyopaque, *Token) callconv(.winapi) HRESULT,
+    },
+    pub const release = Iunknown(EventReceiver).release;
+};
+
+pub const EventArgs = extern struct {
+    vtable: *const extern struct {
+        QueryInterface: Unused,
+        AddRef: Unused,
+        Release: Unused,
+        get_ParameterObjectAsJson: *const fn (*EventArgs, *?[*:0]u16) callconv(.winapi) HRESULT,
+    },
 };
 
 pub const NewWindowArgs = extern struct {
@@ -104,19 +128,21 @@ pub const iid_controller_completed = iid(0x6c4819f3, 0xc9b7, 0x4260, .{ 0x81, 0x
 pub const iid_source_changed = iid(0x3c067f9f, 0x5388, 0x4772, .{ 0x8b, 0x48, 0x79, 0xf7, 0xef, 0x1a, 0xb3, 0x7c });
 pub const iid_history_changed = iid(0xc79a420c, 0xefd9, 0x4058, .{ 0x92, 0x95, 0x3e, 0x8b, 0x4b, 0xca, 0xb6, 0x45 });
 pub const iid_new_window = iid(0xd4c185fe, 0xc81c, 0x4989, .{ 0x97, 0xaf, 0x2d, 0x3f, 0xa7, 0xab, 0x56, 0x51 });
+pub const iid_cdp_completed = iid(0x5c4889f0, 0x5ef6, 0x4c5a, .{ 0x95, 0x2c, 0xd8, 0xf1, 0xb9, 0x2d, 0x05, 0x74 });
+pub const iid_cdp_event = iid(0xe2fda4be, 0x5456, 0x406c, .{ 0xa2, 0x61, 0x3d, 0x45, 0x21, 0x38, 0x36, 0x2c });
 
-/// A handler object WebView2 calls back, running `invoke(hwnd, a, b)`.
+/// A handler object WebView2 calls back, running `invoke(context, a, b)`.
 /// WebView2 keeps a reference while it may still call, so the object
-/// frees itself on its last Release. It carries the panel's window rather
-/// than the panel, so a callback arriving after the panel closed finds
-/// no panel instead of a freed one.
-pub fn Handler(comptime handler_iid: GUID, comptime A: type, comptime B: type, comptime invoke: fn (w32.HWND, A, B) void) type {
+/// frees itself on its last Release. The panel's handlers carry its window
+/// rather than the panel, so a callback arriving after the panel closed
+/// finds no panel instead of a freed one.
+pub fn Handler(comptime handler_iid: GUID, comptime A: type, comptime B: type, comptime invoke: fn (usize, A, B) void) type {
     return extern struct {
         const Self = @This();
 
         vtable: *const Vtbl = &vtbl,
         refs: std.atomic.Value(u32) = .init(1),
-        hwnd: w32.HWND,
+        context: usize,
 
         const Vtbl = extern struct {
             QueryInterface: *const fn (*Self, *const GUID, *?*anyopaque) callconv(.winapi) HRESULT,
@@ -128,9 +154,9 @@ pub fn Handler(comptime handler_iid: GUID, comptime A: type, comptime B: type, c
 
         /// The caller owns one reference and releases it once WebView2 has
         /// taken its own.
-        pub fn create(hwnd: w32.HWND) ?*Self {
+        pub fn create(context: usize) ?*Self {
             const self = std.heap.smp_allocator.create(Self) catch return null;
-            self.* = .{ .hwnd = hwnd };
+            self.* = .{ .context = context };
             return self;
         }
 
@@ -155,7 +181,7 @@ pub fn Handler(comptime handler_iid: GUID, comptime A: type, comptime B: type, c
         }
 
         fn call(self: *Self, a: A, b: B) callconv(.winapi) HRESULT {
-            invoke(self.hwnd, a, b);
+            invoke(self.context, a, b);
             return S_OK;
         }
     };

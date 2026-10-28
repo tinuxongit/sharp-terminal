@@ -1828,3 +1828,41 @@ pub const UNICODE_STRING = extern struct {
     MaximumLength: u16,
     Buffer: ?[*]u16,
 };
+
+// -----------------------------------------------------------------------
+// Named pipes and plain file I/O, for the MCP server and its bridge.
+
+pub const INVALID_HANDLE: usize = std.math.maxInt(usize);
+pub const PIPE_ACCESS_DUPLEX: u32 = 0x00000003;
+pub const FILE_FLAG_FIRST_PIPE_INSTANCE: u32 = 0x00080000;
+pub const PIPE_TYPE_BYTE: u32 = 0x00000000;
+pub const PIPE_READMODE_BYTE: u32 = 0x00000000;
+pub const PIPE_WAIT: u32 = 0x00000000;
+pub const PIPE_REJECT_REMOTE_CLIENTS: u32 = 0x00000008;
+pub const PIPE_UNLIMITED_INSTANCES: u32 = 255;
+pub const GENERIC_READ: u32 = 0x80000000;
+pub const GENERIC_WRITE: u32 = 0x40000000;
+pub const OPEN_EXISTING: u32 = 3;
+pub const ERROR_PIPE_CONNECTED: u32 = 535;
+pub const ERROR_PIPE_BUSY: u32 = 231;
+pub const STD_INPUT_HANDLE: u32 = @bitCast(@as(i32, -10));
+pub const STD_OUTPUT_HANDLE: u32 = @bitCast(@as(i32, -11));
+pub const STD_ERROR_HANDLE: u32 = @bitCast(@as(i32, -12));
+
+pub extern "kernel32" fn CreateNamedPipeW(lpName: [*:0]const u16, dwOpenMode: u32, dwPipeMode: u32, nMaxInstances: u32, nOutBufferSize: u32, nInBufferSize: u32, nDefaultTimeOut: u32, lpSecurityAttributes: ?*anyopaque) callconv(.winapi) usize;
+pub extern "kernel32" fn ConnectNamedPipe(hNamedPipe: HANDLE, lpOverlapped: ?*anyopaque) callconv(.winapi) i32;
+pub extern "kernel32" fn DisconnectNamedPipe(hNamedPipe: HANDLE) callconv(.winapi) i32;
+pub extern "kernel32" fn WaitNamedPipeW(lpNamedPipeName: [*:0]const u16, nTimeOut: u32) callconv(.winapi) i32;
+pub extern "kernel32" fn PeekNamedPipe(hNamedPipe: HANDLE, lpBuffer: ?*anyopaque, nBufferSize: u32, lpBytesRead: ?*u32, lpTotalBytesAvail: ?*u32, lpBytesLeftThisMessage: ?*u32) callconv(.winapi) i32;
+pub extern "kernel32" fn CreateFileW(lpFileName: [*:0]const u16, dwDesiredAccess: u32, dwShareMode: u32, lpSecurityAttributes: ?*anyopaque, dwCreationDisposition: u32, dwFlagsAndAttributes: u32, hTemplateFile: ?HANDLE) callconv(.winapi) usize;
+pub extern "kernel32" fn ReadFile(hFile: HANDLE, lpBuffer: [*]u8, nNumberOfBytesToRead: u32, lpNumberOfBytesRead: ?*u32, lpOverlapped: ?*anyopaque) callconv(.winapi) i32;
+pub extern "kernel32" fn WriteFile(hFile: HANDLE, lpBuffer: [*]const u8, nNumberOfBytesToWrite: u32, lpNumberOfBytesWritten: ?*u32, lpOverlapped: ?*anyopaque) callconv(.winapi) i32;
+pub extern "kernel32" fn GetStdHandle(nStdHandle: u32) callconv(.winapi) ?HANDLE;
+pub extern "kernel32" fn GetLastError() callconv(.winapi) u32;
+pub extern "advapi32" fn GetUserNameW(lpBuffer: [*]u16, pcbBuffer: *u32) callconv(.winapi) i32;
+
+/// A handle from a call that signals failure with INVALID_HANDLE_VALUE.
+pub fn validHandle(raw: usize) ?HANDLE {
+    if (raw == INVALID_HANDLE or raw == 0) return null;
+    return @ptrFromInt(raw);
+}
