@@ -72,15 +72,22 @@ pub fn addressFor(typed: []const u8, search: []const u8, out: []u8) ?[]const u8 
         const local = std.mem.startsWith(u8, typed, "localhost") or std.mem.startsWith(u8, typed, "127.0.0.1");
         w.print("{s}{s}", .{ if (local) "http://" else "https://", typed }) catch return null;
     } else {
-        w.writeAll(search) catch return null;
-        for (typed) |c| {
-            if (std.ascii.isAlphanumeric(c) or c == '-' or c == '_' or c == '.' or c == '~') {
-                w.writeByte(c) catch return null;
-            } else if (c == ' ') {
-                w.writeByte('+') catch return null;
-            } else {
-                w.print("%{X:0>2}", .{c}) catch return null;
-            }
+        return searchAddress(typed, search, out);
+    }
+    return w.buffered();
+}
+
+/// The page that looks `words` up with `search`, the engine's address.
+pub fn searchAddress(words: []const u8, search: []const u8, out: []u8) ?[]const u8 {
+    var w: std.Io.Writer = .fixed(out);
+    w.writeAll(search) catch return null;
+    for (words) |c| {
+        if (std.ascii.isAlphanumeric(c) or c == '-' or c == '_' or c == '.' or c == '~') {
+            w.writeByte(c) catch return null;
+        } else if (c == ' ') {
+            w.writeByte('+') catch return null;
+        } else {
+            w.print("%{X:0>2}", .{c}) catch return null;
         }
     }
     return w.buffered();

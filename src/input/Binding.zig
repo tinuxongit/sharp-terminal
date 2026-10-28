@@ -692,6 +692,18 @@ pub const Action = union(enum) {
     /// Only implemented on Windows.
     split_pane: SplitPane,
 
+    /// Actions of Sharp's Windows app, as Windows Terminal has them:
+    ///
+    ///   - `search_web`: look the selected text up on the web.
+    ///   - `open_folder`: open the shell's folder in Explorer.
+    ///   - `mark_mode`: select with the keyboard from the cursor: arrows
+    ///     extend the selection, Enter copies it, Escape leaves.
+    ///   - `block_selection`: toggle the selection between lines and a
+    ///     rectangle.
+    ///
+    /// Only implemented on Windows.
+    sharp: Sharp,
+
     /// Reset the window to the default size. The "default size" is the
     /// size that a new window would be created with. This has no effect
     /// if the window is fullscreen.
@@ -1077,6 +1089,13 @@ pub const Action = union(enum) {
         auto, // splits along the larger direction
 
         pub const default: SplitDirection = .auto;
+    };
+
+    pub const Sharp = enum {
+        search_web,
+        open_folder,
+        mark_mode,
+        block_selection,
     };
 
     pub const SplitPane = enum {
@@ -1489,6 +1508,7 @@ pub const Action = union(enum) {
             .resize_split,
             .equalize_splits,
             .split_pane,
+            .sharp,
             .inspector,
             => .surface,
         };

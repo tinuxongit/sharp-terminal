@@ -3,6 +3,7 @@
 const Surface = @This();
 
 const std = @import("std");
+const mark_mode = @import("mark_mode.zig");
 const canvas = @import("canvas.zig");
 const Allocator = std.mem.Allocator;
 const apprt = @import("../../apprt.zig");
@@ -61,6 +62,8 @@ icon: ?w32.HICON = null,
 tab_color: ?canvas.Rgb = null,
 /// Typing here goes to every pane of the tab (split_pane:broadcast).
 broadcast: bool = false,
+/// Keys select text instead of reaching the program (mark_mode.zig).
+marking: bool = false,
 
 /// What the tab sidebar shows about this surface: where its shell runs,
 /// its folder (from OSC 7, when the shell reports it), when it opened and
@@ -1000,6 +1003,11 @@ pub fn handleDpiChange(self: *Surface) void {
 pub fn handleKeyEvent(self: *Surface, wparam: usize, lparam: isize, action: input.Action) void {
     if (!self.core_surface_ready) return;
     const vk: u16 = @intCast(wparam & 0xFFFF);
+    if (self.marking) {
+        if (action != .release and mark_mode.key(self, vk)) return;
+        // The releases of keys mark mode took aren't the program's either.
+        if (action == .release and self.marking and !key_map.isModifierVk(vk)) return;
+    }
 
     // When the IME is active, physical key presses arrive as VK_PROCESSKEY.
     // The IME will produce the composed text via WM_IME_COMPOSITION — skip

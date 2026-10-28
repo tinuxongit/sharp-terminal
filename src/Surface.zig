@@ -5625,6 +5625,14 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             {},
         ),
 
+        .sharp => |v| return try self.rt_app.performAction(
+            .{ .surface = self },
+            .sharp,
+            switch (v) {
+                inline else => |tag| @field(apprt.action.Sharp, @tagName(tag)),
+            },
+        ),
+
         .split_pane => |v| return try self.rt_app.performAction(
             .{ .surface = self },
             .split_pane,

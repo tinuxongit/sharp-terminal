@@ -368,6 +368,9 @@ pub const Action = union(Key) {
     /// split_pane).
     split_pane: SplitPane,
 
+    /// An action of Sharp's Windows app (input.Binding.Action sharp).
+    sharp: Sharp,
+
     /// Sync with: ghostty_action_tag_e
     pub const Key = enum(c_int) {
         quit,
@@ -441,6 +444,7 @@ pub const Action = union(Key) {
         move_tab_to_new_window,
         resize_window,
         split_pane,
+        sharp,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_ACTION_");
@@ -525,6 +529,17 @@ pub const SplitDirection = enum(c_int) {
 
     test "ghostty.h SplitDirection" {
         try lib.checkGhosttyHEnum(SplitDirection, "GHOSTTY_SPLIT_DIRECTION_");
+    }
+};
+
+pub const Sharp = enum(c_int) {
+    search_web,
+    open_folder,
+    mark_mode,
+    block_selection,
+
+    test "ghostty.h Sharp" {
+        try lib.checkGhosttyHEnum(Sharp, "GHOSTTY_SHARP_");
     }
 };
 

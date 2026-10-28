@@ -106,6 +106,8 @@ pub fn showContextMenu(self: *Surface, lparam: isize) void {
     const CTX_SPLIT_RIGHT: usize = 4;
     const CTX_SPLIT_DOWN: usize = 5;
     const CTX_RESET: usize = 6;
+    const CTX_SEARCH_WEB: usize = 7;
+    const CTX_OPEN_FOLDER: usize = 8;
 
     const menu = w32.CreatePopupMenu() orelse return;
     defer _ = w32.DestroyMenu(menu);
@@ -115,6 +117,8 @@ pub fn showContextMenu(self: *Surface, lparam: isize) void {
     _ = w32.AppendMenuW(menu, w32.MF_STRING, CTX_PASTE, std.unicode.utf8ToUtf16LeStringLiteral("Paste"));
     _ = w32.AppendMenuW(menu, w32.MF_SEPARATOR, 0, null);
     _ = w32.AppendMenuW(menu, w32.MF_STRING, CTX_SELECT_ALL, std.unicode.utf8ToUtf16LeStringLiteral("Select All"));
+    _ = w32.AppendMenuW(menu, if (has_sel) w32.MF_STRING else w32.MF_GRAYED, CTX_SEARCH_WEB, std.unicode.utf8ToUtf16LeStringLiteral("Search the Web"));
+    _ = w32.AppendMenuW(menu, if (self.folderPath().len > 0) w32.MF_STRING else w32.MF_GRAYED, CTX_OPEN_FOLDER, std.unicode.utf8ToUtf16LeStringLiteral("Open Folder in Explorer"));
     _ = w32.AppendMenuW(menu, w32.MF_SEPARATOR, 0, null);
     _ = w32.AppendMenuW(menu, w32.MF_STRING, CTX_SPLIT_RIGHT, std.unicode.utf8ToUtf16LeStringLiteral("Split Right"));
     _ = w32.AppendMenuW(menu, w32.MF_STRING, CTX_SPLIT_DOWN, std.unicode.utf8ToUtf16LeStringLiteral("Split Down"));
@@ -143,6 +147,8 @@ pub fn showContextMenu(self: *Surface, lparam: isize) void {
         CTX_SPLIT_RIGHT => .{ .new_split = .right },
         CTX_SPLIT_DOWN => .{ .new_split = .down },
         CTX_RESET => .reset,
+        CTX_SEARCH_WEB => .{ .sharp = .search_web },
+        CTX_OPEN_FOLDER => .{ .sharp = .open_folder },
         else => null,
     };
     if (binding) |b| {

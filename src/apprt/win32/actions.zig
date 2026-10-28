@@ -2,6 +2,9 @@
 //! app (new tabs and windows, titles, splits, clipboard, notifications,
 //! fullscreen and the rest): the core's performAction, one case per action.
 const std = @import("std");
+const browser_settings = @import("browser_settings.zig");
+const shell_open = @import("shell_open.zig");
+const mark_mode = @import("mark_mode.zig");
 const apprt = @import("../../apprt.zig");
 const global = @import("../../global.zig");
 const QuickTerminal = @import("QuickTerminal.zig");
@@ -950,6 +953,30 @@ pub fn performAction(
                 .app => {},
                 .surface => |core_surface| {
                     splits.resizeSplit(core_surface.rt_surface.parent_window, value);
+                },
+            }
+            return true;
+        },
+
+        .sharp => {
+            const surface = switch (target) {
+                .app => return false,
+                .surface => |core_surface| core_surface.rt_surface,
+            };
+            switch (value) {
+                .mark_mode => mark_mode.start(surface),
+                .block_selection => mark_mode.toggleBlock(surface),
+                .open_folder => shell_open.folder(surface.folderPath()),
+                .search_web => {
+                    const alloc = self.core_app.alloc;
+                    const words = (surface.core_surface.selectionString(alloc) catch return true) orelse return true;
+                    defer alloc.free(words);
+                    var buf: [2048]u8 = undefined;
+                    const engine = browser_settings.engineFor(self.config.@"browser-search-engine");
+                    // A long selection is cut: search engines take words, not files.
+                    const trimmed = std.mem.trim(u8, words[0..@min(words.len, 400)], " \t\r\n");
+                    const url = browser_settings.searchAddress(trimmed, engine.search, &buf) orelse return true;
+                    return performAction(self, target, .open_url, .{ .kind = .text, .url = url });
                 },
             }
             return true;

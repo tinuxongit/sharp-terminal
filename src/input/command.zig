@@ -558,6 +558,13 @@ fn actionCommands(action: Action.Key) []const Command {
             .description = i18n.N_("Equalize the size of all splits."),
         }},
 
+        .sharp => comptime &.{
+            .{ .action = .{ .sharp = .search_web }, .title = i18n.N_("Search the Web"), .description = i18n.N_("Look the selected text up on the web.") },
+            .{ .action = .{ .sharp = .open_folder }, .title = i18n.N_("Open Folder in Explorer"), .description = i18n.N_("Open the shell's folder in Explorer.") },
+            .{ .action = .{ .sharp = .mark_mode }, .title = i18n.N_("Mark Mode"), .description = i18n.N_("Select text with the keyboard.") },
+            .{ .action = .{ .sharp = .block_selection }, .title = i18n.N_("Toggle Block Selection"), .description = i18n.N_("Switch the selection between lines and a rectangle.") },
+        },
+
         .split_pane => comptime &.{
             .{ .action = .{ .split_pane = .swap_next }, .title = i18n.N_("Swap Split with Next"), .description = i18n.N_("Swap the focused split with the next one.") },
             .{ .action = .{ .split_pane = .swap_previous }, .title = i18n.N_("Swap Split with Previous"), .description = i18n.N_("Swap the focused split with the previous one.") },

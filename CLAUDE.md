@@ -148,6 +148,8 @@ commands and conventions; this file covers what is specific to Sharp.
   (`tab_colors.zon`); the color lives on the tab's panes, like its icon.
 - `src/apprt/win32/tab_order.zig`: Ctrl+Tab in the order tabs were last
   used (`tab-switch-order = recent`).
+- `src/apprt/win32/mark_mode.zig`: selecting with the keyboard and
+  block selection; `shell_open.zig` shows a folder in Explorer.
 - `src/apprt/win32/closed_tabs.zig`: the last ten closed tabs, for
   reopening.
 - `src/apprt/win32/user_environment.zig`: the variables a new tab starts
@@ -449,6 +451,15 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   tab's other panes (an antenna marks the tab); pastes go through
   Ghostty's core and aren't broadcast. Sharp's palette has its own list
   (`command_palette.zig`), not Ghostty's `command.zig`.
+- **Sharp's own actions are one Ghostty action, `sharp`.** Windows-app
+  actions that Ghostty lacks (`sharp:search_web`, `open_folder`,
+  `mark_mode`, `block_selection`) are values of a single action, so new
+  ones add an enum value instead of plumbing a whole action through the
+  shared code. Search the web goes through `open_url`, as typed text,
+  with the browser setting's search engine (`browser_settings.searchAddress`).
+  Mark mode starts a selection at the cursor; arrows, Page Up/Down, Home
+  and End extend it, Enter copies, Escape leaves, and any other key ends
+  it but goes through, keeping the selection.
 - **Closed tabs reopen as the session would restore them.** Windows has
   no undo manager, so Ghostty's `undo` ("Reopen Closed Tab" in Sharp's
   palette and the tab menu) reopens the last of ten closed tabs: shell,
