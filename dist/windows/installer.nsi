@@ -84,6 +84,13 @@ VIAddVersionKey "LegalCopyright" "MIT License"
   ${Loop}
 !macroend
 
+; One "Open in Sharp" verb under ROOT, opening ARG.
+!macro OpenHere ROOT ARG
+  WriteRegStr HKCU "Software\Classes\${ROOT}\SharpTerminal" "" "Open in Sharp"
+  WriteRegStr HKCU "Software\Classes\${ROOT}\SharpTerminal" "Icon" "$INSTDIR\sharp.exe"
+  WriteRegStr HKCU "Software\Classes\${ROOT}\SharpTerminal\command" "" '"$INSTDIR\sharp.exe" +new-tab "--working-directory=${ARG}\."'
+!macroend
+
 Section "Install"
   SetOutPath "$INSTDIR"
   !insertmacro WaitForSharp
@@ -105,6 +112,14 @@ Section "Install"
   ${AndIfNot} ${FileExists} "$DESKTOP\${TITLE}.lnk"
     CreateShortCut "$DESKTOP\${TITLE}.lnk" "$INSTDIR\sharp.exe"
   ${EndIf}
+
+  ; "Open in Sharp" on folders, drives and a folder's background, as a
+  ; tab in the running Sharp (sharp +new-tab). Windows 11 shows it under
+  ; "Show more options": its top menu takes only signed packages. "\."
+  ; keeps a drive root's backslash from escaping the closing quote.
+  !insertmacro OpenHere "Directory\shell" "%V"
+  !insertmacro OpenHere "Directory\Background\shell" "%V"
+  !insertmacro OpenHere "Drive\shell" "%V"
 
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "${TITLE}"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"
@@ -160,6 +175,9 @@ Section "Uninstall"
     !insertmacro RestoreDelegation "DelegationConsole"
     !insertmacro RestoreDelegation "DelegationTerminal"
   ${EndIf}
+  DeleteRegKey HKCU "Software\Classes\Directory\shell\SharpTerminal"
+  DeleteRegKey HKCU "Software\Classes\Directory\Background\shell\SharpTerminal"
+  DeleteRegKey HKCU "Software\Classes\Drive\shell\SharpTerminal"
   DeleteRegKey HKCU "Software\Sharp\DefaultTerminal"
   DeleteRegKey /ifempty HKCU "Software\Sharp"
   DeleteRegKey HKCU "Software\Classes\CLSID\${SHARP_TERMINAL}"

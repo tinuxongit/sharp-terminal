@@ -291,6 +291,11 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   WM_COPYDATA to a running Sharp's message window, letting it come to the
   front. With none running, or only an elevated one Windows keeps it from
   reaching, it starts Sharp with those arguments. Checked 2026-10-28.
+  The installer adds "Open in Sharp" for folders, drives and a folder's
+  background (`sharp +new-tab "--working-directory=%V\."`; the `\.`
+  keeps a drive root's backslash from escaping the quote). Windows 11
+  lists it under "Show more options": its top menu takes only signed
+  packages. Checked 2026-10-29 with a real install and uninstall.
 - **Startup works as in Windows Terminal.** Settings > General >
   Startup: Start with Windows (`start-at-login`, a value under the
   user's Run key), Reopen tabs (Ghostty's `window-save-state = always`,
