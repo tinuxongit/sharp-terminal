@@ -41,6 +41,8 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/settings_view.zig`: lays out and paints the panel.
 - `src/apprt/win32/SettingsPanel.zig`: the panel's layered window, input,
   and state.
+- `src/apprt/win32/frame_pacer.zig`: one frame per display refresh for each
+  renderer thread.
 - `src/apprt/win32/canvas.zig`: drawing shared by the strip and the panel
   (colors, anti-aliased shapes, text, icon fonts).
 - `src/apprt/win32/menu_theme.zig`: dark or light native popup menus.
@@ -98,6 +100,12 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   that handles terminal output.
 - **Win32 + OpenGL (WGL), not WinUI or DirectX.** It reuses Ghostty's OpenGL
   renderer, so there is no second renderer to maintain.
+- **SwapBuffers never waits for the display.** The fork's renderer could
+  hang there with the display off after sleep, and it papered over that by
+  dropping renderer messages after a second. Sharp sets the swap interval
+  to 0 instead, keeps Ghostty's never-dropping mailbox pushes, and paces
+  frames to the display's refresh itself (`frame_pacer.zig`), a wait that
+  is always bounded. It costs about 5 % of raw dump throughput.
 - **Resizing never shows an empty or stale terminal.** WGL has no
   equivalent of Windows Terminal's `DXGI_SCALING_NONE` swap chain, so
   every pane resize waits (up to 16 ms) for the renderer's frame at the
@@ -217,10 +225,6 @@ Baseline, 2026-10-28, two runs each:
 
 ## Tech debt
 
-- The fork made renderer messages in the shared `src/Surface.zig` give up
-  after 1 second, to survive a renderer that hangs in `SwapBuffers` after
-  sleep. That hides the hang instead of fixing it, and a dropped config change
-  leaves the renderer and terminal with different settings.
 - The fork deleted upstream's `test.yml` CI, so upstream's core tests no
   longer run on its changes to shared files.
 - The version info still says 1.3.0.0, inherited from the fork.

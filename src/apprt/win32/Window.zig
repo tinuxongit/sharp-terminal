@@ -850,7 +850,7 @@ pub fn addTabWithOptions(self: *Window, options: AddTabOptions) !*Surface {
     // via ref(). If this fails, we manually clean up.
     var tree = SplitTree(Surface).init(alloc, surface) catch |err| {
         surface.deinit();
-        if (!surface.leaked) alloc.destroy(surface);
+        alloc.destroy(surface);
         return err;
     };
     errdefer tree.deinit(); // tree.deinit() calls unref() which deinits+frees surface
@@ -1412,7 +1412,7 @@ pub fn newSplit(self: *Window, direction: SplitTree(Surface).Split.Direction) !v
     const new_surface = try alloc.create(Surface);
     errdefer {
         new_surface.deinit();
-        if (!new_surface.leaked) alloc.destroy(new_surface);
+        alloc.destroy(new_surface);
     }
     try new_surface.init(self.app, self, .split);
 

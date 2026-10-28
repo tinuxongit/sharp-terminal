@@ -1223,6 +1223,7 @@ pub extern "opengl32" fn wglMakeCurrent(
 ) callconv(.winapi) i32;
 
 pub extern "opengl32" fn wglGetCurrentDC() callconv(.winapi) ?HDC;
+pub extern "opengl32" fn wglGetProcAddress(name: [*:0]const u8) callconv(.winapi) ?*const anyopaque;
 pub extern "user32" fn WindowFromDC(hdc: HDC) callconv(.winapi) ?HWND;
 
 pub extern "opengl32" fn wglDeleteContext(
@@ -1328,6 +1329,25 @@ pub extern "kernel32" fn QueryPerformanceCounter(
 pub extern "kernel32" fn QueryPerformanceFrequency(
     lpFrequency: *i64,
 ) callconv(.winapi) i32;
+
+pub const CREATE_WAITABLE_TIMER_HIGH_RESOLUTION: u32 = 0x00000002;
+pub const TIMER_ALL_ACCESS: u32 = 0x001F0003;
+pub extern "kernel32" fn CreateWaitableTimerExW(
+    lpTimerAttributes: ?*anyopaque,
+    lpTimerName: ?[*:0]const u16,
+    dwFlags: u32,
+    dwDesiredAccess: u32,
+) callconv(.winapi) ?HANDLE;
+pub extern "kernel32" fn SetWaitableTimer(
+    hTimer: HANDLE,
+    lpDueTime: *const i64,
+    lPeriod: i32,
+    pfnCompletionRoutine: ?*const anyopaque,
+    lpArgToCompletionRoutine: ?*anyopaque,
+    fResume: i32,
+) callconv(.winapi) i32;
+pub const VREFRESH: c_int = 116;
+pub extern "gdi32" fn GetDeviceCaps(hdc: HDC, index: c_int) callconv(.winapi) c_int;
 
 // -----------------------------------------------------------------------
 // Thread input and foreground focus API

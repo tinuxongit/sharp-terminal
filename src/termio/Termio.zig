@@ -26,11 +26,6 @@ const compat_file = @import("../lib/compat/file.zig");
 
 const log = std.log.scoped(.io_exec);
 
-/// How long a push to the renderer mailbox may block before we drop
-/// the message. Blocking forever would wedge the IO thread whenever
-/// the renderer thread stops draining its mailbox.
-const renderer_mailbox_timeout_ns: u64 = 1 * std.time.ns_per_s;
-
 /// Mutex state argument for queueMessage.
 pub const MutexState = enum { locked, unlocked };
 
@@ -571,11 +566,7 @@ pub fn resize(
     }
 
     // Mail the renderer so that it can update the GPU and re-render
-    if (self.renderer_mailbox.push(
-        global.io(),
-        .{ .resize = size },
-        .{ .ns = renderer_mailbox_timeout_ns },
-    ) == 0) log.warn("renderer mailbox full, dropped resize", .{});
+    _ = self.renderer_mailbox.push(global.io(), .{ .resize = size }, .{ .forever = {} });
     self.renderer_wakeup.notify() catch {};
 }
 

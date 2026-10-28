@@ -20,6 +20,7 @@ const brand = @import("brand.zig");
 const wide_string = @import("wide_string.zig");
 const servers = @import("servers.zig");
 const frame_log = @import("frame_log.zig");
+const FramePacer = @import("frame_pacer.zig");
 const Scrollbar = @import("Scrollbar.zig").Scrollbar;
 
 const log = std.log.scoped(.win32);
@@ -108,6 +109,9 @@ key_event_produced_text: bool = false,
 /// synchronize rendering with the DWM compositor.
 frame_event: ?w32.HANDLE = null,
 
+/// Paces the renderer thread to the display; only that thread uses it.
+frame_pacer: FramePacer = .{},
+
 /// Themed scrollbar (custom layered-popup overlay).
 /// Created lazily after the surface HWND exists.
 scrollbar: ?*Scrollbar = null,
@@ -188,12 +192,6 @@ palette_filtered: [palette_entries.len + MAX_USER_PALETTE_ENTRIES]u16 = undefine
 /// SplitTree.init() calls ref() to take initial ownership.
 ref_count: u32 = 0,
 
-/// Set when core_surface.deinit() timed out joining a wedged surface
-/// thread and leaked its state. The wedged thread can still reach this
-/// allocation (it embeds core_surface and the renderer thread struct),
-/// so it must never be freed.
-leaked: bool = false,
-
 /// SplitTree view protocol: increment reference count.
 pub fn ref(self: *Surface, alloc: Allocator) Allocator.Error!*Surface {
     _ = alloc;
@@ -207,7 +205,7 @@ pub fn unref(self: *Surface, alloc: Allocator) void {
     if (self.ref_count == 0) {
         if (self.hwnd) |h| _ = w32.ShowWindow(h, w32.SW_HIDE);
         self.deinit();
-        if (!self.leaked) alloc.destroy(self);
+        alloc.destroy(self);
     }
 }
 
@@ -316,6 +314,11 @@ pub fn initWithOptions(
         self.hglrc = null;
     }
 
+    if (w32.wglMakeCurrent(self.hdc.?, self.hglrc.?) != 0) {
+        disableSwapWait();
+        _ = w32.wglMakeCurrent(null, null);
+    }
+
     // Query the initial DPI and size
     self.updateDpiScale();
     self.updateClientSize();
@@ -404,18 +407,10 @@ pub fn deinit(self: *Surface) void {
 
         self.app.core_app.deleteSurface(self);
         log.debug("surface deinit: deleteSurface done", .{});
-
-        if (self.core_surface.deinit_leaked) {
-            // A wedged surface thread can still SetEvent the frame_event
-            // (signalFrameDrawn), use the WGL context, and SwapBuffers the
-            // DC, so leave all three alive alongside everything the core
-            // deinit leaked. GUI-only resources are still safe to destroy.
-            self.leaked = true;
-            self.deinitGui();
-            return;
-        }
     }
 
+    // The renderer thread, its only user, has been joined.
+    self.frame_pacer.deinit();
     if (self.frame_event) |event| {
         _ = w32.CloseHandle(event);
         self.frame_event = null;
@@ -571,6 +566,19 @@ pub fn recreateGLContext(self: *Surface) !void {
     self.hglrc = new;
 
     if (w32.wglMakeCurrent(hdc, new) == 0) return error.Win32Error;
+    disableSwapWait();
+}
+
+/// Present frames without waiting for the display in SwapBuffers. The
+/// renderer paces its own frames and DWM composes windowed OpenGL in
+/// step with the display anyway, so the wait only added latency, and
+/// with the display off after sleep some drivers never returned from it,
+/// wedging the renderer. Needs a current context.
+fn disableSwapWait() void {
+    const SwapInterval = *const fn (c_int) callconv(.winapi) c_int;
+    const proc = w32.wglGetProcAddress("wglSwapIntervalEXT") orelse return;
+    const set_interval: SwapInterval = @ptrCast(proc);
+    _ = set_interval(0);
 }
 
 /// Set up a pixel format suitable for OpenGL rendering.
@@ -3016,11 +3024,12 @@ fn writeWin32InputSequence(
     self.core_surface.io.queueMessage(msg, .unlocked);
 }
 
-/// Called by the renderer thread after each frame it updates and draws,
-/// for the performance benchmark (frame_log.zig).
-pub fn recordFrameTime(self: *Surface, total_ns: u64, swap_ns: u64) void {
-    _ = self;
+/// Called by the renderer thread after each frame it updates and draws:
+/// logs it for the performance benchmark (frame_log.zig) and paces the
+/// next one to the display (frame_pacer.zig).
+pub fn frameDrawn(self: *Surface, total_ns: u64, swap_ns: u64) void {
     frame_log.record(total_ns, swap_ns);
+    self.frame_pacer.frameDone(self.hdc);
 }
 
 /// Called by the renderer thread after SwapBuffers to signal that a

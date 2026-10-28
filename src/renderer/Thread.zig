@@ -670,10 +670,11 @@ fn renderCallback(
     // Draw
     t.drawFrame(false);
 
-    // Sharp's Windows build measures frames against its performance budget.
-    if (comptime @hasDecl(apprt.Surface, "recordFrameTime")) {
+    // Sharp's Windows build logs frames for its performance budget and
+    // paces them to the display.
+    if (comptime @hasDecl(apprt.Surface, "frameDrawn")) {
         const total = frame_start.durationTo(.now(global.io(), .awake)).nanoseconds;
-        t.surface.recordFrameTime(@intCast(total), t.renderer.api.last_swap_ns);
+        t.surface.frameDrawn(@intCast(total), t.renderer.api.last_swap_ns);
     }
 
     // Schedule the next animation wake, if the renderer needs one.
