@@ -429,8 +429,9 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   offered under Settings > General > Updates. A local build (without
   `-Dsharp-release`) never updates. The installer waits for a running
   Sharp to let go of its files before replacing them. Checked 2026-10-28:
-  silent install, waiting on a locked `sharp.exe`, and a clean uninstall;
-  an update from a real release is not checked yet.
+  silent install, waiting on a locked `sharp.exe`, a clean uninstall, and
+  a local 0.0.9 build that found v0.1.0 on GitHub within 25 s, showed the
+  button, and restarted as 0.1.0 about 4 s after the click.
 - **Sharp is installed by a PowerShell command, not a downloaded file.**
   There is no code signing (T3 Code pays for Azure Trusted Signing), and
   SmartScreen stops unsigned programs only when they carry the mark of
