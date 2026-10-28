@@ -18,6 +18,7 @@ const Window = @import("Window.zig");
 const w32 = @import("win32.zig");
 const brand = @import("brand.zig");
 const wide_string = @import("wide_string.zig");
+const servers = @import("servers.zig");
 const frame_log = @import("frame_log.zig");
 const Scrollbar = @import("Scrollbar.zig").Scrollbar;
 
@@ -868,9 +869,11 @@ pub fn clipboardRequest(
         };
         defer _ = w32.GlobalUnlock(hglobal);
 
+        // Any program can put text there without a terminator, so the
+        // block's size bounds the search for one.
         const wptr: [*]const u16 = @ptrCast(@alignCast(ptr16));
-        var wlen: usize = 0;
-        while (wptr[wlen] != 0) wlen += 1;
+        const capacity = w32.GlobalSize(hglobal) / 2;
+        const wlen = std.mem.indexOfScalar(u16, wptr[0..capacity], 0) orelse capacity;
 
         const utf8 = std.unicode.utf16LeToUtf8Alloc(alloc, wptr[0..wlen]) catch |err| {
             log.warn("utf16LeToUtf8Alloc failed: {}", .{err});
@@ -1059,6 +1062,11 @@ pub fn defaultTermioEnv(self: *const Surface) !std.process.Environ.Map {
 /// separator, except for a drive root ("C:\\").
 /// Returns whether the folder changed.
 pub fn setFolder(self: *Surface, path: []const u8) bool {
+    // The path comes from the program's OSC 7. One that doesn't fit would
+    // be a different folder once cut, and control characters or "|" could
+    // forge lines in the session file.
+    if (path.len > self.folder.len) return false;
+    for (path) |c| if (c < 0x20 or c == 0x7F or c == '|') return false;
     var trimmed = std.mem.trimEnd(u8, path, "/\\");
     if (trimmed.len == 2 and trimmed[1] == ':') trimmed = path[0..@min(path.len, 3)];
     const n = @min(trimmed.len, self.folder.len);
@@ -1075,7 +1083,10 @@ pub fn sshHost(self: *const Surface) []const u8 {
 }
 
 /// Returns whether the host changed.
-pub fn setSshHost(self: *Surface, host: []const u8) bool {
+pub fn setSshHost(self: *Surface, detected: []const u8) bool {
+    // Read from another process's command line: anything that couldn't be
+    // an ssh destination (and could break the session file) counts as none.
+    const host = if (servers.valid(detected)) detected else "";
     const n: u8 = @intCast(@min(host.len, self.ssh_host.len));
     if (n == self.ssh_host_len and std.mem.eql(u8, host[0..n], self.ssh_host[0..n])) return false;
     @memcpy(self.ssh_host[0..n], host[0..n]);
@@ -1761,7 +1772,7 @@ pub fn handlePaletteChange(self: *Surface) void {
     const wlen: usize = @intCast(w32.GetWindowTextW(edit, &wbuf, @intCast(wbuf.len)));
 
     var utf8_buf: [512]u8 = undefined;
-    const utf8_len = std.unicode.utf16LeToUtf8(&utf8_buf, wbuf[0..wlen]) catch 0;
+    const utf8_len = wide_string.toUtf8(&utf8_buf, wbuf[0..wlen]);
 
     self.filterPaletteEntries(utf8_buf[0..utf8_len]);
 }
@@ -2826,10 +2837,17 @@ fn sendImeText(self: *Surface, utf16: []const u16) void {
         return;
     }
 
-    // Convert UTF-16LE to UTF-8 in a stack buffer (256 bytes covers
-    // even long CJK phrases — each CJK char is 3 bytes in UTF-8).
-    var utf8_buf: [256]u8 = undefined;
-    const len = std.unicode.utf16LeToUtf8(&utf8_buf, utf16) catch |err| {
+    // A UTF-16 unit becomes at most 3 bytes of UTF-8, and the conversion
+    // doesn't bounds-check. Long results (the heap path in
+    // handleImeComposition) get a buffer of their own.
+    var stack_buf: [256]u8 = undefined;
+    const alloc = self.app.core_app.alloc;
+    const utf8_buf = if (utf16.len * 3 <= stack_buf.len)
+        stack_buf[0..]
+    else
+        alloc.alloc(u8, utf16.len * 3) catch return;
+    defer if (utf8_buf.ptr != &stack_buf) alloc.free(utf8_buf);
+    const len = std.unicode.utf16LeToUtf8(utf8_buf, utf16) catch |err| {
         log.warn("IME utf16→utf8 error: {}", .{err});
         return;
     };

@@ -710,7 +710,7 @@ fn refreshServers(self: *Window) void {
         if (!surface.setSshHost(host)) continue;
         changed = true;
         // Servers reached by typing ssh are offered again later.
-        _ = self.app.recent_servers.add(host);
+        _ = self.app.recent_servers.add(surface.sshHost());
     }
     if (!changed) return;
     self.invalidateTabBar();

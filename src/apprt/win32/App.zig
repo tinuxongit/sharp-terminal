@@ -1125,7 +1125,7 @@ pub fn performAction(
                         const wlen: usize = @intCast(w32.GetWindowTextW(h, &wbuf, @intCast(wbuf.len)));
                         if (wlen > 0) {
                             var utf8_buf: [1024]u8 = undefined;
-                            const utf8_len = std.unicode.utf16LeToUtf8(&utf8_buf, wbuf[0..wlen]) catch 0;
+                            const utf8_len = wide_string.toUtf8(&utf8_buf, wbuf[0..wlen]);
                             if (utf8_len > 0) {
                                 // Copy to clipboard via the core surface
                                 const alloc = self.core_app.alloc;
@@ -2131,10 +2131,8 @@ fn showUpdateNotification(self: *App, ver: []const u8) void {
     // Body: "Version X.Y.Z is available. Visit GitHub to download."
     var body_utf8: [256]u8 = undefined;
     const body_len = std.mem.print(&body_utf8, "Version {s} is available.\nVisit GitHub releases to download.", .{ver[0..ver_len]}) catch return;
-    var body_utf16: [256]u16 = undefined;
-    const wlen = std.unicode.utf8ToUtf16Le(&body_utf16, body_len) catch 0;
-    @memcpy(nid.szInfo[0..wlen], body_utf16[0..wlen]);
-    nid.szInfo[wlen] = 0;
+    // The version comes from the network: truncate, never overflow.
+    _ = wide_string.fromUtf8(&nid.szInfo, body_len);
 
     const tip = std.unicode.utf8ToUtf16LeStringLiteral(brand.name);
     @memcpy(nid.szTip[0..tip.len], tip);

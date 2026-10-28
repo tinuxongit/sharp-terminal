@@ -805,6 +805,10 @@ pub extern "kernel32" fn GlobalLock(
     hMem: *anyopaque,
 ) callconv(.winapi) ?[*]u8;
 
+pub extern "kernel32" fn GlobalSize(
+    hMem: *anyopaque,
+) callconv(.winapi) usize;
+
 pub extern "kernel32" fn GlobalUnlock(
     hMem: *anyopaque,
 ) callconv(.winapi) i32;

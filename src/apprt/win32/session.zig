@@ -89,7 +89,9 @@ pub fn load(alloc: Allocator, default_width: f32) !?Loaded {
         const key = std.mem.trim(u8, line[0..eq], " \t");
         const value = std.mem.trim(u8, line[eq + 1 ..], " \t");
         if (std.mem.eql(u8, key, "width")) {
-            loaded.session.width = std.fmt.parseFloat(f32, value) catch continue;
+            const width = std.fmt.parseFloat(f32, value) catch continue;
+            // nan or inf would reach an int conversion when laid out.
+            if (std.math.isFinite(width)) loaded.session.width = width;
         } else if (std.mem.eql(u8, key, "collapsed")) {
             try collapsed.append(a, try a.dupe(u8, value));
         } else if (std.mem.eql(u8, key, "server")) {

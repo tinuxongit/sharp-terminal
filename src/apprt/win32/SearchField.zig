@@ -77,11 +77,13 @@ pub fn key(self: *SearchField, hwnd: w32.HWND, vk: u16) bool {
             const handle = w32.GetClipboardData(w32.CF_UNICODETEXT) orelse return false;
             const bytes = w32.GlobalLock(handle) orelse return false;
             defer _ = w32.GlobalUnlock(handle);
-            const pasted: [*:0]const u16 = @ptrCast(@alignCast(bytes));
-            var i: usize = 0;
+            // Any program can put text there without a terminator, so the
+            // block's size bounds the read.
+            const pasted: [*]const u16 = @ptrCast(@alignCast(bytes));
             var changed = false;
-            while (pasted[i] != 0 and pasted[i] != '\r' and pasted[i] != '\n') : (i += 1) {
-                if (!self.typeChar(pasted[i])) break;
+            for (pasted[0 .. w32.GlobalSize(handle) / 2]) |unit| {
+                if (unit == 0 or unit == '\r' or unit == '\n') break;
+                if (!self.typeChar(unit)) break;
                 changed = true;
             }
             return changed;
