@@ -111,6 +111,11 @@ data: ?*anyopaque = null,
 /// Process ID (POSIX) or process handle (Windows), set after start is called.
 pid: if (builtin.target.os.tag == .windows) ?windows.HANDLE else ?posix.system.pid_t = null,
 
+/// Windows: the job a pseudo console's process and everything it launches
+/// run in, so they can be ended with it (see os/console_programs.zig).
+job: if (builtin.target.os.tag == .windows) ?windows.HANDLE else void =
+    if (builtin.target.os.tag == .windows) null else {},
+
 /// The various methods a process may exit.
 pub const Exit = if (builtin.target.os.tag == .windows) union(enum) {
     Exited: u32,
@@ -356,11 +361,15 @@ fn startWindows(self: *Command, arena: Allocator) !void {
     // attributes such that the child process only inherits these handles,
     // then set bInheritsHandles below.
 
+    // Must outlive CreateProcessW, which reads it through the attribute list.
+    var job_list: [1]windows.HANDLE = undefined;
     const attribute_list, const stdin, const stdout, const stderr = if (self.pseudo_console) |pseudo_console| b: {
+        self.job = internal_os.console_programs.createJob();
+        const attribute_count: windows.DWORD = if (self.job != null) 2 else 1;
         var attribute_list_size: usize = undefined;
         _ = windows.exp.kernel32.InitializeProcThreadAttributeList(
             null,
-            1,
+            attribute_count,
             0,
             &attribute_list_size,
         );
@@ -368,10 +377,23 @@ fn startWindows(self: *Command, arena: Allocator) !void {
         const attribute_list_buf = try arena.alloc(u8, attribute_list_size);
         if (windows.exp.kernel32.InitializeProcThreadAttributeList(
             attribute_list_buf.ptr,
-            1,
+            attribute_count,
             0,
             &attribute_list_size,
         ) == windows.FALSE) return windows.unexpectedError(windows.GetLastError());
+
+        if (self.job) |job| {
+            job_list = .{job};
+            if (windows.exp.kernel32.UpdateProcThreadAttribute(
+                attribute_list_buf.ptr,
+                0,
+                windows.PROC_THREAD_ATTRIBUTE_JOB_LIST,
+                &job_list,
+                @sizeOf(@TypeOf(job_list)),
+                null,
+                null,
+            ) == windows.FALSE) return windows.unexpectedError(windows.GetLastError());
+        }
 
         if (windows.exp.kernel32.UpdateProcThreadAttribute(
             attribute_list_buf.ptr,

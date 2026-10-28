@@ -19,6 +19,8 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/UntrustedUrl.zig`: decides which links printed by programs
   may be opened. Anything that reaches `ShellExecuteW` from terminal output
   must go through it.
+- `src/os/console_programs.zig`: which programs a tab started on Windows
+  (through its Job Object) and which of them end with it.
 - `src/os/Conpty.zig` and `pkg/conpty/`: the bundled Microsoft ConPTY. The
   package is pinned by version and SHA-256 in `pkg/conpty/fetch.zig`.
 - `src/apprt/win32/wide_string.zig`: the one place that converts text into
@@ -110,7 +112,14 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
 - **Closing asks only when a command is running.** Shells with prompt
   marks (PowerShell with Sharp's integration) answer through the prompt
   test. `cmd.exe` sends none, so on Windows a command counts as running
-  when the shell has a child process (`Subprocess.commandRunning`).
+  when closing would end a program (`Subprocess.commandRunning`).
+- **A tab's programs end with it.** Each shell starts inside its own Job
+  Object (`PROC_THREAD_ATTRIBUTE_JOB_LIST`, so nothing escapes before it
+  is assigned), which catches every program it launches even after the
+  launcher exits. Closing the tab ends the console programs in the job
+  first, then the shell. Programs built for the GUI subsystem (read from
+  their PE header) and everything below them keep running, so `code .`
+  or `start chrome` outlive the tab as they do in Windows Terminal.
 - **Settings are a panel that writes the config file.** The gear, beside
   minimize, opens a panel over the dimmed terminal, laid out like T3
   Code's: searchable categories on the left, cards of settings with
@@ -208,8 +217,6 @@ Baseline, 2026-10-28, two runs each:
   after 1 second, to survive a renderer that hangs in `SwapBuffers` after
   sleep. That hides the hang instead of fixing it, and a dropped config change
   leaves the renderer and terminal with different settings.
-- Closing a tab kills only the shell (`TerminateProcess`). There is no Job
-  Object, so programs started from it in the background can keep running.
 - The PowerShell integration script reports the working directory in OSC 7
   without percent-encoding, so folders containing `%` or `#` are misread.
 - The fork deleted upstream's `test.yml` CI, so upstream's core tests no
@@ -231,7 +238,9 @@ Baseline, 2026-10-28, two runs each:
   be rebound in the config file.
 - Visual Studio is found only in the folders `profiles.zon` lists, not
   through vswhere, so unusual install locations are missed.
-- `commandRunning` matches children by parent PID, which Windows reuses, so
-  an unrelated process could rarely look like a running command.
+- A console program started from the tab in a window of its own (`start
+  cmd`) ends with the tab, since only the GUI subsystem marks a program
+  as independent. If Sharp crashes, nothing ends: the jobs don't kill on
+  close, so GUI programs in them survive a normal close.
 - The fork removed upstream's CI workflows and contributor docs (`HACKING.md`,
   `CONTRIBUTING.md`).

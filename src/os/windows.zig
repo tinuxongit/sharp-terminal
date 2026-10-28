@@ -120,6 +120,26 @@ pub const PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = ProcThreadAttributeValue(
     false,
 );
 
+/// Starts a process inside the given jobs, before it can run any code.
+pub const PROC_THREAD_ATTRIBUTE_JOB_LIST = ProcThreadAttributeValue(
+    .ProcThreadAttributeJobList,
+    false,
+    true,
+    false,
+);
+
+// Job objects (see console_programs.zig)
+pub const PROCESS_TERMINATE: DWORD = 0x0001;
+pub const PROCESS_QUERY_LIMITED_INFORMATION: DWORD = 0x1000;
+pub const JobObjectBasicProcessIdList: c_int = 3;
+pub fn JOBOBJECT_BASIC_PROCESS_ID_LIST(comptime capacity: usize) type {
+    return extern struct {
+        NumberOfAssignedProcesses: DWORD,
+        NumberOfProcessIdsInList: DWORD,
+        ProcessIdList: [capacity]ULONG_PTR,
+    };
+}
+
 // Types needed for ntdll calls
 pub const ACCESS_MASK = windows.ACCESS_MASK;
 pub const CTL_CODE = windows.CTL_CODE;
@@ -286,6 +306,28 @@ pub const exp = struct {
             hProcess: HANDLE,
             lpExitCode: *DWORD,
         ) callconv(.winapi) BOOL;
+        pub extern "kernel32" fn CreateJobObjectW(
+            lpJobAttributes: ?*SECURITY_ATTRIBUTES,
+            lpName: ?LPCWSTR,
+        ) callconv(.winapi) ?HANDLE;
+        pub extern "kernel32" fn QueryInformationJobObject(
+            hJob: HANDLE,
+            JobObjectInformationClass: c_int,
+            lpJobObjectInformation: *anyopaque,
+            cbJobObjectInformationLength: DWORD,
+            lpReturnLength: ?*DWORD,
+        ) callconv(.winapi) BOOL;
+        pub extern "kernel32" fn OpenProcess(
+            dwDesiredAccess: DWORD,
+            bInheritHandle: BOOL,
+            dwProcessId: DWORD,
+        ) callconv(.winapi) ?HANDLE;
+        pub extern "kernel32" fn QueryFullProcessImageNameW(
+            hProcess: HANDLE,
+            dwFlags: DWORD,
+            lpExeName: [*:0]u16,
+            lpdwSize: *DWORD,
+        ) callconv(.winapi) BOOL;
         pub extern "kernel32" fn TerminateProcess(
             hProcess: HANDLE,
             uExitCode: UINT,
@@ -401,6 +443,7 @@ pub const exp = struct {
 };
 
 pub const ProcThreadAttributeNumber = enum(DWORD) {
+    ProcThreadAttributeJobList = 13,
     ProcThreadAttributePseudoConsole = 22,
     _,
 };

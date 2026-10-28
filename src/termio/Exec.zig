@@ -1287,6 +1287,12 @@ const Subprocess = struct {
         if (command.pid) |pid| {
             switch (builtin.target.os.tag) {
                 .windows => {
+                    // Programs the shell left running end with it.
+                    if (command.job) |job| {
+                        internal_os.console_programs.end(job, windows.exp.kernel32.GetProcessId(pid));
+                        _ = windows.exp.kernel32.CloseHandle(job);
+                        command.job = null;
+                    }
                     if (windows.exp.kernel32.TerminateProcess(pid, 0) == windows.FALSE) {
                         return windows.unexpectedError(windows.GetLastError());
                     }
@@ -1404,21 +1410,17 @@ const Subprocess = struct {
 
     /// Whether the shell is running a command, or null when that can't be
     /// told. Only answered on Windows: it has no foreground process group,
-    /// and a ConPTY can't say who reads from it, but a command the shell
-    /// runs is a child process of the shell.
+    /// and a ConPTY can't say who reads from it, but the shell's job holds
+    /// every program it started. Running means closing would end one.
     pub fn commandRunning(self: *Subprocess) ?bool {
+        if (comptime builtin.target.os.tag != .windows) return null;
         const shell = self.processId() orelse return null;
-
-        const snapshot = windows.exp.kernel32.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0);
-        if (snapshot == windows.INVALID_HANDLE_VALUE) return null;
-        defer _ = windows.exp.kernel32.CloseHandle(snapshot);
-
-        var entry: windows.PROCESSENTRY32W = .{};
-        var more = windows.exp.kernel32.Process32FirstW(snapshot, &entry) != windows.FALSE;
-        while (more) : (more = windows.exp.kernel32.Process32NextW(snapshot, &entry) != windows.FALSE) {
-            if (entry.th32ParentProcessID == shell) return true;
-        }
-        return false;
+        const job = switch (self.process orelse return null) {
+            .fork_exec => |cmd| cmd.job orelse return null,
+            .flatpak => return null,
+        };
+        var buf: [internal_os.console_programs.max_programs]u32 = undefined;
+        return internal_os.console_programs.list(job, shell, &buf).len > 0;
     }
 };
 
