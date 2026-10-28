@@ -90,7 +90,7 @@ fn insert(menu: w32.HMENU, position: *u32, id: u32, label: []const u8, bitmap: ?
 }
 
 /// Menus need a 32-bit premultiplied bitmap to show an icon with soft edges.
-fn newBitmap(size: i32) ?struct { dc: w32.HDC, bitmap: *anyopaque, pixels: [*]u32 } {
+pub fn newBitmap(size: i32) ?struct { dc: w32.HDC, bitmap: *anyopaque, pixels: [*]u32 } {
     const dc = w32.CreateCompatibleDC(null) orelse return null;
     const info: w32.BITMAPINFO = .{ .bmiHeader = .{ .biWidth = size, .biHeight = -size } };
     var bits: ?*anyopaque = null;

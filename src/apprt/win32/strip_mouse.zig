@@ -1,6 +1,8 @@
 //! The tab strip's mouse: clicks, hover and leaving, closing tabs Chrome's
 //! way, dragging them to reorder, and the right-click tab menu.
 const std = @import("std");
+const wide_string = @import("wide_string.zig");
+const tab_color = @import("tab_color.zig");
 const closed_tabs = @import("closed_tabs.zig");
 const w32 = @import("win32.zig");
 const tab_strip = @import("tab_strip.zig");
@@ -103,6 +105,9 @@ const TAB_CTX_CLOSE_OTHERS: usize = 9002;
 const TAB_CTX_CLOSE_RIGHT: usize = 9003;
 const TAB_CTX_NEW_TAB: usize = 9004;
 const TAB_CTX_REOPEN: usize = 9005;
+const TAB_CTX_COLOR: usize = 9006;
+const TAB_CTX_RENAME: usize = 9007;
+const TAB_CTX_RENAME_WINDOW: usize = 9008;
 
 /// Handle a right-button click in the tab bar region.
 /// Shows a context menu for the clicked tab.
@@ -134,6 +139,12 @@ pub fn showTabMenu(self: *Window, clicked_tab: ?usize, x: i16, y: i16) void {
         _ = w32.AppendMenuW(menu, w32.MF_STRING, TAB_CTX_CLOSE, std.unicode.utf8ToUtf16LeStringLiteral("Close Tab"));
         _ = w32.AppendMenuW(menu, if (self.tab_count > 1) w32.MF_STRING else w32.MF_GRAYED, TAB_CTX_CLOSE_OTHERS, std.unicode.utf8ToUtf16LeStringLiteral("Close Other Tabs"));
         _ = w32.AppendMenuW(menu, if (tab + 1 < self.tab_count) w32.MF_STRING else w32.MF_GRAYED, TAB_CTX_CLOSE_RIGHT, std.unicode.utf8ToUtf16LeStringLiteral("Close Tabs to the Right"));
+        _ = w32.AppendMenuW(menu, w32.MF_SEPARATOR, 0, null);
+        _ = w32.AppendMenuW(menu, w32.MF_STRING, TAB_CTX_RENAME, std.unicode.utf8ToUtf16LeStringLiteral("Rename Tab"));
+        var color_label: [32]u16 = undefined;
+        _ = wide_string.fromUtf8(&color_label, tab_color.data.menu);
+        _ = w32.AppendMenuW(menu, w32.MF_STRING, TAB_CTX_COLOR, @ptrCast(&color_label));
+        _ = w32.AppendMenuW(menu, w32.MF_STRING, TAB_CTX_RENAME_WINDOW, std.unicode.utf8ToUtf16LeStringLiteral("Rename Window"));
         _ = w32.AppendMenuW(menu, w32.MF_SEPARATOR, 0, null);
     }
     _ = w32.AppendMenuW(menu, w32.MF_STRING, TAB_CTX_NEW_TAB, std.unicode.utf8ToUtf16LeStringLiteral("New Tab"));
@@ -176,6 +187,16 @@ pub fn showTabMenu(self: *Window, clicked_tab: ?usize, x: i16, y: i16) void {
             };
         },
         TAB_CTX_REOPEN => _ = closed_tabs.reopen(self),
+        TAB_CTX_RENAME => if (clicked_tab) |tab| tab_rename.startTabRename(self, tab),
+        TAB_CTX_RENAME_WINDOW => tab_rename.startWindowRename(self),
+        TAB_CTX_COLOR => {
+            const tab = clicked_tab orelse return;
+            const choice = tab_color.pick(self.hwnd.?, pt, self.tabColor(tab), self.scale, menusDark(self)) orelse return;
+            self.setTabColor(tab, switch (choice) {
+                .none => null,
+                .color => |c| c,
+            });
+        },
         else => {},
     }
 }

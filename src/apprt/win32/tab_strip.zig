@@ -385,6 +385,8 @@ pub const Titles = struct {
     lens: []const u16,
     /// Each tab's shell icon, drawn at tab_icon_size.
     icons: []const ?w32.HICON,
+    /// Each tab's color, if it was given one.
+    colors: []const ?Rgb,
 };
 
 /// Paint the whole strip. Shapes go straight into the pixels and text
@@ -454,15 +456,23 @@ fn paintTab(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, titl
     const hovered = view.hover.eql(.{ .tab = i }) or view.hover.eql(.{ .tab_close = i });
     canvas.sync();
 
-    const background = if (active) palette.active_tab else if (hovered) palette.hover else palette.strip;
+    // A colored tab is tinted while it rests, and the active one keeps the
+    // terminal's color, so it still flows into it, under a bar of its color.
+    const color = titles.colors[i];
+    const resting = if (color) |c| palette.strip.mix(c, if (hovered) 0.4 else 0.3) else palette.strip;
+    const background = if (active) palette.active_tab else if (hovered and color == null) palette.hover else resting;
     const foot = if (layout.style == .chrome) layout.px(tab_foot) else 0;
     if (active) {
         fillActiveTab(canvas, rect, layout.px(tab_top_corner), foot, palette.active_tab);
+        if (color) |c| {
+            const inset = layout.px(tab_top_corner);
+            canvas.fillRounded(.{ .left = rect.left + inset, .top = rect.top, .right = rect.right - inset, .bottom = rect.top + layout.px(3) }, layout.px(1.5), c);
+        }
     } else if (hovered and layout.style == .windows_terminal) {
-        fillActiveTab(canvas, rect, layout.px(tab_top_corner), 0, palette.hover);
-    } else if (hovered) {
+        fillActiveTab(canvas, rect, layout.px(tab_top_corner), 0, background);
+    } else if (hovered or color != null) {
         const inset = layout.px(hover_inset);
-        canvas.fillRounded(.{ .left = rect.left + inset, .top = rect.top + inset, .right = rect.right - inset, .bottom = rect.bottom - inset }, layout.px(tab_top_corner), palette.hover);
+        canvas.fillRounded(.{ .left = rect.left + inset, .top = rect.top + inset, .right = rect.right - inset, .bottom = rect.bottom - inset }, layout.px(tab_top_corner), background);
     }
 
     // Separators only between two resting tabs, as in Chrome.

@@ -1825,6 +1825,7 @@ pub const MENUITEMINFOW = extern struct {
     cch: u32 = 0,
     hbmpItem: ?*anyopaque = null,
 };
+pub extern "user32" fn GetMenuItemCount(hMenu: HMENU) callconv(.winapi) u32;
 pub extern "user32" fn InsertMenuItemW(hmenu: HMENU, item: u32, fByPosition: i32, lpmi: *const MENUITEMINFOW) callconv(.winapi) i32;
 pub const MIM_STYLE: u32 = 0x00000010;
 pub const MNS_CHECKORBMP: u32 = 0x04000000;

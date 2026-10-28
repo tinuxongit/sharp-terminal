@@ -160,6 +160,7 @@ pub fn newSplit(self: *Window, direction: SplitTree(Surface).Split.Direction) !v
         alloc.destroy(new_surface);
     }
     try new_surface.init(self.app, self, .split);
+    new_surface.tab_color = active_surface.tab_color;
 
     // Create a single-node tree for the new surface.
     var insert_tree = try SplitTree(Surface).init(alloc, new_surface);

@@ -3,6 +3,7 @@
 const Surface = @This();
 
 const std = @import("std");
+const canvas = @import("canvas.zig");
 const Allocator = std.mem.Allocator;
 const apprt = @import("../../apprt.zig");
 const configpkg = @import("../../config.zig");
@@ -56,6 +57,8 @@ parent_window: *Window = undefined,
 
 /// The shell profile's icon shown on this surface's tab, owned by App.
 icon: ?w32.HICON = null,
+/// The tab's color (tab_color.zig), kept on each of its panes.
+tab_color: ?canvas.Rgb = null,
 
 /// What the tab sidebar shows about this surface: where its shell runs,
 /// its folder (from OSC 7, when the shell reports it), when it opened and

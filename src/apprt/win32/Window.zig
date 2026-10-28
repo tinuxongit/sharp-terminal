@@ -4,6 +4,7 @@
 const Window = @This();
 
 const std = @import("std");
+const tab_color = @import("tab_color.zig");
 const apprt = @import("../../apprt.zig");
 
 const App = @import("App.zig");
@@ -1379,6 +1380,11 @@ pub fn paintTabBar(self: *Window) void {
                 for (0..self.tab_count) |i| icons[i] = self.tabIcon(i);
                 break :icons icons[0..self.tab_count];
             },
+            .colors = colors: {
+                var colors: [MAX_TABS]?tab_color.Rgb = undefined;
+                for (0..self.tab_count) |i| colors[i] = self.tabColor(i);
+                break :colors colors[0..self.tab_count];
+            },
         },
         .{
             .hover = self.strip_hover,
@@ -1682,6 +1688,21 @@ fn profileOptions(self: *Window, list: *const profiles.List, index: usize, base:
     options.wsl = list.items[index].source == .wsl;
     options.paths = list.items[index].paths;
     return options;
+}
+
+/// A tab shows the color of the first of its panes that has one.
+pub fn tabColor(self: *Window, index: usize) ?tab_color.Rgb {
+    var it = self.tab_trees[index].iterator();
+    while (it.next()) |entry| {
+        if (entry.view.tab_color) |c| return c;
+    }
+    return null;
+}
+
+pub fn setTabColor(self: *Window, index: usize, color: ?tab_color.Rgb) void {
+    var it = self.tab_trees[index].iterator();
+    while (it.next()) |entry| entry.view.tab_color = color;
+    self.invalidateTabBar();
 }
 
 /// A tab shows the icon of the first of its panes that has one.

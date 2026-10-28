@@ -1,0 +1,17 @@
+// The colors a tab can be given from its right-click menu, as Windows
+// Terminal's tab color picker offers them, and the menu's text. Checked
+// when Sharp is compiled.
+.{
+    .menu = "Color...",
+    .none = "No color",
+    .colors = .{
+        .{ .name = "Red", .r = 0xE7, .g = 0x48, .b = 0x56 },
+        .{ .name = "Orange", .r = 0xF7, .g = 0x63, .b = 0x0C },
+        .{ .name = "Yellow", .r = 0xFF, .g = 0xB9, .b = 0x00 },
+        .{ .name = "Green", .r = 0x16, .g = 0xC6, .b = 0x0C },
+        .{ .name = "Teal", .r = 0x00, .g = 0xB7, .b = 0xC3 },
+        .{ .name = "Blue", .r = 0x3B, .g = 0x78, .b = 0xFF },
+        .{ .name = "Purple", .r = 0xB1, .g = 0x46, .b = 0xC2 },
+        .{ .name = "Gray", .r = 0x76, .g = 0x76, .b = 0x76 },
+    },
+}
