@@ -8,7 +8,6 @@ const apprt = @import("../../apprt.zig");
 const configpkg = @import("../../config.zig");
 const Config = configpkg.Config;
 const CoreApp = @import("../../App.zig");
-const CoreSurface = @import("../../Surface.zig");
 const internal_os = @import("../../os/main.zig");
 const global = @import("../../global.zig");
 
@@ -37,12 +36,12 @@ const OpenUrlRequest = struct {
     }
 };
 
-const build_config = @import("../../build_config.zig");
 const input = @import("../../input.zig");
 const find_bar = @import("find_bar.zig");
 const command_palette = @import("command_palette.zig");
 const ime = @import("ime.zig");
 const win32_input = @import("win32_input.zig");
+const clipboard = @import("clipboard.zig");
 
 comptime {
     // Exports the exe's load configuration; nothing references it.
@@ -291,7 +290,6 @@ pub fn init(
     // Builds without Zig's segfault handler (ReleaseFast) crash through
     // here; the handler and panics are covered in main_ghostty.zig.
     _ = w32.SetUnhandledExceptionFilter(&crashFilter);
-
 }
 
 /// A crash ends the console programs the tabs started, as closing them
@@ -2864,4 +2862,3 @@ test "open URL frees undelivered requests" {
         .url = "https://example.com/\xff",
     }));
 }
-
