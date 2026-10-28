@@ -187,7 +187,9 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   server), the active tab, folded groups, the width and recent servers are
   saved as they change. A tab that was on a server reconnects.
   Closing a window keeps its tabs for next time; closing the last tab by
-  hand empties the session.
+  hand empties the session. Tabs come back with their shell and folder,
+  not their old output: the programs that wrote it can't come back, and
+  output alone isn't worth saving.
 - **SSH sessions are found by polling.** Windows doesn't announce them, so
   every 3 seconds one process snapshot is searched below each tab's shell
   for an SSH client (ssh.exe, PuTTY's plink.exe, or wsl.exe running ssh)
@@ -253,4 +255,3 @@ Baseline, 2026-10-28, two runs each:
   large, so splitting them makes merges from `winfork` harder.
 - The frame-time benchmark is run by hand, not after every commit: it
   takes a minute and opens a window.
-- A saved session reopens shells, not their output or running programs.
