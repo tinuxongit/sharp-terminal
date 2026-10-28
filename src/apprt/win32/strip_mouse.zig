@@ -27,6 +27,43 @@ pub fn releaseFrozenTabWidth(self: *Window) void {
     self.invalidateTabBar();
 }
 
+/// A dragged tab let go of where the pointer is now: over another Sharp
+/// window's tab strip it moves there, and outside every Sharp window it
+/// becomes a window of its own at the pointer, as in Windows Terminal.
+/// Inside its own window the drag has already reordered it.
+pub fn dropTab(self: *Window, tab: usize) void {
+    if (self.is_quick_terminal or tab >= self.tab_count) return;
+    var point: w32.POINT = .{ .x = 0, .y = 0 };
+    _ = w32.GetCursorPos_(&point);
+    if (inside(self, point)) return;
+    for (self.app.windows.items) |other| {
+        if (other == self or other.is_quick_terminal or other.closing or !inside(other, point)) continue;
+        var client = point;
+        _ = w32.ScreenToClient(other.hwnd.?, &client);
+        if (client.y >= other.tabBarHeight()) return;
+        self.moveTabInto(tab, other, other.stripLayout().dropIndex(client.x)) catch |err|
+            log.warn("could not move the tab to that window: {}", .{err});
+        return;
+    }
+    if (self.tab_count <= 1) return;
+    const destination = self.app.newEmptyWindow() catch return;
+    self.moveTabInto(tab, destination, 0) catch |err| {
+        log.warn("could not tear the tab out: {}", .{err});
+        destination.close();
+        return;
+    };
+    // The new window's tab sits under the pointer, as in Chrome.
+    if (destination.hwnd) |h| _ = w32.SetWindowPos(h, null, point.x - 80, point.y - 16, 0, 0, w32.SWP_NOSIZE | w32.SWP_NOZORDER);
+}
+
+fn inside(window: *Window, point: w32.POINT) bool {
+    const hwnd = window.hwnd orelse return false;
+    if (w32.IsWindowVisible(hwnd) == 0) return false;
+    var rect: w32.RECT = undefined;
+    if (w32.GetWindowRect(hwnd, &rect) == 0) return false;
+    return point.x >= rect.left and point.x < rect.right and point.y >= rect.top and point.y < rect.bottom;
+}
+
 /// Move a tab from one index to another, shifting intermediate tabs.
 pub fn moveTabTo(self: *Window, from: usize, to: usize) void {
     if (from == to) return;

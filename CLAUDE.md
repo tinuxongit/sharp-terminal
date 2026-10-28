@@ -224,6 +224,12 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   derived from the terminal's background and foreground, so every theme
   matches. Rounded corners are anti-aliased by hand rather than pulling in
   GDI+. Not yet tried on Windows 10.
+- **Tabs move between windows by dragging, as in Windows Terminal.** A
+  dragged tab let go of over another Sharp window's strip moves there at
+  that spot (a window left without tabs closes, merging the two); let go
+  of outside every Sharp window it becomes a window under the pointer.
+  `Window.moveTabInto` does every move, Move to New Window included. Not
+  yet tried by hand: the drop reads the real pointer.
 - **Tabs behave like Chrome's.** Equal widths up to 240 px that shrink as
   tabs open, titles that fade instead of an ellipsis, a close button on
   inactive tabs only when there is room (Chromium's 68 px content rule),

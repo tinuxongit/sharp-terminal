@@ -587,6 +587,7 @@ pub extern "user32" fn GetMonitorInfoW(
     lpmi: *MONITORINFO,
 ) callconv(.winapi) i32;
 
+pub extern "user32" fn IsWindowVisible(hWnd: HWND) callconv(.winapi) i32;
 pub extern "user32" fn IsZoomed(
     hWnd: HWND,
 ) callconv(.winapi) i32;

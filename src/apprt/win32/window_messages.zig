@@ -384,9 +384,12 @@ pub fn windowWndProc(
                 return 0;
             }
             if (window.drag_tab >= 0) {
+                const tab: usize = @intCast(window.drag_tab);
+                const dragged = window.drag_active;
                 window.drag_tab = -1;
                 window.drag_active = false;
                 _ = w32.ReleaseCapture();
+                if (dragged) strip_mouse.dropTab(window, tab);
                 return 0;
             }
             return 0;

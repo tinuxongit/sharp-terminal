@@ -727,13 +727,7 @@ fn openHandedOver(self: *App, handed: *const terminal_handoff.Handed) void {
 
 fn handoffWindow(self: *App) !*Window {
     if (self.newestWindow()) |window| return window;
-    const alloc = self.core_app.alloc;
-    const window = try alloc.create(Window);
-    errdefer alloc.destroy(window);
-    try window.init(self, .{});
-    errdefer window.deinit();
-    try self.windows.append(alloc, window);
-    return window;
+    return self.newEmptyWindow();
 }
 
 /// The most recently opened ordinary window, if any is open.
@@ -840,8 +834,9 @@ fn restoreSession(self: *App, first: *Window) !bool {
     return true;
 }
 
-/// Open a new window whose first tab uses `options`.
-pub fn openWindowWithTab(self: *App, options: Window.AddTabOptions) !void {
+/// A new window with no tabs yet, tracked by the app; it shows with its
+/// first tab.
+pub fn newEmptyWindow(self: *App) !*Window {
     const alloc = self.core_app.alloc;
     const window = try alloc.create(Window);
     window.init(self, .{}) catch |err| {
@@ -853,6 +848,12 @@ pub fn openWindowWithTab(self: *App, options: Window.AddTabOptions) !void {
         alloc.destroy(window);
         return err;
     };
+    return window;
+}
+
+/// Open a new window whose first tab uses `options`.
+pub fn openWindowWithTab(self: *App, options: Window.AddTabOptions) !void {
+    const window = try self.newEmptyWindow();
     _ = window.addTabWithOptions(options) catch |err| {
         window.close();
         return err;

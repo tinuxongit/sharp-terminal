@@ -1180,62 +1180,58 @@ pub fn moveTab(self: *Window, amount: isize) void {
 pub fn moveTabToNewWindow(self: *Window, surface: *Surface) !bool {
     if (self.is_quick_terminal or self.tab_count <= 1) return false;
     const tab_idx = self.findTabIndex(surface) orelse return false;
-
-    const alloc = self.app.core_app.alloc;
-    const destination = try alloc.create(Window);
-    destination.init(self.app, .{}) catch |err| {
-        alloc.destroy(destination);
+    const destination = try self.app.newEmptyWindow();
+    self.moveTabInto(tab_idx, destination, 0) catch |err| {
+        destination.close();
         return err;
     };
-    errdefer {
-        destination.deinit();
-        alloc.destroy(destination);
-    }
+    return true;
+}
 
-    try self.app.windows.append(alloc, destination);
-    var tracked = true;
-    errdefer if (tracked) {
-        for (self.app.windows.items, 0..) |window, i| {
-            if (window == destination) {
-                _ = self.app.windows.orderedRemove(i);
-                break;
-            }
-        }
-    };
-
+/// Move tab `tab_idx` into `destination` at `pos`, as its active tab. A
+/// window left without tabs closes, as when its last tab is dragged into
+/// another (Windows Terminal merges windows the same way).
+pub fn moveTabInto(self: *Window, tab_idx: usize, destination: *Window, pos: usize) !void {
+    if (destination == self or destination.tab_count >= MAX_TABS) return error.CannotMove;
+    tab_rename.cancelTabRename(self);
+    tab_rename.cancelTabRename(destination);
     const destination_hwnd = destination.hwnd orelse return error.Win32Error;
-    var moved_tree = self.tab_trees[tab_idx];
 
     // Move child HWNDs and owned popups before mutating either tab array.
-    try reparentTabWindows(&moved_tree, self.hwnd.?, destination_hwnd);
+    try reparentTabWindows(&self.tab_trees[tab_idx], self.hwnd.?, destination_hwnd);
 
     const moved = self.takeTab(tab_idx);
-    const moved_active = moved.active;
+    var it = moved.tree.iterator();
+    while (it.next()) |entry| entry.view.parent_window = destination;
     if (self.active_tab > tab_idx) {
         self.active_tab -= 1;
-    } else if (self.active_tab >= self.tab_count) {
+    } else if (self.tab_count > 0 and self.active_tab >= self.tab_count) {
         self.active_tab = self.tab_count - 1;
     }
 
-    destination.putTab(0, moved);
-    destination.active_tab = 0;
-
-    var it = destination.tab_trees[0].iterator();
-    while (it.next()) |entry| entry.view.parent_window = destination;
-
-    self.selectTabIndex(self.active_tab);
-    self.updateTabBarVisibility();
-    self.invalidateTabBar();
-
+    const at = @min(pos, destination.tab_count);
+    const had_tabs = destination.tab_count > 0;
+    destination.putTab(at, moved);
+    // The active tab moved right with the others, and selecting the new
+    // one must hide it, not whichever tab took its index.
+    if (had_tabs and at <= destination.active_tab) destination.active_tab += 1;
+    _ = w32.ShowWindow(destination_hwnd, w32.SW_SHOW);
+    destination.selectTabIndex(at);
     destination.updateTabBarVisibility();
     destination.updateWindowTitle();
-    _ = w32.ShowWindow(destination_hwnd, w32.SW_SHOW);
     _ = w32.UpdateWindow(destination_hwnd);
-    destination.layoutSplits();
-    if (moved_active.hwnd) |h| _ = w32.SetFocus(h);
+    if (moved.active.hwnd) |h| _ = w32.SetFocus(h);
 
-    tracked = false;
-    return true;
+    if (self.tab_count == 0) {
+        self.closing = true;
+        self.tab_overview.hide(false);
+        if (self.hwnd) |hwnd| _ = w32.PostMessageW(hwnd, w32.WM_CLOSE, 0, 0);
+    } else {
+        self.selectTabIndex(self.active_tab);
+        self.updateTabBarVisibility();
+        self.invalidateTabBar();
+    }
+    self.app.saveSession();
 }
 
 fn reparentTabWindows(tree: *const SplitTree(Surface), source: w32.HWND, destination: w32.HWND) !void {
