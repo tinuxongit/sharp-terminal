@@ -727,7 +727,7 @@ pub fn restartToUpdate(self: *App, owner: ?w32.HWND) void {
 }
 
 pub fn saveSession(self: *App) void {
-    if (self.config.@"window-tab-bar-position" != .sidebar or self.restoring_session or elevation.active()) return;
+    if (!self.keepsSession() or self.restoring_session or elevation.active()) return;
     var windows: [16]session.Window = undefined;
     var tabs: [16][64]session.Tab = undefined;
     var count: usize = 0;
@@ -756,8 +756,14 @@ pub fn saveSession(self: *App) void {
 
 /// Reopen the saved tabs, using `first` for the first saved window.
 /// Returns false when there is nothing to restore.
+/// Whether open tabs are saved and reopened: always in the sidebar layout,
+/// and in Tabs with `window-save-state = always`.
+fn keepsSession(self: *const App) bool {
+    return self.config.@"window-tab-bar-position" == .sidebar or self.config.@"window-save-state" == .always;
+}
+
 fn restoreSession(self: *App, first: *Window) !bool {
-    if (self.config.@"window-tab-bar-position" != .sidebar) return false;
+    if (!self.keepsSession()) return false;
     const alloc = self.core_app.alloc;
     var loaded = (try session.load(alloc, first.sidebar_width)) orelse return false;
     defer loaded.deinit();

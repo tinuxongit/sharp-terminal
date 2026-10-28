@@ -332,6 +332,16 @@ pub fn init(self: *Window, app: *App, options: InitOptions) !void {
             }
         }
     }
+    // window-center: the middle of the screen the pointer is on.
+    if (!options.is_quick_terminal and cx == w32.CW_USEDEFAULT and app.config.@"window-center") center: {
+        var pointer: w32.POINT = .{ .x = 0, .y = 0 };
+        _ = w32.GetCursorPos_(&pointer);
+        const monitor = w32.MonitorFromPoint(pointer, w32.MONITOR_DEFAULTTOPRIMARY) orelse break :center;
+        var info: w32.MONITORINFO = .{ .cbSize = @sizeOf(w32.MONITORINFO), .rcMonitor = undefined, .rcWork = undefined, .dwFlags = 0 };
+        if (w32.GetMonitorInfoW(monitor, &info) == 0) break :center;
+        cx = info.rcWork.left + @divTrunc(info.rcWork.right - info.rcWork.left - 800, 2);
+        cy = info.rcWork.top + @divTrunc(info.rcWork.bottom - info.rcWork.top - 600, 2);
+    }
     if (!options.is_quick_terminal and
         cx == w32.CW_USEDEFAULT and cy == w32.CW_USEDEFAULT and
         app.windows.items.len > 0)
@@ -691,8 +701,10 @@ pub fn addTabWithOptions(self: *Window, options: AddTabOptions) !*Surface {
         // Quick terminal windows are shown by QuickTerminal.animateIn() instead.
         if (!self.is_quick_terminal) {
             if (self.hwnd) |h| {
-                _ = w32.ShowWindow(h, w32.SW_SHOW);
+                // `maximize` and `fullscreen` say how windows open.
+                _ = w32.ShowWindow(h, if (self.app.config.maximize) w32.SW_MAXIMIZE else w32.SW_SHOW);
                 _ = w32.UpdateWindow(h);
+                if (self.app.config.fullscreen != .false) self.toggleFullscreen();
             }
         }
         self.active_tab = pos;

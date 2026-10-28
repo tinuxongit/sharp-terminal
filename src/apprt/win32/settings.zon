@@ -100,6 +100,43 @@
                     },
                 },
                 .{
+                    .title = "Startup",
+                    .settings = .{
+                        .{
+                            .label = "Start with Windows",
+                            .description = "Open Sharp when you sign in.",
+                            .key = "start-at-login",
+                            .on = "true",
+                            .off = "",
+                            .default_on = false,
+                        },
+                        .{
+                            .label = "Reopen tabs",
+                            .description = "Tabs come back with their shell and folder. Workspace always does this.",
+                            .key = "window-save-state",
+                            .on = "always",
+                            .off = "",
+                            .default_on = false,
+                        },
+                        .{
+                            .label = "Open maximized",
+                            .description = "New windows fill the screen.",
+                            .key = "maximize",
+                            .on = "true",
+                            .off = "",
+                            .default_on = false,
+                        },
+                        .{
+                            .label = "Center new windows",
+                            .description = "Open windows in the middle of the screen.",
+                            .key = "window-center",
+                            .on = "true",
+                            .off = "",
+                            .default_on = false,
+                        },
+                    },
+                },
+                .{
                     .title = "Updates",
                     .settings = .{
                         .{

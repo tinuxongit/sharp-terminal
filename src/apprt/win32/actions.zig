@@ -2,6 +2,7 @@
 //! app (new tabs and windows, titles, splits, clipboard, notifications,
 //! fullscreen and the rest): the core's performAction, one case per action.
 const std = @import("std");
+const startup = @import("startup.zig");
 const browser_settings = @import("browser_settings.zig");
 const shell_open = @import("shell_open.zig");
 const mark_mode = @import("mark_mode.zig");
@@ -160,10 +161,12 @@ pub fn performAction(
             if (value.config.clone(self.core_app.alloc)) |new_config| {
                 const browser_was = self.config.@"ai-tools-browser";
                 const default_terminal_was = self.config.@"default-terminal";
+                const start_at_login_was = self.config.@"start-at-login";
                 self.config.deinit();
                 self.config = new_config;
                 self.configureUpdater();
                 self.configureDefaultTerminal(new_config.@"default-terminal" != default_terminal_was);
+                if (new_config.@"start-at-login" != start_at_login_was) startup.set(new_config.@"start-at-login");
 
                 // The browser switch also connects Claude Code to Sharp.
                 if (new_config.@"ai-tools-browser" != browser_was) {

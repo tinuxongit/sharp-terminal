@@ -2307,7 +2307,10 @@ else
 ///
 /// The default value is `default`.
 ///
-/// This is currently only supported on macOS. This has no effect on Linux.
+/// This is currently only supported on macOS and Windows. This has no
+/// effect on Linux. On Windows, `always` reopens the tabs of the Tabs
+/// layout as the sidebar layout always does: their shell, folder and
+/// server, not their output.
 @"window-save-state": WindowSaveState = .default,
 
 /// Resize the window in discrete increments of the focused surface's cell size.
@@ -2459,6 +2462,18 @@ else
 ///
 /// Currently only supported on Windows.
 @"tab-switch-order": TabSwitchOrder = .order,
+
+/// Start Sharp when you sign in to Windows.
+///
+/// Currently only supported on Windows.
+@"start-at-login": bool = false,
+
+/// Open new windows in the middle of the screen the pointer is on, instead
+/// of where Windows places them. `window-position-x` and
+/// `window-position-y` win when set.
+///
+/// Currently only supported on Windows.
+@"window-center": bool = false,
 
 /// Whether Sharp is Windows' default terminal: console programs started
 /// outside a terminal, from Explorer, the Run box or the Start menu, open

@@ -150,6 +150,7 @@ commands and conventions; this file covers what is specific to Sharp.
   used (`tab-switch-order = recent`).
 - `src/apprt/win32/mark_mode.zig`: selecting with the keyboard and
   block selection; `shell_open.zig` shows a folder in Explorer.
+- `src/apprt/win32/startup.zig`: starting Sharp at sign-in.
 - `src/apprt/win32/closed_tabs.zig`: the last ten closed tabs, for
   reopening.
 - `src/apprt/win32/user_environment.zig`: the variables a new tab starts
@@ -281,6 +282,13 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   folder, and the Local and WSL titles, show "+" (default shell) and an
   arrow (shell menu) on hover. On a title they ask for the folder first,
   with Windows' own picker.
+- **Startup works as in Windows Terminal.** Settings > General >
+  Startup: Start with Windows (`start-at-login`, a value under the
+  user's Run key), Reopen tabs (Ghostty's `window-save-state = always`,
+  which on Windows reopens the Tabs layout's tabs as the sidebar layout
+  always does), Open maximized (Ghostty's `maximize`, with `fullscreen`
+  honored too) and Center new windows (`window-center`). Checked
+  2026-10-28 that the switch adds and removes the Run value.
 - **The sidebar layout reopens what was open.** Tabs (profile, folder and
   server), the active tab, folded groups, the width and recent servers are
   saved as they change. A tab that was on a server reconnects.
