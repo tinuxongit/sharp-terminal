@@ -1734,3 +1734,10 @@ pub const MENUINFO = extern struct {
 pub extern "user32" fn SetMenuInfo(hmenu: HMENU, lpmi: *const MENUINFO) callconv(.winapi) i32;
 pub const MB_ICONINFORMATION: u32 = 0x00000040;
 pub extern "kernel32" fn GetTickCount64() callconv(.winapi) u64;
+
+// Window regions: the sidebar layout rounds the terminal's top-left corner.
+pub const RGN_OR: i32 = 2;
+pub const RGN_DIFF: i32 = 4;
+pub extern "gdi32" fn CreateRectRgn(x1: i32, y1: i32, x2: i32, y2: i32) callconv(.winapi) ?*anyopaque;
+pub extern "gdi32" fn CombineRgn(hrgnDst: *anyopaque, hrgnSrc1: *anyopaque, hrgnSrc2: *anyopaque, iMode: i32) callconv(.winapi) i32;
+pub extern "user32" fn SetWindowRgn(hWnd: HWND, hRgn: ?*anyopaque, bRedraw: i32) callconv(.winapi) i32;

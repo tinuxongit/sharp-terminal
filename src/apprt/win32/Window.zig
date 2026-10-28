@@ -911,12 +911,7 @@ pub fn layoutSplits(self: *Window) void {
         while (it.next()) |entry| {
             if (entry.handle == zoomed_handle) {
                 entry.view.setVisible(true);
-                if (entry.view.hwnd) |h| {
-                    const w = @max(rect.right - rect.left, 1);
-                    const ht = @max(rect.bottom - rect.top, 1);
-                    _ = w32.MoveWindow(h, rect.left, rect.top, @intCast(w), @intCast(ht), 1);
-                    _ = w32.ShowWindow(h, w32.SW_SHOW);
-                }
+                if (entry.view.hwnd) |h| self.placePane(h, rect);
             } else {
                 entry.view.setVisible(false);
                 if (entry.view.hwnd) |h| _ = w32.ShowWindow(h, w32.SW_HIDE);
@@ -937,17 +932,81 @@ pub fn layoutSplits(self: *Window) void {
     }
 }
 
+/// Radius of the terminal's top-left corner in the sidebar layout, at 96 DPI.
+const terminal_corner = 10.0;
+
+fn terminalCorner(self: *const Window) i32 {
+    return if (self.sidebarMode()) @intFromFloat(@round(terminal_corner * self.scale)) else 0;
+}
+
+/// Move a pane into place. In the sidebar layout the pane at the
+/// terminal's top-left corner is rounded there, like a card.
+fn placePane(self: *Window, hwnd: w32.HWND, rect: w32.RECT) void {
+    const w = @max(rect.right - rect.left, 1);
+    const h = @max(rect.bottom - rect.top, 1);
+    _ = w32.MoveWindow(hwnd, rect.left, rect.top, @intCast(w), @intCast(h), 1);
+    _ = w32.ShowWindow(hwnd, w32.SW_SHOW);
+
+    const area = self.surfaceRect();
+    const r = self.terminalCorner();
+    if (r == 0 or rect.left != area.left or rect.top != area.top) {
+        _ = w32.SetWindowRgn(hwnd, null, 1);
+        return;
+    }
+    // Windows clips regions without anti-aliasing, so the region drops
+    // every pixel the arc only partly covers and paintTerminalCorner
+    // blends those pixels from the parent instead.
+    const region = w32.CreateRectRgn(0, 0, w, h) orelse return;
+    var py: i32 = 0;
+    while (py < r) : (py += 1) {
+        var first_full: i32 = 0;
+        while (first_full < r and canvas_mod.cornerCoverage(first_full, py, r, .{ 1, 1 }) < 1) first_full += 1;
+        if (first_full == 0) continue;
+        const cut = w32.CreateRectRgn(0, py, first_full, py + 1) orelse continue;
+        defer _ = w32.DeleteObject(cut);
+        _ = w32.CombineRgn(region, region, cut, w32.RGN_DIFF);
+    }
+    // The window owns the region from here on.
+    if (w32.SetWindowRgn(hwnd, region, 1) == 0) _ = w32.DeleteObject(region);
+}
+
+/// Paint the pixels the rounded terminal corner leaves to the parent: a
+/// blend of the sidebar's color and the terminal's background by how much
+/// of each pixel the arc covers.
+fn paintTerminalCorner(self: *Window, hdc_screen: w32.HDC, palette: tab_strip.Palette) void {
+    const r = self.terminalCorner();
+    if (r == 0) return;
+    const area = self.surfaceRect();
+    const mem_dc = w32.CreateCompatibleDC(hdc_screen) orelse return;
+    defer _ = w32.DeleteDC(mem_dc);
+    const info: w32.BITMAPINFO = .{ .bmiHeader = .{ .biWidth = r, .biHeight = -r } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w32.CreateDIBSection(mem_dc, &info, w32.DIB_RGB_COLORS, &bits, null, 0) orelse return;
+    const old = w32.SelectObject(mem_dc, bitmap);
+    defer {
+        _ = w32.SelectObject(mem_dc, old);
+        _ = w32.DeleteObject(bitmap);
+    }
+    const pixels: [*]u32 = @ptrCast(@alignCast(bits orelse return));
+    const bg = self.app.config.background;
+    const terminal: tab_strip.Rgb = .{ .r = bg.r, .g = bg.g, .b = bg.b };
+    var py: i32 = 0;
+    while (py < r) : (py += 1) {
+        var px_: i32 = 0;
+        while (px_ < r) : (px_ += 1) {
+            const coverage = canvas_mod.cornerCoverage(px_, py, r, .{ 1, 1 });
+            pixels[@intCast(py * r + px_)] = palette.strip.mix(terminal, coverage).toPixel();
+        }
+    }
+    _ = w32.BitBlt(hdc_screen, area.left, area.top, r, r, mem_dc, 0, 0, w32.SRCCOPY);
+}
+
 fn layoutNode(self: *Window, tree: SplitTree(Surface), handle: SplitTree(Surface).Node.Handle, rect: w32.RECT) void {
     if (handle.idx() >= tree.nodes.len) return;
     switch (tree.nodes[handle.idx()]) {
         .leaf => |view| {
             view.setVisible(true);
-            if (view.hwnd) |h| {
-                const w = @max(rect.right - rect.left, 1);
-                const ht = @max(rect.bottom - rect.top, 1);
-                _ = w32.MoveWindow(h, rect.left, rect.top, @intCast(w), @intCast(ht), 1);
-                _ = w32.ShowWindow(h, w32.SW_SHOW);
-            }
+            if (view.hwnd) |h| self.placePane(h, rect);
         },
         .split => |s| {
             const gap: i32 = @intFromFloat(@round(5.0 * self.scale));
@@ -1493,6 +1552,10 @@ pub fn invalidateTabBar(self: *Window) void {
     if (self.sidebarMode()) {
         var side = self.sidebarRect();
         _ = w32.InvalidateRect(hwnd, &side, 0);
+        const area = self.surfaceRect();
+        const r = self.terminalCorner();
+        var corner_rect: w32.RECT = .{ .left = area.left, .top = area.top, .right = area.left + r, .bottom = area.top + r };
+        _ = w32.InvalidateRect(hwnd, &corner_rect, 0);
     }
 }
 
@@ -1552,7 +1615,10 @@ fn paintTabBar(self: *Window) void {
         },
     );
     _ = w32.BitBlt(hdc_screen, 0, 0, layout.width, height, mem_dc, 0, 0, w32.SRCCOPY);
-    if (self.sidebarMode()) self.paintSidebar(hdc_screen, palette);
+    if (self.sidebarMode()) {
+        self.paintSidebar(hdc_screen, palette);
+        self.paintTerminalCorner(hdc_screen, palette);
+    }
 }
 
 fn paintSidebar(self: *Window, hdc_screen: w32.HDC, palette: tab_strip.Palette) void {
