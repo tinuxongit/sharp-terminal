@@ -57,7 +57,9 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/config_file.zig`: reads and changes one key of the
   user's Ghostty config file, leaving the rest of it untouched.
 - `src/font/directwrite.zig`: finds system fonts on Windows.
-- `dist/windows/`: icon, resource file and packaging scripts.
+- `dist/windows/`: icon, resource file and packaging scripts. `sharp.ico`
+  is drawn by `make_logo.py` (Pillow): `python make_logo.py sharp.ico
+  preview.png` regenerates it.
 - Everything else in `src/` is the shared Ghostty core. Keep changes there
   small so upstream merges stay easy.
 
@@ -168,8 +170,7 @@ the scrollback.
 - The fork deleted upstream's `test.yml` CI, so upstream's core tests no
   longer run on its changes to shared files.
 - Leftover debug log lines in `Surface.init` (`"renderer created"` and so on).
-- The icon (`dist/windows/ghostty.ico`) is still Ghostty's ghost, and the
-  version info still says 1.3.0.0, inherited from the fork.
+- The version info still says 1.3.0.0, inherited from the fork.
 - `App.zig`, `Surface.zig` and `Window.zig` in the Win32 runtime are each
   2,600 to 3,400 lines and mix several jobs. Upstream's GTK files are just as
   large, so splitting them makes merges from `winfork` harder.

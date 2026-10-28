@@ -6,7 +6,7 @@ LANGUAGE 0, 0
 RT_MANIFEST 24 "ghostty.manifest"
 
 #define ID_ICON_GHOSTTY 1
-ID_ICON_GHOSTTY ICON "ghostty.ico"
+ID_ICON_GHOSTTY ICON "sharp.ico"
 
 // Version info — shown in Explorer's Properties → Details and used by
 // signtool / installer tooling. The numbers here are baseline; the
