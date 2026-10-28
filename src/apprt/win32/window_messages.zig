@@ -12,6 +12,8 @@ const splits = @import("splits.zig");
 const log = std.log.scoped(.win32);
 const Window = @import("Window.zig");
 const strip_mouse = @import("strip_mouse.zig");
+const BrowserPanel = @import("BrowserPanel.zig");
+const browser_dock = @import("browser_dock.zig");
 
 /// Window procedure for top-level container HWNDs (GhosttyWindow class).
 /// GWLP_USERDATA stores a *Window pointer.
@@ -149,6 +151,14 @@ pub fn windowWndProc(
                 return 1;
             }
             return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
+        },
+        BrowserPanel.message_width => {
+            browser_dock.setWidth(window, @intCast(wparam));
+            return 0;
+        },
+        BrowserPanel.message_empty => {
+            browser_dock.emptied(window);
+            return 0;
         },
         w32.WM_MOVE => {
             if (window.settings_panel) |panel| panel.place(window.settingsArea());

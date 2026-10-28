@@ -14,13 +14,18 @@ const version = "0.1.0";
 const default_protocol = "2025-06-18";
 
 var running: std.atomic.Value(bool) = .init(false);
+/// Bumped at every start, so a listener left from before a quick off and
+/// on knows it is not the current one.
+var generation: std.atomic.Value(u32) = .init(0);
+/// A client sending more than this without a line break is cut off.
+const max_line = 8 * 1024 * 1024;
 
 /// Follow the setting: start listening, or stop taking new clients and
 /// refuse tool calls from connected ones.
 pub fn setEnabled(on: bool) void {
     if (running.swap(on, .acq_rel) == on) return;
     if (on) {
-        const thread = std.Thread.spawn(.{}, listen, .{}) catch |err| {
+        const thread = std.Thread.spawn(.{}, listen, .{generation.fetchAdd(1, .acq_rel) + 1}) catch |err| {
             log.warn("failed to start the MCP server: {}", .{err});
             running.store(false, .release);
             return;
@@ -35,11 +40,20 @@ pub fn setEnabled(on: bool) void {
     }
 }
 
-fn listen() void {
+fn current(mine: u32) bool {
+    return running.load(.acquire) and generation.load(.acquire) == mine;
+}
+
+fn listen(mine: u32) void {
     var buf: mcp_pipe.Name = undefined;
-    const name = mcp_pipe.name(&buf) orelse return running.store(false, .release);
+    const name = mcp_pipe.name(&buf) orelse return;
+    var security = mcp_pipe.ownerOnly() orelse {
+        log.warn("could not limit the MCP pipe to this user; not serving", .{});
+        return;
+    };
     var first = true;
-    while (running.load(.acquire)) {
+    var attempts: u32 = 0;
+    while (current(mine)) {
         // The first instance refuses a pipe someone else already made, so
         // no other program can pose as Sharp's server.
         const raw = w32.CreateNamedPipeW(
@@ -50,15 +64,22 @@ fn listen() void {
             64 * 1024,
             64 * 1024,
             0,
-            null,
+            &security,
         );
         const pipe = w32.validHandle(raw) orelse {
+            // A listener from before a quick off and on may still hold it.
+            attempts += 1;
+            if (attempts < 20) {
+                w32.Sleep(100);
+                continue;
+            }
             log.warn("the MCP pipe is taken, probably by another Sharp (error {d})", .{w32.GetLastError()});
-            return running.store(false, .release);
+            return;
         };
         first = false;
+        attempts = 0;
         const connected = w32.ConnectNamedPipe(pipe, null) != 0 or w32.GetLastError() == w32.ERROR_PIPE_CONNECTED;
-        if (!connected or !running.load(.acquire)) {
+        if (!connected or !current(mine)) {
             _ = w32.CloseHandle(pipe);
             continue;
         }
@@ -84,6 +105,7 @@ fn serve(pipe: w32.HANDLE) void {
         var got: u32 = 0;
         if (w32.ReadFile(pipe, &chunk, chunk.len, &got, null) == 0 or got == 0) return;
         pending.appendSlice(gpa, chunk[0..got]) catch return;
+        if (pending.items.len > max_line and std.mem.indexOfScalar(u8, pending.items, '\n') == null) return;
         while (std.mem.indexOfScalar(u8, pending.items, '\n')) |nl| {
             var arena: std.heap.ArenaAllocator = .init(gpa);
             defer arena.deinit();

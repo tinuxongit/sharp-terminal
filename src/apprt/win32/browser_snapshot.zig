@@ -4,6 +4,9 @@
 //! nearby label are left out. Ported from Citropy's snapshot-tree.ts.
 const std = @import("std");
 const Value = std.json.Value;
+const json_read = @import("json_read.zig");
+const field = json_read.field;
+const string = json_read.string;
 
 /// Longer trees are cut, pointing at ref to read the rest.
 pub const max_length = 28_000;
@@ -80,7 +83,7 @@ fn walk(alloc: std.mem.Allocator, tree: *Tree, node: Value, depth: usize, nearby
 }
 
 fn visible(node: Value) bool {
-    if (boolean(node, "ignored")) return false;
+    if (json_read.boolean(node, "ignored") orelse false) return false;
     const role = roleOf(node);
     if (oneOf(role, &skipped_roles)) return false;
     return nameOf(node).len > 0 or hasValue(node) or !oneOf(role, &silent_roles);
@@ -157,21 +160,6 @@ fn truthy(v: ?Value) bool {
 fn inner(node: Value, name: []const u8) ?Value {
     const outer = field(node, name) orelse return null;
     return field(outer, "value");
-}
-
-fn field(value: Value, name: []const u8) ?Value {
-    if (value != .object) return null;
-    return value.object.get(name);
-}
-
-fn string(value: Value, name: []const u8) ?[]const u8 {
-    const v = field(value, name) orelse return null;
-    return if (v == .string) v.string else null;
-}
-
-fn boolean(value: Value, name: []const u8) bool {
-    const v = field(value, name) orelse return false;
-    return v == .bool and v.bool;
 }
 
 fn oneOf(s: []const u8, list: []const []const u8) bool {

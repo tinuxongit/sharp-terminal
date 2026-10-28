@@ -1470,6 +1470,7 @@ pub const MA_NOACTIVATE: isize = 3;
 
 pub const HKEY = *opaque {};
 pub const HKEY_CURRENT_USER: HKEY = @ptrFromInt(0x80000001);
+pub const HKEY_LOCAL_MACHINE: HKEY = @ptrFromInt(0x80000002);
 pub const KEY_READ: u32 = 0x00020019;
 pub const REG_DWORD: u32 = 4;
 pub const ERROR_SUCCESS: u32 = 0;
@@ -1866,3 +1867,22 @@ pub fn validHandle(raw: usize) ?HANDLE {
     if (raw == INVALID_HANDLE or raw == 0) return null;
     return @ptrFromInt(raw);
 }
+
+// Who a process runs as, and pipes only that user may open.
+pub const SECURITY_ATTRIBUTES = extern struct {
+    nLength: u32 = @sizeOf(SECURITY_ATTRIBUTES),
+    lpSecurityDescriptor: ?*anyopaque,
+    bInheritHandle: i32 = 0,
+};
+pub const TOKEN_QUERY: u32 = 0x0008;
+pub const TokenUser: c_int = 1;
+pub const SDDL_REVISION_1: u32 = 1;
+pub extern "advapi32" fn OpenProcessToken(ProcessHandle: HANDLE, DesiredAccess: u32, TokenHandle: *HANDLE) callconv(.winapi) i32;
+pub extern "advapi32" fn GetTokenInformation(TokenHandle: HANDLE, TokenInformationClass: c_int, TokenInformation: ?*anyopaque, TokenInformationLength: u32, ReturnLength: *u32) callconv(.winapi) i32;
+pub extern "advapi32" fn ConvertSidToStringSidW(Sid: *anyopaque, StringSid: *?[*:0]u16) callconv(.winapi) i32;
+pub extern "advapi32" fn ConvertStringSecurityDescriptorToSecurityDescriptorW(StringSecurityDescriptor: [*:0]const u16, StringSDRevision: u32, SecurityDescriptor: *?*anyopaque, SecurityDescriptorSize: ?*u32) callconv(.winapi) i32;
+pub extern "advapi32" fn EqualSid(pSid1: *anyopaque, pSid2: *anyopaque) callconv(.winapi) i32;
+pub extern "kernel32" fn LocalFree(hMem: ?*anyopaque) callconv(.winapi) ?*anyopaque;
+pub extern "kernel32" fn GetCurrentProcess() callconv(.winapi) HANDLE;
+pub extern "kernel32" fn GetNamedPipeServerProcessId(Pipe: HANDLE, ServerProcessId: *u32) callconv(.winapi) i32;
+pub extern "kernel32" fn GetUserDefaultLocaleName(lpLocaleName: [*]u16, cchLocaleName: c_int) callconv(.winapi) c_int;

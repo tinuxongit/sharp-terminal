@@ -2422,6 +2422,13 @@ else
 /// Currently only supported on Windows.
 @"ai-tools-browser": bool = false,
 
+/// The search engine of the browser panel (`ai-tools-browser`): where new
+/// tabs open and where words typed in its address box are looked up.
+/// `google` (the default) or `duckduckgo`.
+///
+/// Currently only supported on Windows.
+@"browser-search-engine": ?[:0]const u8 = null,
+
 /// Background color for the window titlebar. This only takes effect if
 /// window-theme is set to ghostty. Currently only supported in the GTK app
 /// runtime.

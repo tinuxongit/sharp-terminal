@@ -3,6 +3,9 @@
 //! for the errors an action caused. Kept on the UI thread, where WebView2
 //! delivers the DevTools events.
 const std = @import("std");
+const json_read = @import("json_read.zig");
+const field = json_read.field;
+const string = json_read.string;
 
 pub const Level = enum { debug, log, info, warning, @"error" };
 
@@ -78,23 +81,23 @@ pub const Log = struct {
                     if (i > 0) w.writeByte(' ') catch break;
                     remoteText(&w, arg) catch break;
                 }
-                const kind = string(field(params, "type")) orelse "log";
+                const kind = string(params, "type") orelse "log";
                 self.add(at_ms, levelOf(kind), w.buffered());
             },
             // Runtime.exceptionThrown: exceptionDetails.
             .exception => {
                 const details = field(params, "exceptionDetails") orelse return;
-                const description = if (field(details, "exception")) |e| string(field(e, "description")) else null;
-                self.add(at_ms, .@"error", description orelse string(field(details, "text")) orelse return);
+                const description = if (field(details, "exception")) |e| string(e, "description") else null;
+                self.add(at_ms, .@"error", description orelse string(details, "text") orelse return);
             },
             // Log.entryAdded: entry with level, text and url. Failed loads
             // arrive here with source "network".
             .browser => {
                 const entry = field(params, "entry") orelse return;
-                const level = levelOf(string(field(entry, "level")) orelse return);
+                const level = levelOf(string(entry, "level") orelse return);
                 if (level != .warning and level != .@"error") return;
-                w.writeAll(string(field(entry, "text")) orelse return) catch {};
-                if (string(field(entry, "url"))) |url| w.print(" ({s})", .{url}) catch {};
+                w.writeAll(string(entry, "text") orelse return) catch {};
+                if (string(entry, "url")) |url| w.print(" ({s})", .{url}) catch {};
                 self.add(at_ms, level, w.buffered());
             },
         }
@@ -112,22 +115,12 @@ fn levelOf(name: []const u8) Level {
 /// A console argument as console.log shows it: strings bare, other
 /// values as JSON or their description.
 fn remoteText(w: *std.Io.Writer, arg: std.json.Value) std.Io.Writer.Error!void {
-    if (string(field(arg, "type"))) |t| {
+    if (string(arg, "type")) |t| {
         if (std.mem.eql(u8, t, "string")) {
-            if (string(field(arg, "value"))) |s| return w.writeAll(s);
+            if (string(arg, "value")) |s| return w.writeAll(s);
         }
     }
     if (field(arg, "value")) |v| return std.json.Stringify.value(v, .{}, w);
-    const text = string(field(arg, "unserializableValue")) orelse string(field(arg, "description")) orelse string(field(arg, "type")) orelse "";
+    const text = string(arg, "unserializableValue") orelse string(arg, "description") orelse string(arg, "type") orelse "";
     try w.writeAll(text);
-}
-
-fn field(value: std.json.Value, name: []const u8) ?std.json.Value {
-    if (value != .object) return null;
-    return value.object.get(name);
-}
-
-fn string(value: ?std.json.Value) ?[]const u8 {
-    const v = value orelse return null;
-    return if (v == .string) v.string else null;
 }

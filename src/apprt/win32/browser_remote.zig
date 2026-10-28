@@ -7,23 +7,31 @@ const w32 = @import("win32.zig");
 const App = @import("App.zig");
 const Window = @import("Window.zig");
 const BrowserPanel = @import("BrowserPanel.zig");
+const browser_settings = @import("browser_settings.zig");
+const BrowserTab = @import("BrowserTab.zig");
 const browser_dock = @import("browser_dock.zig");
 const webview2 = @import("webview2.zig");
 
 const alloc = std.heap.smp_allocator;
 
+pub const History = enum { back, forward, reload };
+
 pub const Op = union(enum) {
+    /// Show the panel, creating it if needed; with a url, open it in a new
+    /// tab. Answers the tab's id.
+    open: struct { url: []const u8 },
+    /// Show the panel and tab `tab`, or the active one for 0. Answers its id.
+    select: struct { tab: u32 },
+    /// Whether the tab's page can take calls yet.
+    ready: struct { tab: u32 },
     /// A DevTools Protocol method and its JSON parameters.
-    devtools: struct { method: []const u8, params: []const u8 },
-    /// Show a window's panel, creating it if needed.
-    open,
-    /// Whether the panel's page can take calls yet.
-    ready,
-    back,
-    forward,
-    reload,
-    /// The page's log from `since_ms` (GetTickCount64) on.
-    logs: struct { since_ms: u64, clear: bool },
+    devtools: struct { tab: u32, method: []const u8, params: []const u8 },
+    history: struct { tab: u32, step: History },
+    /// The tab's log from `since_ms` (GetTickCount64) on.
+    logs: struct { tab: u32, since_ms: u64, clear: bool },
+    /// Every tab as JSON: id, title, url and whether it is active.
+    tabs,
+    close: struct { tab: u32 },
 };
 
 /// One call, shared by the waiting thread and the UI thread; the last of
@@ -44,18 +52,18 @@ pub const Request = struct {
             return null;
         };
         // The strings are copied, since the caller may stop waiting.
-        var owned = op;
-        switch (op) {
-            .devtools => |d| {
+        const owned: Op = switch (op) {
+            .devtools => |d| blk: {
                 const method = alloc.dupe(u8, d.method) catch return self.fail(event);
                 const params = alloc.dupe(u8, d.params) catch {
                     alloc.free(method);
                     return self.fail(event);
                 };
-                owned = .{ .devtools = .{ .method = method, .params = params } };
+                break :blk .{ .devtools = .{ .tab = d.tab, .method = method, .params = params } };
             },
-            else => {},
-        }
+            .open => |o| .{ .open = .{ .url = alloc.dupe(u8, o.url) catch return self.fail(event) } },
+            else => op,
+        };
         self.* = .{ .op = owned, .done = event };
         return self;
     }
@@ -73,6 +81,7 @@ pub const Request = struct {
                 alloc.free(d.method);
                 alloc.free(d.params);
             },
+            .open => |o| alloc.free(o.url),
             else => {},
         }
         alloc.free(self.result);
@@ -86,6 +95,11 @@ pub const Request = struct {
         self.result = alloc.dupe(u8, result) catch &.{};
         _ = w32.SetEvent(self.done);
         self.release();
+    }
+
+    fn finishId(self: *Request, id: u32) void {
+        var buf: [16]u8 = undefined;
+        self.finish(true, std.fmt.bufPrint(&buf, "{d}", .{id}) catch "");
     }
 };
 
@@ -119,7 +133,7 @@ pub fn call(op: Op, timeout_ms: u32) error{ Unavailable, TimedOut }!Answer {
     return .{ .ok = request.ok, .text = alloc.dupe(u8, request.result) catch return error.Unavailable };
 }
 
-const DevtoolsDone = webview2.Handler(webview2.iid_cdp_completed, w32.HRESULT, ?[*:0]const u16, onDevtools);
+const DevtoolsDone = webview2.Handler(webview2.iid_cdp_completed, usize, w32.HRESULT, ?[*:0]const u16, onDevtools);
 
 fn onDevtools(context: usize, result: w32.HRESULT, json: ?[*:0]const u16) void {
     const request: *Request = @ptrFromInt(context);
@@ -130,7 +144,7 @@ fn onDevtools(context: usize, result: w32.HRESULT, json: ?[*:0]const u16) void {
 }
 
 /// The window whose panel Claude uses: the first with the panel showing,
-/// else the first with a panel, else (for open) the first window.
+/// else the first with a panel, else (for open) the first that may have one.
 fn windowFor(app: *App, opening: bool) ?*Window {
     for (app.windows.items) |w| if (w.browser != null and w.browser_shown) return w;
     for (app.windows.items) |w| if (w.browser != null) return w;
@@ -138,40 +152,83 @@ fn windowFor(app: *App, opening: bool) ?*Window {
     return null;
 }
 
+const not_open = "The browser isn't open. Call browser_open first.";
+
 /// Answer a posted request on the UI thread.
 pub fn serve(app: *App, request: *Request) void {
     if (!app.config.@"ai-tools-browser") return request.finish(false, "The browser is off in Sharp's Settings > AI > Tools.");
-    const window = windowFor(app, request.op == .open) orelse
-        return request.finish(false, "The browser isn't open. Call browser_open first.");
-    if (request.op == .open) {
-        if (!window.browser_shown) browser_dock.toggle(window);
-        return request.finish(window.browser != null, "");
-    }
-    const panel = window.browser orelse return request.finish(false, "The browser isn't open. Call browser_open first.");
+    const window = windowFor(app, request.op == .open or request.op == .select) orelse return request.finish(false, not_open);
     switch (request.op) {
-        .open => unreachable,
-        .ready => request.finish(panel.webview != null, if (panel.failed) BrowserPanel.data.unavailable else ""),
-        .back, .forward, .reload => {
-            const webview = panel.webview orelse return request.finish(false, "The page is still loading.");
-            _ = switch (request.op) {
+        .open => |o| {
+            const existed = window.browser != null;
+            const url: ?[]const u8 = if (o.url.len > 0) o.url else null;
+            if (!browser_dock.open(window, if (existed) null else url)) return request.finish(false, "Sharp couldn't open its browser.");
+            const panel = window.browser orelse return request.finish(false, not_open);
+            if (existed and url != null) {
+                const id = panel.openTab(url.?) orelse return request.finish(false, "Every tab is in use. Close one with browser_close.");
+                return request.finishId(id);
+            }
+            const tab = panel.activeTab() orelse return request.finish(false, not_open);
+            request.finishId(tab.id);
+        },
+        .select => |s| {
+            if (!window.browser_shown and !browser_dock.open(window, null)) return request.finish(false, not_open);
+            const panel = window.browser orelse return request.finish(false, not_open);
+            const tab = (if (s.tab == 0) panel.activeTab() else panel.tabById(s.tab)) orelse
+                return request.finish(false, "There is no such tab. browser_tabs lists them.");
+            for (panel.tabs(), 0..) |t, i| if (t == tab and i != panel.active) panel.select(i);
+            request.finishId(tab.id);
+        },
+        .tabs => {
+            const panel = window.browser orelse return request.finish(true, "[]");
+            var out: std.Io.Writer.Allocating = .init(alloc);
+            defer out.deinit();
+            var json: std.json.Stringify = .{ .writer = &out.writer };
+            json.beginArray() catch {};
+            for (panel.tabs(), 0..) |tab, i| {
+                var buf: [2048]u8 = undefined;
+                json.write(.{ .id = tab.id, .title = tab.title(), .url = tab.source(&buf) orelse "", .active = i == panel.active }) catch {};
+            }
+            json.endArray() catch {};
+            request.finish(true, out.written());
+        },
+        inline .ready, .devtools, .history, .logs, .close => |op, tag| {
+            const panel = window.browser orelse return request.finish(false, not_open);
+            const tab = panel.tabById(op.tab) orelse return request.finish(false, "That tab was closed. browser_tabs lists the open ones.");
+            serveTab(panel, tab, request, @unionInit(Op, @tagName(tag), op));
+        },
+    }
+}
+
+fn serveTab(panel: *BrowserPanel, tab: *BrowserTab, request: *Request, op: Op) void {
+    switch (op) {
+        .ready => request.finish(tab.ready, if (panel.failed) browser_settings.data.unavailable else ""),
+        .history => |h| {
+            const webview = tab.webview orelse return request.finish(false, "The page is still loading.");
+            _ = switch (h.step) {
                 .back => webview.vtable.GoBack(webview),
                 .forward => webview.vtable.GoForward(webview),
-                else => webview.vtable.Reload(webview),
+                .reload => webview.vtable.Reload(webview),
             };
             request.finish(true, "");
         },
         .logs => |l| {
             var out: std.Io.Writer.Allocating = .init(alloc);
             defer out.deinit();
-            panel.page_log.write(&out.writer, l.since_ms) catch {};
-            if (l.clear) panel.page_log.clear();
+            tab.page_log.write(&out.writer, l.since_ms) catch {};
+            if (l.clear) tab.page_log.clear();
             request.finish(true, out.written());
+        },
+        .close => {
+            panel.closeTab(tab);
+            request.finish(true, "");
         },
         .devtools => |d| {
             const handler = DevtoolsDone.create(@intFromPtr(request)) orelse return request.finish(false, "Out of memory");
             defer _ = handler.release();
             // From here the handler owns the UI thread's reference.
-            if (!panel.devtools(d.method, d.params, handler)) request.finish(false, "The page is still loading.");
+            if (!tab.devtools(d.method, d.params, handler)) request.finish(false, "The page is still loading.");
         },
+        else => unreachable,
     }
 }

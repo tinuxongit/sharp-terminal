@@ -1,10 +1,12 @@
 //! A window's side of the browser panel: whether the globe shows, where
-//! the panel sits (right of the terminal, below the strip), and opening,
-//! hiding and closing it. Nothing is created until the globe is clicked.
+//! the panel sits (right of the terminal, below the strip) and how wide,
+//! and opening, hiding and closing it. Nothing is created until the globe
+//! is clicked, or Claude opens the browser.
 const std = @import("std");
 const w32 = @import("win32.zig");
 const Window = @import("Window.zig");
 const BrowserPanel = @import("BrowserPanel.zig");
+const browser_settings = @import("browser_settings.zig");
 
 const log = std.log.scoped(.win32);
 
@@ -13,16 +15,23 @@ pub fn enabled(self: *const Window) bool {
     return !self.is_quick_terminal and self.app.config.@"ai-tools-browser";
 }
 
+fn engine(self: *const Window) *const browser_settings.Engine {
+    return browser_settings.engineFor(self.app.config.@"browser-search-engine");
+}
+
 /// Width the panel takes from the terminal, 0 while hidden.
 pub fn width(self: *const Window) i32 {
     if (!self.browser_shown) return 0;
     const hwnd = self.hwnd orelse return 0;
     var client: w32.RECT = undefined;
     if (w32.GetClientRect(hwnd, &client) == 0) return 0;
-    const share = @divTrunc(client.right * BrowserPanel.data.width_percent, 100);
-    const narrowest: i32 = @intFromFloat(@round(BrowserPanel.data.min_width * self.scale));
-    // The terminal keeps a fifth of the window however small it gets.
-    return @min(@max(share, narrowest), @divTrunc(client.right * 4, 5));
+    const wanted: i32 = if (self.browser_width) |w|
+        @intFromFloat(@round(w * self.scale))
+    else
+        @divTrunc(client.right * browser_settings.data.width_percent, 100);
+    const narrowest: i32 = @intFromFloat(@round(browser_settings.data.min_width * self.scale));
+    // The terminal keeps a fifth of the window however wide the panel is.
+    return @max(0, @min(@max(wanted, narrowest), @divTrunc(client.right * 4, 5)));
 }
 
 fn rect(self: *const Window) w32.RECT {
@@ -32,27 +41,52 @@ fn rect(self: *const Window) w32.RECT {
 }
 
 /// The globe: show the panel, creating it the first time, or hide it.
-/// A hidden panel keeps its page.
+/// A hidden panel keeps its pages.
 pub fn toggle(self: *Window) void {
-    if (!enabled(self)) return;
-    const hwnd = self.hwnd orelse return;
-    self.browser_shown = !self.browser_shown;
+    if (self.browser_shown) hide(self) else _ = open(self, null);
+}
+
+/// Show the panel, creating it on `first_url` (or the home page) if it
+/// doesn't exist yet. False when it can't be created.
+pub fn open(self: *Window, first_url: ?[]const u8) bool {
+    if (!enabled(self)) return false;
+    const hwnd = self.hwnd orelse return false;
+    self.browser_shown = true;
     if (self.browser) |panel| {
-        panel.show(self.browser_shown);
-    } else if (self.browser_shown) {
-        self.browser = BrowserPanel.create(self.app.core_app.alloc, self.app.hinstance, hwnd, rect(self), self.scale, self.stripPalette()) catch |err| {
+        panel.show(true);
+    } else {
+        self.browser = BrowserPanel.create(self.app.hinstance, hwnd, rect(self), self.scale, self.stripPalette(), engine(self), first_url) catch |err| {
             log.err("failed to open the browser panel: {}", .{err});
             self.browser_shown = false;
-            return;
+            return false;
         };
     }
     self.handleResize();
+    return true;
 }
 
-/// Follow the window's size, scale and colors.
+fn hide(self: *Window) void {
+    self.browser_shown = false;
+    if (self.browser) |panel| panel.show(false);
+    self.handleResize();
+}
+
+/// The panel's last tab closed: hide it, as closing a browser's last tab
+/// closes the browser.
+pub fn emptied(self: *Window) void {
+    if (self.browser_shown) hide(self);
+}
+
+/// The panel's edge was dragged to `pixels` wide.
+pub fn setWidth(self: *Window, pixels: i32) void {
+    self.browser_width = @as(f32, @floatFromInt(pixels)) / self.scale;
+    self.handleResize();
+}
+
+/// Follow the window's size, scale, colors and search engine.
 pub fn place(self: *Window) void {
     const panel = self.browser orelse return;
-    if (self.browser_shown) panel.place(rect(self), self.scale, self.stripPalette());
+    if (self.browser_shown) panel.place(rect(self), self.scale, self.stripPalette(), engine(self));
 }
 
 /// Free the panel and its WebView2, as when the setting is switched off.
@@ -60,5 +94,5 @@ pub fn close(self: *Window) void {
     const panel = self.browser orelse return;
     self.browser = null;
     self.browser_shown = false;
-    panel.destroy(self.app.core_app.alloc);
+    panel.destroy();
 }

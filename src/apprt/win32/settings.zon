@@ -293,6 +293,15 @@
                             .off = "",
                             .default_on = false,
                         },
+                        .{
+                            .label = "Search engine",
+                            .description = "Where new browser tabs open and typed words are looked up.",
+                            .key = "browser-search-engine",
+                            .choices = .{
+                                .{ .label = "Google", .value = "" },
+                                .{ .label = "DuckDuckGo", .value = "duckduckgo" },
+                            },
+                        },
                     },
                 },
             },

@@ -80,6 +80,8 @@ settings_panel: ?*SettingsPanel = null,
 /// closes or the setting is switched off; see browser_dock.
 browser: ?*BrowserPanel = null,
 browser_shown: bool = false,
+/// The panel's width in pixels at 96 DPI once its edge is dragged.
+browser_width: ?f32 = null,
 
 /// The tab sidebar's state, used when `window-tab-bar-position = sidebar`.
 sidebar_fonts: tab_sidebar.Fonts = .{},

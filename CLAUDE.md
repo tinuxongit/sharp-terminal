@@ -82,22 +82,32 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/servers.zig`: the servers the sidebar offers (hosts in
   `~/.ssh/config` and recent ones), and which addresses ssh may be given.
 - `src/apprt/win32/BrowserPanel.zig`: the browser panel, a child window
-  hosting a WebView2 page, its toolbar's input, and the page's DevTools
-  calls and log. Its sizes and text are in `browser.zon`.
-- `src/apprt/win32/browser_toolbar.zig`: the panel's toolbar (back,
+  with its tabs, where pages sit in it, and its painting.
+  `browser_messages.zig` is where its Windows messages go (toolbar,
+  address box, shortcuts, dragging its edge).
+- `src/apprt/win32/browser_settings.zig`: reads `browser.zon` (sizes,
+  fixed page size, tab limit, search engines, text) and says what a typed
+  address means.
+- `src/apprt/win32/BrowserTab.zig`: one tab's page, title, history and
+  log. `browser_engine.zig` is the WebView2 side: the browser process,
+  each tab's page and its preparation (Chrome identity, fixed size), and
+  page events.
+- `src/apprt/win32/browser_toolbar.zig`: the panel's toolbar (tabs, back,
   forward, reload, address box), its layout and painting.
-- `src/apprt/win32/browser_log.zig`: what the page logged (console,
+- `src/apprt/win32/browser_log.zig`: what a page logged (console,
   uncaught errors, failed loads) for Claude.
 - `src/apprt/win32/browser_dock.zig`: a window's side of the panel: the
   globe, where the panel sits, and opening, hiding and freeing it.
 - `src/apprt/win32/webview2.zig`: the WebView2 COM interfaces the panel
   calls, and loading `WebView2Loader.dll` (pinned in `pkg/webview2/`).
 - `src/apprt/win32/browser_tools.zon`: the tools Claude is offered (names,
-  descriptions, input schemas). `browser_tools.zig` runs them,
+  descriptions, input schemas). `browser_tools.zig` runs them on
+  `browser_page.zig`, a tab seen from the MCP server's thread;
   `browser_snapshot.zig` turns the accessibility tree into Claude's text,
-  and `browser_remote.zig` carries their calls to the UI thread.
+  `browser_remote.zig` carries their calls to the UI thread, and
+  `json_read.zig` reads the JSON that comes back.
 - `src/apprt/win32/mcp_server.zig`: Sharp's MCP server (JSON-RPC over a
-  per-user named pipe, `mcp_pipe.zig`). `mcp_bridge.zig` builds
+  named pipe only the user can open, `mcp_pipe.zig`). `mcp_bridge.zig` builds
   `sharp-mcp.exe`, the command Claude Code runs, which relays its stdio to
   that pipe.
 - `src/apprt/win32/claude_mcp.zig`: adds Sharp to Claude Code's MCP
@@ -273,27 +283,52 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   the process and no `msedgewebview2.exe`. The page is WebView2, the Edge
   runtime Windows ships, driven through its COM API with the loader
   pinned and loaded by full path like ConPTY; Electron or CEF would ship a
-  second Chromium. Sharp draws the toolbar. Hiding the panel keeps its
-  page, switching the setting off frees it, and logins stay in
-  `%LOCALAPPDATA%\Sharp\Browser`, apart from Edge's. Links that open a
-  window open in the panel. The design follows Citropy's browser rather
+  second Chromium. Sharp draws the toolbar and its tabs (up to 12;
+  Ctrl+T, Ctrl+W, Ctrl+L and Ctrl+Tab work as in Chrome). Hiding the
+  panel keeps its pages, closing its last tab hides it, switching the
+  setting off frees it, and logins stay in
+  `%LOCALAPPDATA%\Sharp\Browser`, apart from Edge's. A page opening a
+  window gets a tab that is that window (`put_NewWindow`), so sign-in
+  popups keep their `opener`. New tabs open the search engine chosen in
+  Settings > AI > Tools (`browser-search-engine`: Google or DuckDuckGo).
+  The panel's edge drags. The design follows Citropy's browser rather
   than T3 Code's, which is a preview of a dev server.
+- **Every page is 1920 × 1080, scaled to fit, as in Citropy.** Claude
+  always sees the same desktop layout and coordinates however wide the
+  panel is. `Emulation.setDeviceMetricsOverride` with its `scale` fits the
+  page into a 16:9 box below the toolbar, and the user's own clicks are
+  mapped back into the page (checked 2026-10-28: the middle of the shown
+  page lands at 960 × 540). The cost is small text in a narrow panel; the
+  size is in `browser.zon`.
+- **Sites see Chrome, not WebView2.** WebView2 says "Edg/" and "Microsoft
+  Edge WebView2" in its user agent and client hints, and some sites
+  refuse embedded browsers. Before a page loads anything, it gets the
+  user agent without "Edg/", client hints naming Chromium and Google
+  Chrome with the grease brand Chromium would add, Windows' platform
+  version from the registry, and the user's language, through
+  `Emulation.setUserAgentOverride`. Checked against httpbin: the headers
+  match a Chrome of the same version.
 - **Claude reaches the browser over MCP, only while the switch is on.**
   Turning Settings > AI > Tools > Browser on starts Sharp's MCP server
   and runs `claude mcp add --scope user sharp -- <dir>\sharp-mcp.exe`;
   turning it off stops the server and runs `claude mcp remove`. That is
   the only change Sharp makes to Claude Code's configuration. Claude Code
   runs `sharp-mcp.exe`, which relays its stdio to a named pipe named after
-  the Windows user, created first-instance-only and closed to remote
-  clients, so the tools act on the panel the user sees. The tools are
-  Citropy's core: `browser_open`, `browser_snapshot` (the accessibility
-  tree with `[ref=N]` handles, plus a JPEG in the same CSS pixels clicks
-  use), `browser_action` (navigate, back, forward, reload, click, hover,
-  type, press, scroll, wait, evaluate) and `browser_logs`, all through
-  DevTools calls on the page. Citropy's tabs, iframes, uploads, dialogs,
-  mobile emulation and connected accounts are left out; the panel has
-  one page. Checked 2026-10-28 through the real protocol and against a
-  throwaway Claude Code config (`claude mcp list`: connected).
+  the Windows user, so the tools act on the panel the user sees. The pipe
+  is created first-instance-only, closed to remote clients, and with a
+  DACL for the user alone (the default lets everyone read it); the bridge
+  refuses a pipe whose server runs as another user. Claude may open only
+  http and https addresses, so a page can't steer it to `file://` or the
+  browser's own pages. The tools are Citropy's core: `browser_open`,
+  `browser_tabs`, `browser_close`, `browser_snapshot` (the accessibility
+  tree with `[ref=N]` handles, plus a 1920 × 1080 JPEG in the coordinates
+  clicks use), `browser_action` (navigate, back, forward, reload, click,
+  hover, type, press, scroll, wait, evaluate) and `browser_logs`, all
+  through DevTools calls on the page. A tool's tab becomes the visible
+  one, so the user sees what Claude does. Citropy's iframes, uploads,
+  dialogs, mobile emulation and connected accounts are left out. Checked
+  2026-10-28 through the real protocol and against a throwaway Claude
+  Code config (`claude mcp list`: connected).
 - **OSC 7 works on Windows.** Upstream ignored it there. Paths must carry
   a drive letter, since a Linux path from WSL would break the folder new
   tabs start in, and the host check ignores case. As on other platforms,

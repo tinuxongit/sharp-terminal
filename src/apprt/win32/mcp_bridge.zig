@@ -14,6 +14,11 @@ pub fn main() u8 {
         report("Sharp isn't running, or its browser is off in Settings > AI > Tools.\n");
         return 1;
     };
+    // Another account could have made a pipe of this name first.
+    if (!mcp_pipe.servedByUs(pipe)) {
+        report("The pipe isn't served by Sharp running as this user; not connecting.\n");
+        return 1;
+    }
     // Both sides are polled from one thread: a blocking read on the pipe
     // would hold up writes to it, since its handle is synchronous.
     var chunk: [64 * 1024]u8 = undefined;

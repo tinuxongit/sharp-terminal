@@ -20,6 +20,9 @@ pub const Token = extern struct { value: i64 };
 
 fn Iunknown(comptime Self: type) type {
     return struct {
+        pub fn addRef(self: *Self) void {
+            _ = self.vtable.AddRef(self);
+        }
         pub fn release(self: *Self) void {
             _ = self.vtable.Release(self);
         }
@@ -29,10 +32,11 @@ fn Iunknown(comptime Self: type) type {
 pub const Environment = extern struct {
     vtable: *const extern struct {
         QueryInterface: Unused,
-        AddRef: Unused,
+        AddRef: *const fn (*Environment) callconv(.winapi) u32,
         Release: *const fn (*Environment) callconv(.winapi) u32,
         CreateCoreWebView2Controller: *const fn (*Environment, w32.HWND, *anyopaque) callconv(.winapi) HRESULT,
     },
+    pub const addRef = Iunknown(Environment).addRef;
     pub const release = Iunknown(Environment).release;
 };
 
@@ -47,11 +51,14 @@ pub const Controller = extern struct {
         put_Bounds: *const fn (*Controller, w32.RECT) callconv(.winapi) HRESULT,
         _7: [5]Unused,
         MoveFocus: *const fn (*Controller, u32) callconv(.winapi) HRESULT,
-        _13: [10]Unused,
+        _13: [6]Unused,
+        add_AcceleratorKeyPressed: *const fn (*Controller, *anyopaque, *Token) callconv(.winapi) HRESULT,
+        _20: [3]Unused,
         NotifyParentWindowPositionChanged: *const fn (*Controller) callconv(.winapi) HRESULT,
         Close: *const fn (*Controller) callconv(.winapi) HRESULT,
         get_CoreWebView2: *const fn (*Controller, *?*WebView) callconv(.winapi) HRESULT,
     },
+    pub const addRef = Iunknown(Controller).addRef;
     pub const release = Iunknown(Controller).release;
     pub const focus_programmatic: u32 = 0;
 };
@@ -62,7 +69,7 @@ pub const WebView = extern struct {
         QueryInterface: Unused,
         AddRef: Unused,
         Release: *const fn (*WebView) callconv(.winapi) u32,
-        get_Settings: Unused,
+        get_Settings: *const fn (*WebView, *?*Settings) callconv(.winapi) HRESULT,
         get_Source: *const fn (*WebView, *?[*:0]u16) callconv(.winapi) HRESULT,
         Navigate: *const fn (*WebView, [*:0]const u16) callconv(.winapi) HRESULT,
         _6: [5]Unused,
@@ -83,8 +90,27 @@ pub const WebView = extern struct {
         GetDevToolsProtocolEventReceiver: *const fn (*WebView, [*:0]const u16, *?*EventReceiver) callconv(.winapi) HRESULT,
         _43: Unused,
         add_NewWindowRequested: *const fn (*WebView, *anyopaque, *Token) callconv(.winapi) HRESULT,
+        _45: Unused,
+        add_DocumentTitleChanged: *const fn (*WebView, *anyopaque, *Token) callconv(.winapi) HRESULT,
+        _47: Unused,
+        get_DocumentTitle: *const fn (*WebView, *?[*:0]u16) callconv(.winapi) HRESULT,
     },
     pub const release = Iunknown(WebView).release;
+};
+
+pub const Settings = extern struct {
+    vtable: *const extern struct {
+        QueryInterface: Unused,
+        AddRef: Unused,
+        Release: *const fn (*Settings) callconv(.winapi) u32,
+        _3: [3]Unused,
+        put_IsWebMessageEnabled: *const fn (*Settings, BOOL) callconv(.winapi) HRESULT,
+        _7: [9]Unused,
+        put_AreHostObjectsAllowed: *const fn (*Settings, BOOL) callconv(.winapi) HRESULT,
+        _17: Unused,
+        put_IsZoomControlEnabled: *const fn (*Settings, BOOL) callconv(.winapi) HRESULT,
+    },
+    pub const release = Iunknown(Settings).release;
 };
 
 pub const EventReceiver = extern struct {
@@ -109,13 +135,44 @@ pub const EventArgs = extern struct {
 pub const NewWindowArgs = extern struct {
     vtable: *const extern struct {
         QueryInterface: Unused,
-        AddRef: Unused,
-        Release: Unused,
+        AddRef: *const fn (*NewWindowArgs) callconv(.winapi) u32,
+        Release: *const fn (*NewWindowArgs) callconv(.winapi) u32,
         get_Uri: *const fn (*NewWindowArgs, *?[*:0]u16) callconv(.winapi) HRESULT,
-        put_NewWindow: Unused,
+        put_NewWindow: *const fn (*NewWindowArgs, *WebView) callconv(.winapi) HRESULT,
         get_NewWindow: Unused,
         put_Handled: *const fn (*NewWindowArgs, BOOL) callconv(.winapi) HRESULT,
+        get_Handled: Unused,
+        get_IsUserInitiated: Unused,
+        GetDeferral: *const fn (*NewWindowArgs, *?*Deferral) callconv(.winapi) HRESULT,
     },
+    pub const addRef = Iunknown(NewWindowArgs).addRef;
+    pub const release = Iunknown(NewWindowArgs).release;
+};
+
+pub const Deferral = extern struct {
+    vtable: *const extern struct {
+        QueryInterface: Unused,
+        AddRef: Unused,
+        Release: *const fn (*Deferral) callconv(.winapi) u32,
+        Complete: *const fn (*Deferral) callconv(.winapi) HRESULT,
+    },
+    pub const release = Iunknown(Deferral).release;
+};
+
+pub const KeyArgs = extern struct {
+    vtable: *const extern struct {
+        QueryInterface: Unused,
+        AddRef: Unused,
+        Release: Unused,
+        get_KeyEventKind: *const fn (*KeyArgs, *c_int) callconv(.winapi) HRESULT,
+        get_VirtualKey: *const fn (*KeyArgs, *u32) callconv(.winapi) HRESULT,
+        get_KeyEventLParam: Unused,
+        get_PhysicalKeyStatus: Unused,
+        get_Handled: Unused,
+        put_Handled: *const fn (*KeyArgs, BOOL) callconv(.winapi) HRESULT,
+    },
+    pub const key_down: c_int = 0;
+    pub const system_key_down: c_int = 2;
 };
 
 fn iid(d1: u32, d2: u16, d3: u16, d4: [8]u8) GUID {
@@ -128,21 +185,23 @@ pub const iid_controller_completed = iid(0x6c4819f3, 0xc9b7, 0x4260, .{ 0x81, 0x
 pub const iid_source_changed = iid(0x3c067f9f, 0x5388, 0x4772, .{ 0x8b, 0x48, 0x79, 0xf7, 0xef, 0x1a, 0xb3, 0x7c });
 pub const iid_history_changed = iid(0xc79a420c, 0xefd9, 0x4058, .{ 0x92, 0x95, 0x3e, 0x8b, 0x4b, 0xca, 0xb6, 0x45 });
 pub const iid_new_window = iid(0xd4c185fe, 0xc81c, 0x4989, .{ 0x97, 0xaf, 0x2d, 0x3f, 0xa7, 0xab, 0x56, 0x51 });
+pub const iid_title_changed = iid(0xf5f2b923, 0x953e, 0x4042, .{ 0x9f, 0x95, 0xf3, 0xa1, 0x18, 0xe1, 0xaf, 0xd4 });
+pub const iid_accelerator_key = iid(0xb29c7e28, 0xfa79, 0x41a8, .{ 0x8e, 0x44, 0x65, 0x81, 0x1c, 0x76, 0xdc, 0xb2 });
 pub const iid_cdp_completed = iid(0x5c4889f0, 0x5ef6, 0x4c5a, .{ 0x95, 0x2c, 0xd8, 0xf1, 0xb9, 0x2d, 0x05, 0x74 });
 pub const iid_cdp_event = iid(0xe2fda4be, 0x5456, 0x406c, .{ 0xa2, 0x61, 0x3d, 0x45, 0x21, 0x38, 0x36, 0x2c });
 
 /// A handler object WebView2 calls back, running `invoke(context, a, b)`.
 /// WebView2 keeps a reference while it may still call, so the object
 /// frees itself on its last Release. The panel's handlers carry its window
-/// rather than the panel, so a callback arriving after the panel closed
-/// finds no panel instead of a freed one.
-pub fn Handler(comptime handler_iid: GUID, comptime A: type, comptime B: type, comptime invoke: fn (usize, A, B) void) type {
+/// and a tab id rather than pointers, so a callback arriving after the
+/// panel or tab closed finds nothing instead of freed memory.
+pub fn Handler(comptime handler_iid: GUID, comptime Context: type, comptime A: type, comptime B: type, comptime invoke: fn (Context, A, B) void) type {
     return extern struct {
         const Self = @This();
 
         vtable: *const Vtbl = &vtbl,
         refs: std.atomic.Value(u32) = .init(1),
-        context: usize,
+        context: Context,
 
         const Vtbl = extern struct {
             QueryInterface: *const fn (*Self, *const GUID, *?*anyopaque) callconv(.winapi) HRESULT,
@@ -154,7 +213,7 @@ pub fn Handler(comptime handler_iid: GUID, comptime A: type, comptime B: type, c
 
         /// The caller owns one reference and releases it once WebView2 has
         /// taken its own.
-        pub fn create(context: usize) ?*Self {
+        pub fn create(context: Context) ?*Self {
             const self = std.heap.smp_allocator.create(Self) catch return null;
             self.* = .{ .context = context };
             return self;
