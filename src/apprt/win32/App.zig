@@ -42,6 +42,7 @@ const workspace = @import("workspace.zig");
 const tab_rename = @import("tab_rename.zig");
 const actions = @import("actions.zig");
 const pane_messages = @import("pane_messages.zig");
+const window_messages = @import("window_messages.zig");
 const global_hotkey = @import("global_hotkey.zig");
 
 comptime {
@@ -197,7 +198,7 @@ pub fn init(
     const wc = w32.WNDCLASSEXW{
         .cbSize = @sizeOf(w32.WNDCLASSEXW),
         .style = w32.CS_DBLCLKS,
-        .lpfnWndProc = &Window.windowWndProc,
+        .lpfnWndProc = &window_messages.windowWndProc,
         .cbClsExtra = 0,
         .cbWndExtra = 0,
         .hInstance = hinstance,
