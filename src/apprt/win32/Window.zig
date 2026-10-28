@@ -15,8 +15,8 @@ const w32 = @import("win32.zig");
 const brand = @import("brand.zig");
 const wide_string = @import("wide_string.zig");
 const tab_strip = @import("tab_strip.zig");
-const settings_menu = @import("settings_menu.zig");
-const config_file = @import("config_file.zig");
+const menu_theme = @import("menu_theme.zig");
+const SettingsPanel = @import("SettingsPanel.zig");
 
 const log = std.log.scoped(.win32);
 
@@ -59,6 +59,9 @@ window_active: bool = true,
 
 /// Tab width held while tabs are being closed with the mouse.
 frozen_tab_width: ?i32 = null,
+
+/// The settings panel, while it is open.
+settings_panel: ?*SettingsPanel = null,
 
 /// Tab drag state: which tab is being dragged (-1 = none).
 drag_tab: isize = -1,
@@ -230,6 +233,8 @@ pub fn onConfigChange(self: *Window) void {
         applyBackgroundBlur(hwnd, self.app.config.@"background-blur".enabled());
     }
     self.tab_overview.updateAppearance();
+    // The strip's colors come from the terminal's, so a new theme repaints it.
+    self.invalidateTabBar();
 }
 
 /// Initialize the Window by creating the top-level HWND and tab bar font.
@@ -1469,7 +1474,8 @@ fn paintTabBar(self: *Window) void {
         },
         .{
             .hover = self.strip_hover,
-            .pressed = self.strip_pressed,
+            // The gear stays lit while its panel is open.
+            .pressed = if (self.settings_panel != null) .settings else self.strip_pressed,
             .window_active = self.window_active,
             .maximized = w32.IsZoomed(hwnd) != 0,
         },
@@ -1619,6 +1625,7 @@ pub fn toggleWindowDecorations(self: *Window) void {
 const RESIZE_OVERLAY_TIMER_ID: usize = 0x5247; // 'RG'
 
 fn handleResize(self: *Window) void {
+    if (self.settings_panel) |panel| panel.place(self.settingsArea());
     self.layoutSplits();
     self.invalidateTabBar();
     self.showResizeOverlay();
@@ -1716,7 +1723,7 @@ fn handleTabBarClick(self: *Window, x: i16, y: i16) void {
             log.err("failed to create new tab: {}", .{err});
         },
         .tab_close => |i| self.closeTabFromStrip(i),
-        .settings => self.showSettingsMenu(),
+        .settings => self.openSettings(),
         .tab => |i| {
             self.selectTabIndex(i);
             // Start tracking potential tab drag
@@ -1730,39 +1737,73 @@ fn handleTabBarClick(self: *Window, x: i16, y: i16) void {
     }
 }
 
-/// Drop the settings menu below the gear and apply what was picked.
-fn showSettingsMenu(self: *Window) void {
+/// Open the settings panel over the terminal, or focus it if it is open.
+fn openSettings(self: *Window) void {
+    if (self.settings_panel) |panel| return panel.focus();
     const hwnd = self.hwnd orelse return;
-    const button = self.stripLayout().rightButtonRect(.settings);
-    var corner: w32.POINT = .{ .x = button.right, .y = button.bottom };
-    _ = w32.ClientToScreen(hwnd, &corner);
+    const alloc = self.app.core_app.alloc;
+    const panel = alloc.create(SettingsPanel) catch return;
+    panel.* = .{
+        .owner = hwnd,
+        .host = .{
+            .ctx = self,
+            .reload = settingsReload,
+            .edit_file = settingsEditFile,
+            .colors = settingsColors,
+            .closed = settingsClosed,
+        },
+        .alloc = alloc,
+        .scale = self.scale,
+    };
+    self.settings_panel = panel;
+    self.invalidateTabBar();
+    panel.open(self.app.hinstance, self.settingsArea()) catch |err| {
+        log.err("failed to open settings: {}", .{err});
+        self.settings_panel = null;
+        alloc.destroy(panel);
+    };
+}
+
+/// The terminal area below the strip, in screen pixels, which the
+/// settings panel covers.
+fn settingsArea(self: *Window) w32.RECT {
+    var client: w32.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+    const hwnd = self.hwnd orelse return client;
+    _ = w32.GetClientRect(hwnd, &client);
+    var top_left: w32.POINT = .{ .x = 0, .y = self.tabBarHeight() };
+    var bottom_right: w32.POINT = .{ .x = client.right, .y = client.bottom };
+    _ = w32.ClientToScreen(hwnd, &top_left);
+    _ = w32.ClientToScreen(hwnd, &bottom_right);
+    return .{ .left = top_left.x, .top = top_left.y, .right = bottom_right.x, .bottom = bottom_right.y };
+}
+
+fn settingsReload(ctx: *anyopaque) void {
+    const self: *Window = @ptrCast(@alignCast(ctx));
+    _ = self.app.performAction(.app, .reload_config, .{ .soft = false }) catch |err| {
+        log.err("failed to reload config: {}", .{err});
+    };
+}
+
+fn settingsEditFile(ctx: *anyopaque) void {
+    const self: *Window = @ptrCast(@alignCast(ctx));
+    _ = self.app.performAction(.app, .open_config, .os_open) catch |err| {
+        log.err("failed to open the config file: {}", .{err});
+    };
+}
+
+fn settingsColors(ctx: *anyopaque) [2]tab_strip.Rgb {
+    const self: *Window = @ptrCast(@alignCast(ctx));
     const bg = self.app.config.background;
-    const dark = tab_strip.Rgb.isDark(.{ .r = bg.r, .g = bg.g, .b = bg.b });
+    const fg = self.app.config.foreground;
+    return .{ .{ .r = bg.r, .g = bg.g, .b = bg.b }, .{ .r = fg.r, .g = fg.g, .b = fg.b } };
+}
 
-    self.strip_pressed = .settings;
+fn settingsClosed(ctx: *anyopaque) void {
+    const self: *Window = @ptrCast(@alignCast(ctx));
+    const panel = self.settings_panel orelse return;
+    self.settings_panel = null;
+    self.app.core_app.alloc.destroy(panel);
     self.invalidateTabBar();
-    const pick = settings_menu.show(self.app.core_app.alloc, hwnd, corner, dark);
-    self.strip_pressed = .none;
-    self.invalidateTabBar();
-
-    const reload: apprt.action.ReloadConfig = .{ .soft = false };
-    switch (pick orelse return) {
-        .set => |change| {
-            config_file.write(self.app.core_app.alloc, change.key, change.value) catch |err| {
-                log.err("failed to save setting {s}: {}", .{ change.key, err });
-                return;
-            };
-            _ = self.app.performAction(.app, .reload_config, reload) catch |err| {
-                log.err("failed to reload config: {}", .{err});
-            };
-        },
-        .edit_file => _ = self.app.performAction(.app, .open_config, .os_open) catch |err| {
-            log.err("failed to open the config file: {}", .{err});
-        },
-        .reload => _ = self.app.performAction(.app, .reload_config, reload) catch |err| {
-            log.err("failed to reload config: {}", .{err});
-        },
-    }
 }
 
 /// Closing with the mouse keeps the other tabs at their width, as Chrome
@@ -1877,7 +1918,7 @@ fn handleTabBarRightClick(self: *Window, x: i16, y: i16) void {
     _ = w32.AppendMenuW(menu, w32.MF_STRING, TAB_CTX_NEW_TAB, std.unicode.utf8ToUtf16LeStringLiteral("New Tab"));
 
     const bg = self.app.config.background;
-    settings_menu.applyMenuTheme(tab_strip.Rgb.isDark(.{ .r = bg.r, .g = bg.g, .b = bg.b }));
+    menu_theme.apply(tab_strip.Rgb.isDark(.{ .r = bg.r, .g = bg.g, .b = bg.b }));
 
     // Convert client coords to screen coords for the popup.
     var pt = w32.POINT{ .x = @intCast(x), .y = @intCast(y) };
@@ -2306,6 +2347,7 @@ pub fn windowWndProc(
             return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
         },
         w32.WM_MOVE => {
+            if (window.settings_panel) |panel| panel.place(window.settingsArea());
             // Top-level move: child surface HWNDs do NOT receive WM_MOVE
             // (their position relative to the parent is unchanged), but the
             // scrollbar is a screen-positioned popup that must follow its

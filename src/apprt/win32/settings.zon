@@ -1,0 +1,203 @@
+// The settings panel behind the gear button: categories in the sidebar,
+// each with titled sections of settings. Every setting edits one Ghostty
+// config key: picking a choice writes `key = value` to the user's config
+// file and reloads it. An empty value removes the key, so Ghostty's
+// default applies again. The file is checked when Sharp is compiled.
+//
+// .icon is a Segoe Fluent Icons code point.
+//
+// A setting is one of:
+//   a dropdown   .choices = .{ .{ .label, .value }, ... }
+//   a toggle     .on / .off values, .default_on when the key is absent
+//   an action    .action = .edit_file or .reload, with a .button label
+//
+// Choices can name what they need; they are hidden when it is missing:
+//   .requires_program  an executable on PATH, or an absolute path
+//   .requires_font     an installed font family
+.{
+    .title = "Settings",
+    .search_placeholder = "Search",
+    .restore_label = "Restore defaults",
+    .restore_confirm = "Remove every setting changed from this panel and go back to the defaults?",
+    .no_results = "No settings match your search.",
+    .categories = .{
+        .{
+            .name = "General",
+            .icon = 0xE713,
+            .sections = .{
+                .{
+                    .title = "New tabs",
+                    .settings = .{
+                        .{
+                            .label = "Shell",
+                            .description = "The program new tabs and windows start. Open tabs keep theirs.",
+                            .key = "command",
+                            .choices = .{
+                                .{ .label = "Command Prompt", .value = "" },
+                                .{ .label = "Windows PowerShell", .value = "powershell.exe", .requires_program = "powershell.exe" },
+                                .{ .label = "PowerShell 7", .value = "pwsh.exe", .requires_program = "pwsh.exe" },
+                                .{ .label = "WSL", .value = "wsl.exe", .requires_program = "wsl.exe" },
+                                .{
+                                    .label = "Git Bash",
+                                    .value = "\"C:\\Program Files\\Git\\bin\\bash.exe\" -i -l",
+                                    .requires_program = "C:\\Program Files\\Git\\bin\\bash.exe",
+                                },
+                            },
+                        },
+                    },
+                },
+                .{
+                    .title = "Behavior",
+                    .settings = .{
+                        .{
+                            .label = "Confirm before closing",
+                            .description = "Ask before closing a tab or window that is still running a command.",
+                            .key = "confirm-close-surface",
+                            .on = "",
+                            .off = "false",
+                            .default_on = true,
+                        },
+                        .{
+                            .label = "Copy on select",
+                            .description = "Copy selected text to the clipboard as soon as you select it.",
+                            .key = "copy-on-select",
+                            .on = "clipboard",
+                            .off = "",
+                            .default_on = false,
+                        },
+                    },
+                },
+            },
+        },
+        .{
+            .name = "Appearance",
+            .icon = 0xE790,
+            .sections = .{
+                .{
+                    .title = "Colors",
+                    .settings = .{
+                        .{
+                            .label = "Theme",
+                            .description = "Colors for the terminal and the tab strip.",
+                            .key = "theme",
+                            .choices = .{
+                                .{ .label = "Default", .value = "" },
+                                .{ .label = "Catppuccin Mocha", .value = "Catppuccin Mocha" },
+                                .{ .label = "Catppuccin Latte", .value = "Catppuccin Latte" },
+                                .{ .label = "Dracula", .value = "Dracula" },
+                                .{ .label = "Nord", .value = "Nord" },
+                                .{ .label = "Gruvbox Dark", .value = "Gruvbox Dark" },
+                                .{ .label = "Tokyo Night", .value = "TokyoNight" },
+                                .{ .label = "Rose Pine", .value = "Rose Pine" },
+                                .{ .label = "Kanagawa Wave", .value = "Kanagawa Wave" },
+                                .{ .label = "Monokai Pro", .value = "Monokai Pro" },
+                                .{ .label = "One Half Dark", .value = "One Half Dark" },
+                                .{ .label = "Solarized Dark", .value = "iTerm2 Solarized Dark" },
+                                .{ .label = "GitHub Dark", .value = "GitHub Dark Default" },
+                                .{ .label = "GitHub Light", .value = "GitHub Light Default" },
+                            },
+                        },
+                        .{
+                            .label = "Background opacity",
+                            .description = "Let the desktop show through the terminal background.",
+                            .key = "background-opacity",
+                            .choices = .{
+                                .{ .label = "100%", .value = "" },
+                                .{ .label = "95%", .value = "0.95" },
+                                .{ .label = "90%", .value = "0.9" },
+                                .{ .label = "85%", .value = "0.85" },
+                                .{ .label = "80%", .value = "0.8" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        .{
+            .name = "Text",
+            .icon = 0xE8D2,
+            .sections = .{
+                .{
+                    .title = "Font",
+                    .settings = .{
+                        .{
+                            .label = "Font family",
+                            .description = "The typeface for terminal text. Only installed fonts are listed.",
+                            .key = "font-family",
+                            .choices = .{
+                                .{ .label = "JetBrains Mono", .value = "" },
+                                .{ .label = "Cascadia Mono", .value = "Cascadia Mono", .requires_font = "Cascadia Mono" },
+                                .{ .label = "Cascadia Code", .value = "Cascadia Code", .requires_font = "Cascadia Code" },
+                                .{ .label = "Consolas", .value = "Consolas", .requires_font = "Consolas" },
+                                .{ .label = "Fira Code", .value = "Fira Code", .requires_font = "Fira Code" },
+                                .{ .label = "Lucida Console", .value = "Lucida Console", .requires_font = "Lucida Console" },
+                            },
+                        },
+                        .{
+                            .label = "Font size",
+                            .description = "Text size in points. Ctrl+Plus and Ctrl+Minus change it for one tab.",
+                            .key = "font-size",
+                            .choices = .{
+                                .{ .label = "10", .value = "10" },
+                                .{ .label = "11", .value = "11" },
+                                .{ .label = "12", .value = "" },
+                                .{ .label = "13", .value = "13" },
+                                .{ .label = "14", .value = "14" },
+                                .{ .label = "16", .value = "16" },
+                                .{ .label = "18", .value = "18" },
+                                .{ .label = "20", .value = "20" },
+                            },
+                        },
+                    },
+                },
+                .{
+                    .title = "Cursor",
+                    .settings = .{
+                        .{
+                            .label = "Cursor style",
+                            .description = "Programs can still change it while they run.",
+                            .key = "cursor-style",
+                            .choices = .{
+                                .{ .label = "Block", .value = "" },
+                                .{ .label = "Bar", .value = "bar" },
+                                .{ .label = "Underline", .value = "underline" },
+                                .{ .label = "Hollow block", .value = "block_hollow" },
+                            },
+                        },
+                        .{
+                            .label = "Blinking cursor",
+                            .description = "Make the cursor blink while the terminal has focus.",
+                            .key = "cursor-style-blink",
+                            .on = "true",
+                            .off = "false",
+                            .default_on = true,
+                        },
+                    },
+                },
+            },
+        },
+        .{
+            .name = "Advanced",
+            .icon = 0xE90F,
+            .sections = .{
+                .{
+                    .title = "Config file",
+                    .settings = .{
+                        .{
+                            .label = "Edit config file",
+                            .description = "Every Ghostty option, including the ones not shown here, lives in this text file.",
+                            .action = .edit_file,
+                            .button = "Open",
+                        },
+                        .{
+                            .label = "Reload config",
+                            .description = "Apply changes you made to the file by hand.",
+                            .action = .reload,
+                            .button = "Reload",
+                        },
+                    },
+                },
+            },
+        },
+    },
+}

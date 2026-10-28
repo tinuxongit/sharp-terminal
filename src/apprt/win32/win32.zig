@@ -1681,3 +1681,5 @@ pub extern "kernel32" fn GetFileAttributesW(lpFileName: [*:0]const u16) callconv
 pub extern "kernel32" fn LoadLibraryW(lpLibFileName: [*:0]const u16) callconv(.winapi) ?HINSTANCE;
 pub extern "kernel32" fn GetProcAddress(hModule: HINSTANCE, lpProcName: [*:0]const u8) callconv(.winapi) ?*const anyopaque;
 pub const ANTIALIASED_QUALITY: u32 = 4;
+pub const DT_RIGHT: u32 = 0x2;
+pub extern "dwmapi" fn DwmGetColorizationColor(pcrColorization: *u32, pfOpaqueBlend: *i32) callconv(.winapi) i32;

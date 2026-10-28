@@ -31,10 +31,17 @@ commands and conventions; this file covers what is specific to Sharp.
   new-tab and settings buttons, minimize/maximize/close), with its layout,
   hit-testing, colors and painting. `Window.zig` only feeds it state and turns its
   hit-test results into window messages (`WM_NCCALCSIZE`, `WM_NCHITTEST`).
-- `src/apprt/win32/settings_menu.zon`: the entries of the settings menu
-  (themes, fonts, shells...). Add or change choices here, not in code.
-- `src/apprt/win32/settings_menu.zig`: builds that menu, marks current
-  values, hides choices whose program or font is missing.
+- `src/apprt/win32/settings.zon`: everything the settings panel offers
+  (categories, settings, descriptions, choices) and its text. Add or change
+  settings here, not in code.
+- `src/apprt/win32/settings.zig`: reads that data and relates each setting
+  to the config file (current value, toggles, search, dropdown choices).
+- `src/apprt/win32/settings_view.zig`: lays out and paints the panel.
+- `src/apprt/win32/SettingsPanel.zig`: the panel's layered window, input,
+  and state.
+- `src/apprt/win32/canvas.zig`: drawing shared by the strip and the panel
+  (colors, anti-aliased shapes, text, icon fonts).
+- `src/apprt/win32/menu_theme.zig`: dark or light native popup menus.
 - `src/apprt/win32/config_file.zig`: reads and changes one key of the
   user's Ghostty config file, leaving the rest of it untouched.
 - `src/font/directwrite.zig`: finds system fonts on Windows.
@@ -81,11 +88,16 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   marks (PowerShell with Sharp's integration) answer through the prompt
   test. `cmd.exe` sends none, so on Windows a command counts as running
   when the shell has a child process (`Subprocess.commandRunning`).
-- **Settings are a menu that writes the config file.** The gear, beside
-  minimize, opens a native menu; a pick writes `key = value` to Ghostty's
-  config file and reloads it, so the file stays the single source of
-  truth. Menus follow the strip's dark or light look through uxtheme's
-  unnamed SetPreferredAppMode export, as Explorer and Notepad do.
+- **Settings are a panel that writes the config file.** The gear, beside
+  minimize, opens a panel over the dimmed terminal, laid out like T3
+  Code's: searchable categories on the left, cards of settings with
+  dropdowns and switches on the right. A change writes `key = value` to
+  Ghostty's config file and reloads it, so the file stays the single
+  source of truth. The panel is a per-pixel-alpha layered window drawn
+  with `canvas.zig`, so it has no child controls; the search box is drawn
+  too, and typing anywhere in the panel searches. Dropdowns open native
+  menus, themed through uxtheme's unnamed SetPreferredAppMode export, as
+  Explorer and Notepad do.
 - **Images use the kitty graphics protocol.** The bundled ConPTY passes it
   through (checked 2026-10-28 with OpenConsole 1.25; the inbox Windows
   ConPTY strips it). `chafa` picks it automatically via `TERM_PROGRAM`.

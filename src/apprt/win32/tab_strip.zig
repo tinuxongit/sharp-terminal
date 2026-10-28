@@ -8,6 +8,9 @@
 //! tabs wide enough keep a close button.
 const std = @import("std");
 const w32 = @import("win32.zig");
+const canvas_mod = @import("canvas.zig");
+const Canvas = canvas_mod.Canvas;
+pub const Rgb = canvas_mod.Rgb;
 
 /// What sits under a point of the strip.
 pub const Part = union(enum) {
@@ -205,46 +208,6 @@ fn contains(rect: w32.RECT, x: i32, y: i32) bool {
     return x >= rect.left and x < rect.right and y >= rect.top and y < rect.bottom;
 }
 
-pub const Rgb = struct {
-    r: u8,
-    g: u8,
-    b: u8,
-
-    const black: Rgb = .{ .r = 0, .g = 0, .b = 0 };
-    const white: Rgb = .{ .r = 255, .g = 255, .b = 255 };
-
-    fn mix(a: Rgb, b: Rgb, t: f32) Rgb {
-        const lerp = struct {
-            fn f(x: u8, y: u8, k: f32) u8 {
-                const v = @as(f32, @floatFromInt(x)) * (1 - k) + @as(f32, @floatFromInt(y)) * k;
-                return @intFromFloat(@round(std.math.clamp(v, 0, 255)));
-            }
-        }.f;
-        return .{ .r = lerp(a.r, b.r, t), .g = lerp(a.g, b.g, t), .b = lerp(a.b, b.b, t) };
-    }
-
-    pub fn isDark(self: Rgb) bool {
-        const luminance = 0.2126 * @as(f32, @floatFromInt(self.r)) +
-            0.7152 * @as(f32, @floatFromInt(self.g)) +
-            0.0722 * @as(f32, @floatFromInt(self.b));
-        return luminance < 128;
-    }
-
-    /// GDI's COLORREF order.
-    fn ref(self: Rgb) u32 {
-        return w32.RGB(self.r, self.g, self.b);
-    }
-
-    /// A 32-bit DIB pixel stores blue in the low byte.
-    fn toPixel(self: Rgb) u32 {
-        return @as(u32, self.b) | (@as(u32, self.g) << 8) | (@as(u32, self.r) << 16);
-    }
-
-    fn fromPixel(p: u32) Rgb {
-        return .{ .r = @truncate(p >> 16), .g = @truncate(p >> 8), .b = @truncate(p) };
-    }
-};
-
 /// Strip colors derived from the terminal's own colors, so every theme
 /// gets a matching title bar and the active tab blends into the terminal.
 pub const Palette = struct {
@@ -296,12 +259,12 @@ pub const Fonts = struct {
 
     /// `hdc` is only used to check which icon font Windows actually picked.
     pub fn init(hdc: w32.HDC, scale: f32) Fonts {
-        const icon_face = iconFace(hdc);
+        const icon_face = canvas_mod.iconFace(hdc);
         return .{
-            .title = createFont(12, scale, std.unicode.utf8ToUtf16LeStringLiteral("Segoe UI"), w32.CLEARTYPE_QUALITY),
-            .icons = createFont(10, scale, icon_face, w32.ANTIALIASED_QUALITY),
-            .icons_small = createFont(8, scale, icon_face, w32.ANTIALIASED_QUALITY),
-            .icons_large = createFont(12, scale, icon_face, w32.ANTIALIASED_QUALITY),
+            .title = canvas_mod.createFont(12, scale, canvas_mod.segoe_ui, w32.FW_NORMAL, .cleartype),
+            .icons = canvas_mod.createFont(10, scale, icon_face, w32.FW_NORMAL, .grayscale),
+            .icons_small = canvas_mod.createFont(8, scale, icon_face, w32.FW_NORMAL, .grayscale),
+            .icons_large = canvas_mod.createFont(12, scale, icon_face, w32.FW_NORMAL, .grayscale),
         };
     }
 
@@ -310,45 +273,6 @@ pub const Fonts = struct {
             if (font.*) |f| _ = w32.DeleteObject(f);
             font.* = null;
         }
-    }
-
-    /// Windows 11 ships Segoe Fluent Icons; Windows 10 only has Segoe MDL2
-    /// Assets, which uses the same code points. A missing font would
-    /// silently fall back to one that draws boxes, so check the result.
-    fn iconFace(hdc: w32.HDC) [*:0]const u16 {
-        const fluent = std.unicode.utf8ToUtf16LeStringLiteral("Segoe Fluent Icons");
-        const mdl2 = std.unicode.utf8ToUtf16LeStringLiteral("Segoe MDL2 Assets");
-        const probe = createFont(10, 1, fluent, w32.ANTIALIASED_QUALITY) orelse return mdl2;
-        defer _ = w32.DeleteObject(probe);
-        const old = w32.SelectObject(hdc, probe);
-        defer _ = w32.SelectObject(hdc, old);
-        var face: [32]u16 = undefined;
-        const len = w32.GetTextFaceW(hdc, face.len, &face);
-        if (len <= 0) return mdl2;
-        const picked = face[0..@min(@as(usize, @intCast(len)), face.len)];
-        const expected: []const u16 = fluent;
-        return if (std.mem.startsWith(u16, picked, expected)) fluent else mdl2;
-    }
-
-    /// Icons use grayscale smoothing, as Windows' own caption glyphs do:
-    /// ClearType's colored subpixels show as tinted fringes on thin icons.
-    fn createFont(size: f32, scale: f32, face: [*:0]const u16, quality: u32) ?*anyopaque {
-        return w32.CreateFontW(
-            -@as(i32, @intFromFloat(@round(size * scale))),
-            0,
-            0,
-            0,
-            w32.FW_NORMAL,
-            0,
-            0,
-            0,
-            w32.DEFAULT_CHARSET,
-            0,
-            0,
-            quality,
-            0,
-            face,
-        );
     }
 };
 
@@ -363,100 +287,6 @@ pub const View = struct {
 pub const Titles = struct {
     text: []const [256]u16,
     lens: []const u16,
-};
-
-/// A top-down 32-bit DIB selected into `hdc`. GDI draws text into it and
-/// shapes are blended straight into `pixels`.
-pub const Canvas = struct {
-    hdc: w32.HDC,
-    pixels: [*]u32,
-    width: i32,
-    height: i32,
-
-    /// Direct pixel access must wait for GDI's queued drawing.
-    fn sync(_: Canvas) void {
-        _ = w32.GdiFlush();
-    }
-
-    fn blend(self: Canvas, x: i32, y: i32, color: Rgb, coverage: f32) void {
-        if (x < 0 or y < 0 or x >= self.width or y >= self.height or coverage <= 0) return;
-        const p = &self.pixels[@intCast(y * self.width + x)];
-        p.* = if (coverage >= 1) color.toPixel() else Rgb.fromPixel(p.*).mix(color, coverage).toPixel();
-    }
-
-    fn fill(self: Canvas, rect: w32.RECT, color: Rgb) void {
-        var y = @max(rect.top, 0);
-        while (y < @min(rect.bottom, self.height)) : (y += 1) {
-            var x = @max(rect.left, 0);
-            while (x < @min(rect.right, self.width)) : (x += 1) self.blend(x, y, color, 1);
-        }
-    }
-
-    /// Fill a rounded rectangle; a radius of half the size draws a circle.
-    fn fillRounded(self: Canvas, rect: w32.RECT, radius: i32, color: Rgb) void {
-        const r = @min(radius, @divTrunc(rect.right - rect.left, 2), @divTrunc(rect.bottom - rect.top, 2));
-        self.fill(.{ .left = rect.left + r, .top = rect.top, .right = rect.right - r, .bottom = rect.bottom }, color);
-        self.fill(.{ .left = rect.left, .top = rect.top + r, .right = rect.left + r, .bottom = rect.bottom - r }, color);
-        self.fill(.{ .left = rect.right - r, .top = rect.top + r, .right = rect.right, .bottom = rect.bottom - r }, color);
-        self.corner(rect.left, rect.top, r, .{ 1, 1 }, .inside, color);
-        self.corner(rect.right - r, rect.top, r, .{ 0, 1 }, .inside, color);
-        self.corner(rect.left, rect.bottom - r, r, .{ 1, 0 }, .inside, color);
-        self.corner(rect.right - r, rect.bottom - r, r, .{ 0, 0 }, .inside, color);
-    }
-
-    /// The active tab: rounded on top, and curving out at the bottom into
-    /// the terminal below, Chrome's signature shape.
-    fn fillActiveTab(self: Canvas, rect: w32.RECT, top: i32, foot: i32, color: Rgb) void {
-        self.fill(.{ .left = rect.left + top, .top = rect.top, .right = rect.right - top, .bottom = rect.bottom }, color);
-        self.fill(.{ .left = rect.left, .top = rect.top + top, .right = rect.left + top, .bottom = rect.bottom }, color);
-        self.fill(.{ .left = rect.right - top, .top = rect.top + top, .right = rect.right, .bottom = rect.bottom }, color);
-        self.corner(rect.left, rect.top, top, .{ 1, 1 }, .inside, color);
-        self.corner(rect.right - top, rect.top, top, .{ 0, 1 }, .inside, color);
-        self.corner(rect.left - foot, rect.bottom - foot, foot, .{ 0, 0 }, .outside, color);
-        self.corner(rect.right, rect.bottom - foot, foot, .{ 1, 0 }, .outside, color);
-    }
-
-    const Side = enum { inside, outside };
-
-    /// Blend an r×r square at (x0, y0) by how much of each pixel lies
-    /// inside (or outside) a quarter circle. `center` says which corner of
-    /// the square the circle's center sits on (1 = far side on that axis).
-    fn corner(self: Canvas, x0: i32, y0: i32, r: i32, center: [2]u1, side: Side, color: Rgb) void {
-        if (r <= 0) return;
-        const rf: f32 = @floatFromInt(r);
-        const cx: f32 = if (center[0] == 1) rf else 0;
-        const cy: f32 = if (center[1] == 1) rf else 0;
-        const samples = 4;
-        var py: i32 = 0;
-        while (py < r) : (py += 1) {
-            var px_: i32 = 0;
-            while (px_ < r) : (px_ += 1) {
-                var inside: u32 = 0;
-                for (0..samples) |sy| {
-                    for (0..samples) |sx| {
-                        const fx = @as(f32, @floatFromInt(px_)) + (@as(f32, @floatFromInt(sx)) + 0.5) / samples - cx;
-                        const fy = @as(f32, @floatFromInt(py)) + (@as(f32, @floatFromInt(sy)) + 0.5) / samples - cy;
-                        if (fx * fx + fy * fy <= rf * rf) inside += 1;
-                    }
-                }
-                const covered = if (side == .inside) inside else samples * samples - inside;
-                self.blend(x0 + px_, y0 + py, color, @as(f32, @floatFromInt(covered)) / (samples * samples));
-            }
-        }
-    }
-
-    /// Fade the right end of `rect` into `background`, Chrome's way of
-    /// cutting a title that doesn't fit instead of an ellipsis.
-    fn fadeRight(self: Canvas, rect: w32.RECT, width: i32, background: Rgb) void {
-        const w = @min(width, rect.right - rect.left);
-        if (w <= 0) return;
-        var x = rect.right - w;
-        while (x < rect.right) : (x += 1) {
-            const t = @as(f32, @floatFromInt(x - (rect.right - w) + 1)) / @as(f32, @floatFromInt(w));
-            var y = rect.top;
-            while (y < rect.bottom) : (y += 1) self.blend(x, y, background, t);
-        }
-    }
 };
 
 /// Paint the whole strip. Shapes go straight into the pixels and text
@@ -500,7 +330,7 @@ pub fn paint(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, tit
         else
             palette.text_dim;
         // The gear reads smaller than the caption glyphs at the same size.
-        drawGlyph(canvas.hdc, if (part == .settings) fonts.icons_large else fonts.icons, glyph, rect, color);
+        canvas.glyph(rect, @backingInt(glyph), if (part == .settings) fonts.icons_large else fonts.icons, color);
     }
     canvas.sync();
 }
@@ -513,7 +343,7 @@ fn paintTab(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, titl
 
     const background = if (active) palette.active_tab else if (hovered) palette.hover else palette.strip;
     if (active) {
-        canvas.fillActiveTab(rect, layout.px(tab_top_corner), layout.px(tab_foot), palette.active_tab);
+        fillActiveTab(canvas, rect, layout.px(tab_top_corner), layout.px(tab_foot), palette.active_tab);
     } else if (hovered) {
         const inset = layout.px(hover_inset);
         canvas.fillRounded(.{ .left = rect.left + inset, .top = rect.top + inset, .right = rect.right - inset, .bottom = rect.bottom - inset }, layout.px(tab_top_corner), palette.hover);
@@ -552,7 +382,7 @@ fn paintTab(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, titl
             canvas.sync();
             canvas.fillRounded(close_rect, @divTrunc(close_rect.right - close_rect.left, 2), background.mix(palette.contrast, 0.12));
         }
-        drawGlyph(canvas.hdc, fonts.icons_small, .close, close_rect, text_color);
+        canvas.glyph(close_rect, @backingInt(Glyph.close), fonts.icons_small, text_color);
     }
 }
 
@@ -561,13 +391,17 @@ fn paintRoundButton(canvas: Canvas, rect: w32.RECT, glyph: Glyph, hovered: bool,
         canvas.sync();
         canvas.fillRounded(rect, @divTrunc(rect.right - rect.left, 2), palette.hover);
     }
-    drawGlyph(canvas.hdc, fonts.icons_large, glyph, rect, if (hovered) palette.text else palette.text_dim);
+    canvas.glyph(rect, @backingInt(glyph), fonts.icons_large, if (hovered) palette.text else palette.text_dim);
 }
 
-fn drawGlyph(hdc: w32.HDC, font: ?*anyopaque, glyph: Glyph, rect: w32.RECT, color: Rgb) void {
-    _ = w32.SelectObject(hdc, font);
-    _ = w32.SetTextColor(hdc, color.ref());
-    const text = [_]u16{@backingInt(glyph)};
-    var r = rect;
-    _ = w32.DrawTextW(hdc, &text, 1, &r, w32.DT_CENTER | w32.DT_VCENTER | w32.DT_SINGLELINE | w32.DT_NOPREFIX);
+/// The active tab: rounded on top, and curving out at the bottom into the
+/// terminal below, Chrome's signature shape.
+fn fillActiveTab(canvas: Canvas, rect: w32.RECT, top: i32, foot: i32, color: Rgb) void {
+    canvas.fill(.{ .left = rect.left + top, .top = rect.top, .right = rect.right - top, .bottom = rect.bottom }, color);
+    canvas.fill(.{ .left = rect.left, .top = rect.top + top, .right = rect.left + top, .bottom = rect.bottom }, color);
+    canvas.fill(.{ .left = rect.right - top, .top = rect.top + top, .right = rect.right, .bottom = rect.bottom }, color);
+    canvas.corner(rect.left, rect.top, top, .{ 1, 1 }, .inside, color);
+    canvas.corner(rect.right - top, rect.top, top, .{ 0, 1 }, .inside, color);
+    canvas.corner(rect.left - foot, rect.bottom - foot, foot, .{ 0, 0 }, .outside, color);
+    canvas.corner(rect.right, rect.bottom - foot, foot, .{ 1, 0 }, .outside, color);
 }
