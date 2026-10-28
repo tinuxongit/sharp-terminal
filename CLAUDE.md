@@ -149,7 +149,9 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   Explorer and Notepad do.
 - **Images use the kitty graphics protocol.** The bundled ConPTY passes it
   through (checked 2026-10-28 with OpenConsole 1.25; the inbox Windows
-  ConPTY strips it). `chafa` picks it automatically via `TERM_PROGRAM`.
+  ConPTY strips it), both ways: a program's kitty query gets its
+  `ESC _Gi=31;OK ESC \` reply on input, so tools that wait for one detect
+  image support. `chafa` picks it automatically via `TERM_PROGRAM`.
   Ghostty has no Sixel support.
 - **Shell profiles work like Windows Terminal's.** The arrow beside "+"
   lists installed shells with their icons; Ctrl+Shift+1..9 opens the Nth
@@ -240,9 +242,6 @@ Baseline, 2026-10-28, two runs each:
   large, so splitting them makes merges from `winfork` harder.
 - The frame-time benchmark is run by hand, not after every commit: it
   takes a minute and opens a window.
-- Replies to programs that probe for image support travel back through
-  ConPTY's input side, which reportedly drops APC replies. Tools that
-  insist on a reply may not detect image support. Unverified.
 - A saved session reopens shells, not their output or running programs.
 - A console program started from the tab in a window of its own (`start
   cmd`) ends with the tab, since only the GUI subsystem marks a program
