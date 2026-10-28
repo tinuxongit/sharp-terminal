@@ -34,12 +34,12 @@ BEGIN
         BLOCK "040904B0"
         BEGIN
             VALUE "CompanyName",      "Sharp"
-            VALUE "FileDescription",  "Sharp terminal emulator"
+            VALUE "FileDescription",  "Sharp Terminal"
             VALUE "FileVersion",      SHARP_VERSION_STR
             VALUE "InternalName",     "sharp"
             VALUE "LegalCopyright",   "MIT License. See share\\licenses\\sharp\\LICENSE.txt."
             VALUE "OriginalFilename", "sharp.exe"
-            VALUE "ProductName",      "Sharp"
+            VALUE "ProductName",      "Sharp Terminal"
             VALUE "ProductVersion",   SHARP_VERSION_STR
         END
     END

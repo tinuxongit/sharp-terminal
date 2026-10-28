@@ -472,7 +472,9 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
 - **Sharp to people, Ghostty to programs.** The exe, window text, dialogs,
   version info, the command palette, messages printed in the terminal and
   the CLI's own text (`+version` shows Ghostty's version below Sharp's)
-  say Sharp. `TERM_PROGRAM`, terminfo, `GHOSTTY_*` variables,
+  say Sharp. Where Windows lists programs (Task Manager, Installed apps,
+  the Start menu) it is "Sharp Terminal"; the install folder, uninstaller
+  and registry key stay "Sharp" so updates find the copy installed. `TERM_PROGRAM`, terminfo, `GHOSTTY_*` variables,
   `share\ghostty` resources and the `%LOCALAPPDATA%\ghostty` config folder
   stay as they are, so programs keep their Ghostty support and Ghostty's
   themes and docs still apply. Only the Windows exe is renamed, which keeps

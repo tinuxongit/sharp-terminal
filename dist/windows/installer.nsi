@@ -16,26 +16,29 @@ RequestExecutionLevel user
 ManifestDPIAware true
 
 !define APP "Sharp"
+; The name people see; APP stays the folder, uninstaller and registry key,
+; so updates find the copy already installed.
+!define TITLE "Sharp Terminal"
 !define PUBLISHER "Sharp"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Sharp"
 !define URL "https://github.com/tinuxongit/sharp-terminal"
 
-Name "${APP}"
+Name "${TITLE}"
 OutFile "${OUTFILE}"
 InstallDir "$LOCALAPPDATA\Programs\${APP}"
 InstallDirRegKey HKCU "${UNINSTALL_KEY}" "InstallLocation"
 Icon "sharp.ico"
 UninstallIcon "sharp.ico"
-BrandingText "${APP} ${VERSION}"
+BrandingText "${TITLE} ${VERSION}"
 ShowInstDetails nevershow
 ShowUninstDetails nevershow
 AutoCloseWindow true
 
 VIProductVersion "${VERSION4}"
-VIAddVersionKey "ProductName" "${APP}"
+VIAddVersionKey "ProductName" "${TITLE}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "FileVersion" "${VERSION}"
-VIAddVersionKey "FileDescription" "${APP} installer"
+VIAddVersionKey "FileDescription" "${TITLE} installer"
 VIAddVersionKey "CompanyName" "${PUBLISHER}"
 VIAddVersionKey "LegalCopyright" "MIT License"
 
@@ -90,15 +93,20 @@ Section "Install"
   File /r "${STAGE}\*.*"
   WriteUninstaller "$INSTDIR\Uninstall ${APP}.exe"
 
-  CreateShortCut "$SMPROGRAMS\${APP}.lnk" "$INSTDIR\sharp.exe"
+  ; Shortcuts from before the rename get the new name.
+  Delete "$SMPROGRAMS\${APP}.lnk"
+  ${If} ${FileExists} "$DESKTOP\${APP}.lnk"
+    Rename "$DESKTOP\${APP}.lnk" "$DESKTOP\${TITLE}.lnk"
+  ${EndIf}
+  CreateShortCut "$SMPROGRAMS\${TITLE}.lnk" "$INSTDIR\sharp.exe"
   ; The desktop shortcut comes with a first, interactive install only, so
   ; deleting it sticks across updates.
   ${IfNot} ${Silent}
-  ${AndIfNot} ${FileExists} "$DESKTOP\${APP}.lnk"
-    CreateShortCut "$DESKTOP\${APP}.lnk" "$INSTDIR\sharp.exe"
+  ${AndIfNot} ${FileExists} "$DESKTOP\${TITLE}.lnk"
+    CreateShortCut "$DESKTOP\${TITLE}.lnk" "$INSTDIR\sharp.exe"
   ${EndIf}
 
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "${APP}"
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "${TITLE}"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "Publisher" "${PUBLISHER}"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "URLInfoAbout" "${URL}"
@@ -161,6 +169,8 @@ Section "Uninstall"
   Delete "$INSTDIR\*.exe"
   Delete "$INSTDIR\*.dll"
   RMDir "$INSTDIR"
+  Delete "$SMPROGRAMS\${TITLE}.lnk"
+  Delete "$DESKTOP\${TITLE}.lnk"
   Delete "$SMPROGRAMS\${APP}.lnk"
   Delete "$DESKTOP\${APP}.lnk"
   DeleteRegKey HKCU "${UNINSTALL_KEY}"
