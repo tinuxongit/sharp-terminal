@@ -1290,6 +1290,7 @@ const Subprocess = struct {
                     // Programs the shell left running end with it.
                     if (command.job) |job| {
                         internal_os.console_programs.end(job, windows.exp.kernel32.GetProcessId(pid));
+                        internal_os.console_programs.unregister(job);
                         _ = windows.exp.kernel32.CloseHandle(job);
                         command.job = null;
                     }

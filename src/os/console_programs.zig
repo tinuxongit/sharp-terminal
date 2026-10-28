@@ -4,13 +4,17 @@
 //! has exited (a dev server whose `npm` is gone is still found).
 //!
 //! Closing a tab ends its console programs: servers, builds, anything left
-//! running in the background. Programs with a window (an editor opened
-//! with `code .`, a browser opened with `start`) keep running, and so does
-//! everything they launch, as they would after closing Windows Terminal.
+//! running in the background, sharing the tab's console, in a hidden one
+//! or in none. Programs with a window (an editor opened with `code .`, a
+//! browser opened with `start`, a console opened with `start cmd`) keep
+//! running, and so does everything they launch, as they would after
+//! closing Windows Terminal. If Sharp crashes, every tab's console
+//! programs end too (endAll).
 const std = @import("std");
 const windows = @import("windows.zig");
 
 const kernel32 = windows.exp.kernel32;
+const user32 = windows.exp.user32;
 
 pub const max_programs = 256;
 
@@ -41,11 +45,54 @@ pub fn list(job: windows.HANDLE, shell_pid: u32, out: *[max_programs]u32) []cons
     var n: usize = 0;
     for (members) |member| {
         const pid: u32 = @intCast(member);
-        if (pid == shell_pid or underWindow(pid, shell_pid, members, &tree)) continue;
+        if (pid == shell_pid or underWindow(pid, shell_pid, members, &tree) or ownConsole(pid, &tree)) continue;
         out[n] = pid;
         n += 1;
     }
     return out[0..n];
+}
+
+/// Every tab's job, so a crash can end them all.
+const Registered = struct { job: windows.HANDLE, shell_pid: u32 };
+var registry: [256]Registered = undefined;
+var registry_len: usize = 0;
+var registry_busy: std.atomic.Value(bool) = .init(false);
+
+fn lockRegistry() void {
+    while (registry_busy.cmpxchgWeak(false, true, .acquire, .monotonic) != null) std.atomic.spinLoopHint();
+}
+
+fn unlockRegistry() void {
+    registry_busy.store(false, .release);
+}
+
+/// Remember a tab's job once its shell runs.
+pub fn register(job: windows.HANDLE, shell_pid: u32) void {
+    lockRegistry();
+    defer unlockRegistry();
+    if (registry_len == registry.len) return;
+    registry[registry_len] = .{ .job = job, .shell_pid = shell_pid };
+    registry_len += 1;
+}
+
+/// Forget a tab's job before its handle is closed.
+pub fn unregister(job: windows.HANDLE) void {
+    lockRegistry();
+    defer unlockRegistry();
+    for (registry[0..registry_len], 0..) |r, i| {
+        if (r.job != job) continue;
+        registry_len -= 1;
+        registry[i] = registry[registry_len];
+        return;
+    }
+}
+
+/// End every tab's console programs, as Sharp crashes. Never waits: if the
+/// crash came while the registry was being changed, it is left alone.
+pub fn endAll() void {
+    if (registry_busy.cmpxchgStrong(false, true, .acquire, .monotonic) != null) return;
+    defer unlockRegistry();
+    for (registry[0..registry_len]) |r| end(r.job, r.shell_pid);
 }
 
 /// End the console programs in `job`, before the tab's shell is ended.
@@ -91,6 +138,47 @@ fn hasWindow(pid: u32) bool {
 }
 
 const image_subsystem_windows_gui = 2;
+
+/// Whether `pid` runs in a console of its own that someone can see: a
+/// visible console window (`start cmd`), or another terminal's pseudo
+/// console. Sharing a Sharp tab's console, a hidden console window and
+/// no console at all mean a background program.
+fn ownConsole(pid: u32, tree: *const Tree) bool {
+    const process = kernel32.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, windows.FALSE, pid) orelse return false;
+    defer _ = kernel32.CloseHandle(process);
+    var host_info: usize = 0;
+    if (windows.exp.ntdll.NtQueryInformationProcess(process, windows.ProcessConsoleHostProcess, &host_info, @sizeOf(usize), null) != .SUCCESS) return false;
+    // The low bits are flags, not part of the PID.
+    const host: u32 = @intCast(host_info & ~@as(usize, 3));
+    if (host == 0) return false;
+    // Sharp's own pseudo consoles are hosted by OpenConsole.exe processes
+    // it started.
+    if (tree.parentOf(host) == kernel32.GetCurrentProcessId()) return false;
+
+    var search: ConsoleWindowSearch = .{ .host = host };
+    _ = user32.EnumWindows(ConsoleWindowSearch.visit, @bitCast(@intFromPtr(&search)));
+    return search.shown;
+}
+
+const ConsoleWindowSearch = struct {
+    host: u32,
+    shown: bool = false,
+
+    fn visit(hwnd: windows.HWND, param: windows.LPARAM) callconv(.winapi) windows.BOOL {
+        const self: *ConsoleWindowSearch = @ptrFromInt(@as(usize, @bitCast(param)));
+        var owner: windows.DWORD = 0;
+        _ = user32.GetWindowThreadProcessId(hwnd, &owner);
+        if (owner != self.host) return windows.TRUE;
+        var class: [32]u16 = undefined;
+        const len: usize = @intCast(@max(0, user32.GetClassNameW(hwnd, &class, class.len)));
+        const pseudo = std.mem.eql(u16, class[0..len], std.unicode.utf8ToUtf16LeStringLiteral("PseudoConsoleWindow"));
+        if (pseudo or user32.IsWindowVisible(hwnd) != windows.FALSE) {
+            self.shown = true;
+            return windows.FALSE;
+        }
+        return windows.TRUE;
+    }
+};
 
 /// The Subsystem field of a PE image's optional header, or null when
 /// `image` doesn't start like one.

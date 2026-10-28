@@ -132,6 +132,11 @@ pub const PROC_THREAD_ATTRIBUTE_JOB_LIST = ProcThreadAttributeValue(
 pub const PROCESS_TERMINATE: DWORD = 0x0001;
 pub const PROCESS_QUERY_LIMITED_INFORMATION: DWORD = 0x1000;
 pub const JobObjectBasicLimitInformation: c_int = 2;
+/// NtQueryInformationProcess: the conhost/OpenConsole hosting a process's
+/// console, as a PID with flags in its low two bits.
+pub const ProcessConsoleHostProcess: c_int = 49;
+pub const HWND = windows.HWND;
+pub const LPARAM = windows.LPARAM;
 pub const JobObjectBasicProcessIdList: c_int = 3;
 pub const JOB_OBJECT_LIMIT_BREAKAWAY_OK: DWORD = 0x00000800;
 pub const JOBOBJECT_BASIC_LIMIT_INFORMATION = extern struct {
@@ -347,6 +352,7 @@ pub const exp = struct {
             lpExeName: [*:0]u16,
             lpdwSize: *DWORD,
         ) callconv(.winapi) BOOL;
+        pub extern "kernel32" fn GetCurrentProcessId() callconv(.winapi) DWORD;
         pub extern "kernel32" fn TerminateProcess(
             hProcess: HANDLE,
             uExitCode: UINT,
@@ -377,6 +383,16 @@ pub const exp = struct {
             dwFlags: DWORD,
         ) callconv(.winapi) DWORD;
     };
+    pub const user32 = struct {
+        pub extern "user32" fn EnumWindows(
+            lpEnumFunc: *const fn (HWND, LPARAM) callconv(.winapi) BOOL,
+            lParam: LPARAM,
+        ) callconv(.winapi) BOOL;
+        pub extern "user32" fn GetWindowThreadProcessId(hWnd: HWND, lpdwProcessId: ?*DWORD) callconv(.winapi) DWORD;
+        pub extern "user32" fn GetClassNameW(hWnd: HWND, lpClassName: [*]u16, nMaxCount: c_int) callconv(.winapi) c_int;
+        pub extern "user32" fn IsWindowVisible(hWnd: HWND) callconv(.winapi) BOOL;
+    };
+
     pub const ntdll = struct {
         pub extern "ntdll" fn NtCreateFile(
             FileHandle: *HANDLE,
@@ -400,6 +416,13 @@ pub const exp = struct {
             OpenOptions: ULONG,
         ) callconv(.winapi) NTSTATUS;
         pub extern "ntdll" fn NtClose(Handle: HANDLE) callconv(.winapi) NTSTATUS;
+        pub extern "ntdll" fn NtQueryInformationProcess(
+            ProcessHandle: HANDLE,
+            ProcessInformationClass: c_int,
+            ProcessInformation: *anyopaque,
+            ProcessInformationLength: ULONG,
+            ReturnLength: ?*ULONG,
+        ) callconv(.winapi) NTSTATUS;
         pub extern "ntdll" fn NtReadFile(
             FileHandle: HANDLE,
             Event: ?HANDLE,

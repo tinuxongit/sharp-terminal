@@ -135,7 +135,11 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   launcher exits. Closing the tab ends the console programs in the job
   first, then the shell. Programs built for the GUI subsystem (read from
   their PE header) and everything below them keep running, so `code .`
-  or `start chrome` outlive the tab as they do in Windows Terminal.
+  or `start chrome` outlive the tab as they do in Windows Terminal; so do
+  console programs in a console someone can see (`start cmd`, or another
+  terminal's pseudo console), told apart by the process hosting their
+  console. A crash (panic, segfault or unhandled exception) ends every
+  tab's console programs the same way before the process dies.
 - **Settings are a panel that writes the config file.** The gear, beside
   minimize, opens a panel over the dimmed terminal, laid out like T3
   Code's: searchable categories on the left, cards of settings with
@@ -250,7 +254,3 @@ Baseline, 2026-10-28, two runs each:
 - The frame-time benchmark is run by hand, not after every commit: it
   takes a minute and opens a window.
 - A saved session reopens shells, not their output or running programs.
-- A console program started from the tab in a window of its own (`start
-  cmd`) ends with the tab, since only the GUI subsystem marks a program
-  as independent. If Sharp crashes, nothing ends: the jobs don't kill on
-  close, so GUI programs in them survive a normal close.

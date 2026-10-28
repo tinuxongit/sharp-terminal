@@ -198,6 +198,26 @@ fn macosLogger(comptime scope: @TypeOf(.EnumLiteral)) *macos.os.Log {
     return created;
 }
 
+/// A crash ends the console programs Sharp's tabs started on Windows, as
+/// closing them would, before the process dies (see os/console_programs).
+pub const panic = std.debug.FullPanic(struct {
+    fn call(msg: []const u8, first_trace_addr: ?usize) noreturn {
+        endTabPrograms();
+        std.debug.defaultPanic(msg, first_trace_addr);
+    }
+}.call);
+
+pub const debug = struct {
+    pub fn handleSegfault(addr: ?usize, name: []const u8, ctx: ?std.debug.CpuContextPtr) noreturn {
+        endTabPrograms();
+        std.debug.defaultHandleSegfault(addr, name, ctx);
+    }
+};
+
+fn endTabPrograms() void {
+    if (comptime builtin.target.os.tag == .windows) @import("os/main.zig").console_programs.endAll();
+}
+
 pub const std_options: std.Options = .{
     // Our log level is always at least info in every build mode.
     //

@@ -455,6 +455,7 @@ fn startWindows(self: *Command, arena: Allocator) !void {
     ) == windows.FALSE) return windows.unexpectedError(windows.GetLastError());
 
     self.pid = process_information.hProcess;
+    if (self.job) |job| internal_os.console_programs.register(job, windows.exp.kernel32.GetProcessId(process_information.hProcess));
 }
 
 fn setupFd(src: File.Handle, target: i32) !void {

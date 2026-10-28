@@ -284,6 +284,17 @@ pub fn init(
     // Register global hotkey for quick terminal (if configured).
     self.registerGlobalHotkey();
 
+    // Builds without Zig's segfault handler (ReleaseFast) crash through
+    // here; the handler and panics are covered in main_ghostty.zig.
+    _ = w32.SetUnhandledExceptionFilter(&crashFilter);
+
+}
+
+/// A crash ends the console programs the tabs started, as closing them
+/// would, then lets Windows report it as usual.
+fn crashFilter(_: *anyopaque) callconv(.winapi) c_long {
+    internal_os.console_programs.endAll();
+    return w32.EXCEPTION_CONTINUE_SEARCH;
 }
 
 pub fn run(self: *App) !void {

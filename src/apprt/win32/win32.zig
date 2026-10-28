@@ -1322,6 +1322,11 @@ pub extern "user32" fn MonitorFromPoint(
 // Performance counter API
 // -----------------------------------------------------------------------
 
+pub extern "kernel32" fn SetUnhandledExceptionFilter(
+    filter: ?*const fn (*anyopaque) callconv(.winapi) c_long,
+) callconv(.winapi) ?*const fn (*anyopaque) callconv(.winapi) c_long;
+pub const EXCEPTION_CONTINUE_SEARCH: c_long = 0;
+
 pub extern "kernel32" fn QueryPerformanceCounter(
     lpPerformanceCount: *i64,
 ) callconv(.winapi) i32;

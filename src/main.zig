@@ -15,6 +15,11 @@ const entrypoint = switch (build_config.exe_entrypoint) {
 /// The main entrypoint for the program.
 pub const main = entrypoint.main;
 
+/// A panic or segfault first lets the entrypoint clean up (Sharp's
+/// Windows build ends the console programs its tabs started).
+pub const panic = if (@hasDecl(entrypoint, "panic")) entrypoint.panic else std.debug.FullPanic(std.debug.defaultPanic);
+pub const debug = if (@hasDecl(entrypoint, "debug")) entrypoint.debug else struct {};
+
 /// Standard options such as logger overrides.
 pub const std_options: std.Options = if (@hasDecl(entrypoint, "std_options"))
     entrypoint.std_options
