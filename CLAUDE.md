@@ -440,9 +440,18 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   session, installs updates or takes default-terminal consoles. Checked
   2026-10-28 that those arguments open the profile in the folder; the
   consent prompt itself needs a person.
+- **Pane actions are one new Ghostty action, `split_pane`.** Windows
+  Terminal's swap, flip orientation, move to new tab, close others and
+  broadcast input are `split_pane:swap_next` and so on, in the palette
+  and bindable, so the shared code gains one action rather than six.
+  Swapping wraps around, as in Windows Terminal. Broadcast copies what
+  Sharp's Win32 input mode writes for typed keys, text and IME to the
+  tab's other panes (an antenna marks the tab); pastes go through
+  Ghostty's core and aren't broadcast. Sharp's palette has its own list
+  (`command_palette.zig`), not Ghostty's `command.zig`.
 - **Closed tabs reopen as the session would restore them.** Windows has
-  no undo manager, so Ghostty's `undo` (the palette's "Reopen Closed
-  Tab", and the tab menu) reopens the last of ten closed tabs: shell,
+  no undo manager, so Ghostty's `undo` ("Reopen Closed Tab" in Sharp's
+  palette and the tab menu) reopens the last of ten closed tabs: shell,
   folder, server and Claude conversation, not output. It has no key by
   default, as in Windows Terminal; Ctrl+Shift+T stays "new tab".
 - **New tabs see the environment Windows has now.** Each tab starts from

@@ -731,8 +731,6 @@ fn tabNeedsConfirm(self: *Window, index: usize) bool {
     return false;
 }
 
-/// The id that names the tab at `index` across modal loops, where tab
-/// indexes can shift.
 /// What identifies tab `index` while it lives, even as its panes take
 /// focus: its first pane.
 pub fn tabKey(self: *const Window, index: usize) usize {
@@ -792,11 +790,13 @@ pub fn putTab(self: *Window, index: usize, tab: Tab) void {
     self.tab_count += 1;
 }
 
+/// The id that names the tab at `index` across modal loops, where tab
+/// indexes can shift.
 pub fn tabId(self: *Window, index: usize) u64 {
     return self.tab_active_surface[index].core_surface.id;
 }
 
-fn confirmDialog(owner: ?w32.HWND, message: [*:0]const u16) bool {
+pub fn confirmDialog(owner: ?w32.HWND, message: [*:0]const u16) bool {
     return w32.MessageBoxW(
         owner,
         message,
@@ -1326,7 +1326,7 @@ pub fn onTabTitleChanged(self: *Window, surface: *Surface, title: [:0]const u8) 
 }
 
 /// Update tab bar visibility based on config and tab count.
-fn updateTabBarVisibility(self: *Window) void {
+pub fn updateTabBarVisibility(self: *Window) void {
     if (self.is_quick_terminal) {
         self.tab_bar_visible = false;
         return;
@@ -1415,6 +1415,11 @@ pub fn paintTabBar(self: *Window) void {
                 var colors: [MAX_TABS]?tab_color.Rgb = undefined;
                 for (0..self.tab_count) |i| colors[i] = self.tabColor(i);
                 break :colors colors[0..self.tab_count];
+            },
+            .broadcast = broadcast: {
+                var on: [MAX_TABS]bool = undefined;
+                for (0..self.tab_count) |i| on[i] = self.tab_active_surface[i].broadcast;
+                break :broadcast on[0..self.tab_count];
             },
         },
         .{

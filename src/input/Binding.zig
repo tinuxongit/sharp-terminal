@@ -678,6 +678,20 @@ pub const Action = union(enum) {
     /// Equalize the size of all splits in the current window.
     equalize_splits,
 
+    /// Rearrange the splits of the current tab, as Windows Terminal's pane
+    /// actions do:
+    ///
+    ///   - `swap_next`, `swap_previous`: swap the focused split with the
+    ///     next or previous one.
+    ///   - `flip`: turn the focused split's parent from side by side to
+    ///     stacked, or back.
+    ///   - `to_new_tab`: move the focused split into a tab of its own.
+    ///   - `close_others`: close every other split in the tab.
+    ///   - `broadcast`: toggle typing into every split of the tab at once.
+    ///
+    /// Only implemented on Windows.
+    split_pane: SplitPane,
+
     /// Reset the window to the default size. The "default size" is the
     /// size that a new window would be created with. This has no effect
     /// if the window is fullscreen.
@@ -1063,6 +1077,15 @@ pub const Action = union(enum) {
         auto, // splits along the larger direction
 
         pub const default: SplitDirection = .auto;
+    };
+
+    pub const SplitPane = enum {
+        swap_next,
+        swap_previous,
+        flip,
+        to_new_tab,
+        close_others,
+        broadcast,
     };
 
     pub const SplitFocusDirection = enum {
@@ -1465,6 +1488,7 @@ pub const Action = union(enum) {
             .toggle_readonly,
             .resize_split,
             .equalize_splits,
+            .split_pane,
             .inspector,
             => .surface,
         };

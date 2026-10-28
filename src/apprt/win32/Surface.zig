@@ -59,6 +59,8 @@ parent_window: *Window = undefined,
 icon: ?w32.HICON = null,
 /// The tab's color (tab_color.zig), kept on each of its panes.
 tab_color: ?canvas.Rgb = null,
+/// Typing here goes to every pane of the tab (split_pane:broadcast).
+broadcast: bool = false,
 
 /// What the tab sidebar shows about this surface: where its shell runs,
 /// its folder (from OSC 7, when the shell reports it), when it opened and

@@ -2,6 +2,7 @@
 //! dragging), and creating, moving between, resizing, equalizing and
 //! zooming splits.
 const std = @import("std");
+const termio = @import("../../termio.zig");
 const apprt = @import("../../apprt.zig");
 const Surface = @import("Surface.zig");
 const SplitTree = @import("../../datastruct/split_tree.zig").SplitTree;
@@ -284,4 +285,136 @@ pub fn toggleSplitZoom(self: *Window) void {
         tree.zoom(handle);
     }
     self.layoutSplits();
+}
+
+/// Windows Terminal's pane actions on the focused split of the active tab
+/// (Ghostty's split_pane, which Sharp adds).
+pub fn arrange(self: *Window, action: apprt.action.SplitPane) void {
+    if (self.tab_count == 0) return;
+    const tab = self.active_tab;
+    const focused = self.tab_active_surface[tab];
+    switch (action) {
+        .swap_next => swap(self, tab, focused, .next),
+        .swap_previous => swap(self, tab, focused, .previous),
+        .flip => flip(self, tab, focused),
+        .to_new_tab => toNewTab(self, tab, focused),
+        .close_others => closeOthers(self, tab, focused),
+        .broadcast => {
+            const on = !focused.broadcast;
+            var it = self.tab_trees[tab].iterator();
+            while (it.next()) |entry| entry.view.broadcast = on;
+            self.invalidateTabBar();
+        },
+    }
+}
+
+/// A copy of tab `tab`'s tree to change before it replaces the old one.
+/// The copy holds its own references to the same panes, so moving them
+/// around or changing a split's layout in it keeps every count right.
+fn editable(self: *Window, tab: usize) ?struct { tree: SplitTree(Surface), nodes: []SplitTree(Surface).Node } {
+    const tree = self.tab_trees[tab].clone(self.app.core_app.alloc) catch return null;
+    return .{ .tree = tree, .nodes = @constCast(tree.nodes) };
+}
+
+fn replaceTree(self: *Window, tab: usize, tree: SplitTree(Surface)) void {
+    var old = self.tab_trees[tab];
+    self.tab_trees[tab] = tree;
+    old.deinit();
+    self.layoutSplits();
+    self.invalidateTabBar();
+}
+
+fn swap(self: *Window, tab: usize, focused: *Surface, direction: enum { next, previous }) void {
+    const tree = &self.tab_trees[tab];
+    if (!tree.isSplit()) return;
+    const from = self.findHandle(tab, focused) orelse return;
+    // The panes in order, wrapping around at either end as in Windows
+    // Terminal.
+    var leaves: [64]SplitTree(Surface).Node.Handle = undefined;
+    var count: usize = 0;
+    var at: usize = 0;
+    var it = tree.iterator();
+    while (it.next()) |entry| {
+        if (count == leaves.len) break;
+        if (entry.handle == from) at = count;
+        leaves[count] = entry.handle;
+        count += 1;
+    }
+    const to = leaves[switch (direction) {
+        .next => (at + 1) % count,
+        .previous => (at + count - 1) % count,
+    }];
+    const copy = editable(self, tab) orelse return;
+    std.mem.swap(SplitTree(Surface).Node, &copy.nodes[from.idx()], &copy.nodes[to.idx()]);
+    replaceTree(self, tab, copy.tree);
+}
+
+fn flip(self: *Window, tab: usize, focused: *Surface) void {
+    if (!self.tab_trees[tab].isSplit()) return;
+    const leaf = self.findHandle(tab, focused) orelse return;
+    const copy = editable(self, tab) orelse return;
+    // The split that holds the focused pane directly.
+    for (copy.nodes) |*node| switch (node.*) {
+        .leaf => {},
+        .split => |*s| if (s.left == leaf or s.right == leaf) {
+            s.layout = if (s.layout == .horizontal) .vertical else .horizontal;
+            break;
+        },
+    };
+    replaceTree(self, tab, copy.tree);
+}
+
+fn toNewTab(self: *Window, tab: usize, focused: *Surface) void {
+    const alloc = self.app.core_app.alloc;
+    const tree = &self.tab_trees[tab];
+    if (!tree.isSplit()) return;
+    const handle = self.findHandle(tab, focused) orelse return;
+    const next = (tree.goto(alloc, handle, .next) catch null) orelse
+        (tree.goto(alloc, handle, .previous) catch null) orelse return;
+    const next_surface = switch (tree.nodes[next.idx()]) {
+        .leaf => |v| v,
+        .split => return,
+    };
+    // The pane's own tree takes a reference before the old tree lets go.
+    var alone = SplitTree(Surface).init(alloc, focused) catch return;
+    const rest = tree.remove(alloc, handle) catch {
+        alone.deinit();
+        return;
+    };
+    self.tab_active_surface[tab] = next_surface;
+    replaceTree(self, tab, rest);
+    self.putTab(tab + 1, .{ .tree = alone, .active = focused, .title = self.tab_titles[tab], .title_len = self.tab_title_lens[tab] });
+    self.selectTabIndex(tab + 1);
+    self.updateTabBarVisibility();
+}
+
+fn closeOthers(self: *Window, tab: usize, focused: *Surface) void {
+    var others: [64]*Surface = undefined;
+    var count: usize = 0;
+    var running = false;
+    var it = self.tab_trees[tab].iterator();
+    while (it.next()) |entry| {
+        if (entry.view == focused or count == others.len) continue;
+        others[count] = entry.view;
+        count += 1;
+        if (entry.view.core_surface_ready and entry.view.core_surface.needsConfirmQuit()) running = true;
+    }
+    if (count == 0) return;
+    if (running and !Window.confirmDialog(self.hwnd, std.unicode.utf8ToUtf16LeStringLiteral("Commands are still running in the other splits.\nClose them anyway?"))) return;
+    for (others[0..count]) |surface| self.closeSplitSurface(surface);
+}
+
+/// Send what was typed in `from` to the other panes of its tab too, when
+/// the tab broadcasts (split_pane:broadcast), as Windows Terminal does.
+pub fn broadcastInput(from: *Surface, bytes: []const u8) void {
+    if (!from.broadcast) return;
+    const window = from.parent_window;
+    const tab = window.findTabIndex(from) orelse return;
+    var it = window.tab_trees[tab].iterator();
+    while (it.next()) |entry| {
+        const pane = entry.view;
+        if (pane == from or !pane.core_surface_ready or pane.core_surface.readonly) continue;
+        const msg = termio.Message.writeReq(window.app.core_app.alloc, bytes) catch continue;
+        pane.core_surface.io.queueMessage(msg, .unlocked);
+    }
 }

@@ -343,6 +343,7 @@ const Glyph = enum(u16) {
     /// Segoe's "update restore": an arrow around, as Windows Update shows.
     update = 0xE777,
     shield = 0xEA18,
+    broadcast = 0xEC05,
 };
 
 pub const Fonts = struct {
@@ -387,6 +388,8 @@ pub const Titles = struct {
     icons: []const ?w32.HICON,
     /// Each tab's color, if it was given one.
     colors: []const ?Rgb,
+    /// Whether typing in each tab goes to all its panes.
+    broadcast: []const bool,
 };
 
 /// Paint the whole strip. Shapes go straight into the pixels and text
@@ -492,7 +495,13 @@ fn paintTab(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, titl
         if (r.right <= rect.right) _ = w32.DrawIconEx(canvas.hdc, r.left, r.top, icon, r.right - r.left, r.bottom - r.top, 0, null, w32.DI_NORMAL);
     }
 
-    const text_rect = layout.tabTextRect(i);
+    var text_rect = layout.tabTextRect(i);
+    if (titles.broadcast[i]) {
+        const size = layout.px(tab_icon_size);
+        const mark: w32.RECT = .{ .left = text_rect.left, .top = text_rect.top, .right = text_rect.left + size, .bottom = text_rect.bottom };
+        canvas.glyph(mark, @backingInt(Glyph.broadcast), fonts.icons_small, text_color);
+        text_rect.left += size + layout.px(4);
+    }
     const len = titles.lens[i];
     if (len > 0 and text_rect.right > text_rect.left) {
         // Chrome fades a title that doesn't fit; Windows Terminal cuts it

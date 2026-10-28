@@ -364,6 +364,10 @@ pub const Action = union(Key) {
     /// split or the window is fullscreen.
     resize_window: ResizeWindow,
 
+    /// Rearrange the splits of the target's tab (input.Binding.Action
+    /// split_pane).
+    split_pane: SplitPane,
+
     /// Sync with: ghostty_action_tag_e
     pub const Key = enum(c_int) {
         quit,
@@ -436,6 +440,7 @@ pub const Action = union(Key) {
         copy_title_to_clipboard,
         move_tab_to_new_window,
         resize_window,
+        split_pane,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_ACTION_");
@@ -520,6 +525,19 @@ pub const SplitDirection = enum(c_int) {
 
     test "ghostty.h SplitDirection" {
         try lib.checkGhosttyHEnum(SplitDirection, "GHOSTTY_SPLIT_DIRECTION_");
+    }
+};
+
+pub const SplitPane = enum(c_int) {
+    swap_next,
+    swap_previous,
+    flip,
+    to_new_tab,
+    close_others,
+    broadcast,
+
+    test "ghostty.h SplitPane" {
+        try lib.checkGhosttyHEnum(SplitPane, "GHOSTTY_SPLIT_PANE_");
     }
 };
 

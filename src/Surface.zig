@@ -5625,6 +5625,14 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             {},
         ),
 
+        .split_pane => |v| return try self.rt_app.performAction(
+            .{ .surface = self },
+            .split_pane,
+            switch (v) {
+                inline else => |tag| @field(apprt.action.SplitPane, @tagName(tag)),
+            },
+        ),
+
         .toggle_split_zoom => return try self.rt_app.performAction(
             .{ .surface = self },
             .toggle_split_zoom,

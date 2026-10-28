@@ -2,6 +2,7 @@
 //! and character events sent as \x1b[Vk;Sc;Uc;Kd;Cs;Rc_ sequences, so console
 //! programs see real key events with their virtual key and scan codes.
 const std = @import("std");
+const splits = @import("splits.zig");
 const input = @import("../../input.zig");
 const termio = @import("../../termio.zig");
 const global = @import("../../global.zig");
@@ -129,4 +130,5 @@ pub fn writeWin32InputSequence(
         seq,
     ) catch return;
     self.core_surface.io.queueMessage(msg, .unlocked);
+    splits.broadcastInput(self, seq);
 }

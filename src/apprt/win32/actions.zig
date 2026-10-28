@@ -955,6 +955,14 @@ pub fn performAction(
             return true;
         },
 
+        .split_pane => {
+            switch (target) {
+                .app => return false,
+                .surface => |core_surface| splits.arrange(core_surface.rt_surface.parent_window, value),
+            }
+            return true;
+        },
+
         .equalize_splits => {
             switch (target) {
                 .app => {},

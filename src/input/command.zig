@@ -558,6 +558,15 @@ fn actionCommands(action: Action.Key) []const Command {
             .description = i18n.N_("Equalize the size of all splits."),
         }},
 
+        .split_pane => comptime &.{
+            .{ .action = .{ .split_pane = .swap_next }, .title = i18n.N_("Swap Split with Next"), .description = i18n.N_("Swap the focused split with the next one.") },
+            .{ .action = .{ .split_pane = .swap_previous }, .title = i18n.N_("Swap Split with Previous"), .description = i18n.N_("Swap the focused split with the previous one.") },
+            .{ .action = .{ .split_pane = .flip }, .title = i18n.N_("Flip Split Orientation"), .description = i18n.N_("Turn the focused split from side by side to stacked, or back.") },
+            .{ .action = .{ .split_pane = .to_new_tab }, .title = i18n.N_("Move Split to New Tab"), .description = i18n.N_("Move the focused split into a tab of its own.") },
+            .{ .action = .{ .split_pane = .close_others }, .title = i18n.N_("Close Other Splits"), .description = i18n.N_("Close every split in the tab but the focused one.") },
+            .{ .action = .{ .split_pane = .broadcast }, .title = i18n.N_("Toggle Broadcast Input"), .description = i18n.N_("Type into every split of the tab at once.") },
+        },
+
         .reset_window_size => comptime &.{.{
             .action = .reset_window_size,
             .title = i18n.N_("Reset Window Size"),
@@ -693,8 +702,8 @@ fn actionCommands(action: Action.Key) []const Command {
 
         .undo => comptime &.{.{
             .action = .undo,
-            .title = i18n.N_("Reopen Closed Tab"),
-            .description = i18n.N_("Open the last tab you closed again, in its folder."),
+            .title = i18n.N_("Undo"),
+            .description = i18n.N_("Undo the last action."),
         }},
 
         .redo => comptime &.{.{
