@@ -55,7 +55,7 @@ commands and conventions; this file covers what is specific to Sharp.
   open tabs (`sharp-session`, beside the config file).
 - `src/apprt/win32/ssh.zig`: finds the server a tab's ssh is connected to.
 - `src/apprt/win32/folder_picker.zig`: Windows' folder picker, behind the
-  "+" on a sidebar section's title.
+  buttons on a sidebar section's title.
 - `src/termio/cmd_prompt.zig`: makes cmd.exe report its folder (OSC 7)
   through its PROMPT.
 - `src/apprt/win32/SearchField.zig`: the search box shared by the settings
@@ -133,19 +133,22 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   Settings > Shell dropdown uses the same list.
 - **Ctrl+, opens the settings panel**, not the config file: in Sharp the
   panel is the config UI. The file is under Settings > Advanced.
-- **Tabs can live in a sidebar** (`window-tab-bar-position = sidebar`,
-  off by default), laid out like Citropy's thread list: a search box,
+- **Two modes: Tabs and Workspace.** Workspace puts tabs in a sidebar
+  (`window-tab-bar-position = sidebar`, off by default). The settings
+  panel offers it under General as a mode, not as a tab option, since it
+  changes how Sharp works rather than how tabs look. It is laid out like Citropy's thread list: a search box,
   sections for local, WSL and SSH servers, a group per folder (or server),
   and per tab its shell icon, title, age, and a red dot after a bell out
-  of sight. The strip stays as the title bar with "+" and the active tab's
-  title, and the terminal gets a rounded top-left corner.
+  of sight. The strip stays as the title bar with the active tab's title, and the terminal gets a rounded top-left corner.
 - **The sidebar layout works by folder.** Every tab has a folder from the
   start (inherited or configured) that the shell's OSC 7 reports keep
   current; cmd.exe reports too, through a PROMPT prefix. The shell's type
   shows only in the icon. Groups fold per section and folder, tabs drag
-  within their folder, a group's "+" opens a tab there, and the right edge
-  resizes the sidebar. The "+" on the Local or WSL title asks
-  for any folder with Windows' own picker and opens a tab of that kind there.
+  within their folder, and the right edge
+  resizes the sidebar. The strip has no "+" in this mode: each
+  folder, and the Local and WSL titles, show "+" (default shell) and an
+  arrow (shell menu) on hover. On a title they ask for the folder first,
+  with Windows' own picker.
 - **The sidebar layout reopens what was open.** Tabs (profile and folder),
   the active tab, folded groups and the width are saved as they change.
   Closing a window keeps its tabs for next time; closing the last tab by

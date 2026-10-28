@@ -76,6 +76,8 @@ settings_panel: ?*SettingsPanel = null,
 sidebar_fonts: tab_sidebar.Fonts = .{},
 sidebar_search: SearchField = .{},
 sidebar_hover: tab_sidebar.Target = .none,
+/// The sidebar arrow whose shell menu is open.
+sidebar_pressed: tab_sidebar.Target = .none,
 sidebar_scroll: i32 = 0,
 sidebar_max_scroll: i32 = 0,
 sidebar_spots: tab_sidebar.Spots = .{},
@@ -672,29 +674,45 @@ fn refreshServers(self: *Window) void {
     if (changed) self.invalidateTabBar();
 }
 
-/// A new tab in the folder of `tab`'s group, with a shell of its section.
-fn openInFolder(self: *Window, tab: usize) void {
-    self.openInSection(self.tabSection(tab), self.tab_active_surface[tab].folderPath());
-}
-
-/// Ask for a folder, then open a tab of `section` in it, as the "+" on a
-/// section title does.
-fn pickFolderAndOpen(self: *Window, section: tab_sidebar.Section) void {
+/// Ask for a folder, then open a tab there: profile `index` when given,
+/// else the default shell of `section`.
+fn pickFolderAndOpen(self: *Window, section: tab_sidebar.Section, index: ?usize) void {
     const hwnd = self.hwnd orelse return;
     const start = if (self.getActiveSurface()) |s| s.folderPath() else "";
     var buf: [1024]u8 = undefined;
     const folder = folder_picker.pick(hwnd, profiles.data.sidebar.pick_folder, start, &buf) orelse return;
-    self.openInSection(section, folder);
+    self.openInSection(section, index, folder);
 }
 
-/// WSL tabs open the first WSL distribution; others the default shell.
-fn openInSection(self: *Window, section: tab_sidebar.Section, folder: []const u8) void {
+/// Open profile `index` in `folder`, or without one the default shell of
+/// `section`: the first WSL distribution for WSL, else the configured shell.
+fn openInSection(self: *Window, section: tab_sidebar.Section, index: ?usize, folder: []const u8) void {
     const list = profiles.detect();
     const wsl_index = for (0..list.len) |i| {
         if (list.items[i].source == .wsl) break i;
     } else null;
-    const index = (if (section == .wsl) wsl_index else null) orelse list.selected(self.configuredCommand()) orelse return;
-    self.openProfileIn(&list, index, folder, false);
+    const default = (if (section == .wsl) wsl_index else null) orelse list.selected(self.configuredCommand()) orelse return;
+    self.openProfileIn(&list, index orelse default, folder, false);
+}
+
+/// The shell menu dropped below the sidebar arrow `arrow`. Returns the
+/// profile picked.
+fn sidebarProfileMenu(self: *Window, arrow: tab_sidebar.Target, list: *const profiles.List) ?usize {
+    const hwnd = self.hwnd orelse return null;
+    const spot = for (self.sidebar_spots.items[0..self.sidebar_spots.len]) |spot| {
+        if (spot.target.eql(arrow)) break spot;
+    } else return null;
+    const sidebar = self.sidebarRect();
+    var corner: w32.POINT = .{ .x = sidebar.left + spot.rect.left, .y = sidebar.top + spot.rect.bottom + @as(i32, @intFromFloat(@round(4 * self.scale))) };
+    _ = w32.ClientToScreen(hwnd, &corner);
+
+    self.sidebar_pressed = arrow;
+    self.invalidateTabBar();
+    defer {
+        self.sidebar_pressed = .none;
+        self.invalidateTabBar();
+    }
+    return new_tab_menu.show(hwnd, corner, list, list.selected(self.configuredCommand()), &self.app.profile_icons, self.scale, self.menusDark());
 }
 
 /// The sidebar's rectangle in client coordinates.
@@ -1819,6 +1837,7 @@ fn paintSidebar(self: *Window, hdc_screen: w32.HDC, palette: tab_strip.Palette) 
         .scroll = self.sidebar_scroll,
         .collapsed = self.collapsedGroups(&collapsed),
         .dragging = if (self.sidebar_dragging) self.sidebar_drag else null,
+        .pressed = self.sidebar_pressed,
     }, &self.sidebar_spots);
     canvas.sync();
     _ = w32.BitBlt(hdc_screen, rect.left, rect.top, width, height, mem_dc, 0, 0, w32.SRCCOPY);
@@ -1892,9 +1911,19 @@ fn sidebarClick(self: *Window, x: i32, y: i32) void {
             var buf: [300]u8 = undefined;
             self.toggleCollapsed(tab_sidebar.collapseKey(&buf, self.tabSection(i), self.groupKey(i)));
         },
-        .group_new => |i| self.openInFolder(i),
+        .group_new => |i| self.openInSection(self.tabSection(i), null, self.tab_active_surface[i].folderPath()),
+        .group_menu => |i| {
+            const list = profiles.detect();
+            const index = self.sidebarProfileMenu(target, &list) orelse return;
+            self.openProfileIn(&list, index, self.tab_active_surface[i].folderPath(), false);
+        },
         .section => {},
-        .section_new => |section| self.pickFolderAndOpen(section),
+        .section_new => |section| self.pickFolderAndOpen(section, null),
+        .section_menu => |section| {
+            const list = profiles.detect();
+            const index = self.sidebarProfileMenu(target, &list) orelse return;
+            self.pickFolderAndOpen(section, index);
+        },
     }
 }
 
@@ -2283,13 +2312,11 @@ fn showNewTabMenu(self: *Window) void {
     const arrow = self.stripLayout().newTabMenuRect();
     var corner: w32.POINT = .{ .x = arrow.left, .y = arrow.bottom + @as(i32, @intFromFloat(@round(4 * self.scale))) };
     _ = w32.ClientToScreen(hwnd, &corner);
-    const bg = self.app.config.background;
-    const dark = tab_strip.Rgb.isDark(.{ .r = bg.r, .g = bg.g, .b = bg.b });
     const list = profiles.detect();
 
     self.strip_pressed = .new_tab_menu;
     self.invalidateTabBar();
-    const pick = new_tab_menu.show(hwnd, corner, &list, list.selected(self.configuredCommand()), &self.app.profile_icons, self.scale, dark);
+    const pick = new_tab_menu.show(hwnd, corner, &list, list.selected(self.configuredCommand()), &self.app.profile_icons, self.scale, self.menusDark());
     self.strip_pressed = .none;
     self.invalidateTabBar();
 
@@ -2442,6 +2469,12 @@ fn handleTabBarRightClick(self: *Window, x: i16, y: i16) void {
     self.showTabMenu(clicked_tab, x, y);
 }
 
+/// Native menus follow the terminal's background, light or dark.
+fn menusDark(self: *const Window) bool {
+    const bg = self.app.config.background;
+    return tab_strip.Rgb.isDark(.{ .r = bg.r, .g = bg.g, .b = bg.b });
+}
+
 /// The tab right-click menu at client point (x, y).
 fn showTabMenu(self: *Window, clicked_tab: ?usize, x: i16, y: i16) void {
 
@@ -2457,8 +2490,7 @@ fn showTabMenu(self: *Window, clicked_tab: ?usize, x: i16, y: i16) void {
     }
     _ = w32.AppendMenuW(menu, w32.MF_STRING, TAB_CTX_NEW_TAB, std.unicode.utf8ToUtf16LeStringLiteral("New Tab"));
 
-    const bg = self.app.config.background;
-    menu_theme.apply(tab_strip.Rgb.isDark(.{ .r = bg.r, .g = bg.g, .b = bg.b }));
+    menu_theme.apply(self.menusDark());
 
     // Convert client coords to screen coords for the popup.
     var pt = w32.POINT{ .x = @intCast(x), .y = @intCast(y) };
@@ -3160,7 +3192,7 @@ pub fn windowWndProc(
                     window.showTabMenu(i, x, y);
                     return 0;
                 },
-                .none, .search, .resize, .group, .group_new, .section, .section_new => {},
+                .none, .search, .resize, .group, .group_new, .group_menu, .section, .section_new, .section_menu => {},
             }
             return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
         },
@@ -3174,7 +3206,7 @@ pub fn windowWndProc(
             }
             switch (window.sidebarTarget(x, y)) {
                 .tab, .close => |i| window.requestCloseTabs(&.{window.tabId(i)}),
-                .none, .search, .resize, .group, .group_new, .section, .section_new => {},
+                .none, .search, .resize, .group, .group_new, .group_menu, .section, .section_new, .section_menu => {},
             }
             return 0;
         },

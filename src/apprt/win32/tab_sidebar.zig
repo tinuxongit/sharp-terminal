@@ -34,6 +34,8 @@ const icon_folder_open = 0xE838;
 const icon_server = 0xE774;
 const icon_close = 0xE8BB;
 const icon_add = 0xE710;
+const icon_chevron_down = 0xE70D;
+const arrow_width = 18.0;
 
 /// Bell red, as in the sidebar this mirrors.
 const attention_red: Rgb = .{ .r = 0xE5, .g = 0x48, .b = 0x3E };
@@ -64,12 +66,17 @@ pub const Target = union(enum) {
     close: usize,
     /// A group header, named by the first tab in it: toggles collapse.
     group: usize,
-    /// The "+" on a group header: a new tab in that folder.
+    /// The "+" on a group header: a new tab with the default shell in that
+    /// folder.
     group_new: usize,
-    /// A section title, which shows its "+" while hovered.
+    /// The arrow beside it: the shell menu, for a tab in that folder.
+    group_menu: usize,
+    /// A section title, which shows its buttons while hovered.
     section: Section,
     /// The "+" on a section title: a new tab in a folder the user picks.
     section_new: Section,
+    /// The arrow beside it: the shell menu, then the folder picker.
+    section_menu: Section,
 
     pub fn eql(a: Target, b: Target) bool {
         return std.meta.eql(a, b);
@@ -84,6 +91,7 @@ pub const Fonts = struct {
     small: ?*anyopaque = null,
     icons: ?*anyopaque = null,
     icons_small: ?*anyopaque = null,
+    icons_tiny: ?*anyopaque = null,
 
     pub fn init(hdc: w32.HDC, scale: f32) Fonts {
         const ui = canvas_mod.jetbrains_mono;
@@ -95,11 +103,12 @@ pub const Fonts = struct {
             .small = f(12, scale, ui, w32.FW_NORMAL, .cleartype),
             .icons = f(14, scale, icon_face, w32.FW_NORMAL, .grayscale),
             .icons_small = f(9, scale, icon_face, w32.FW_NORMAL, .grayscale),
+            .icons_tiny = f(7, scale, icon_face, w32.FW_NORMAL, .grayscale),
         };
     }
 
     pub fn deinit(self: *Fonts) void {
-        inline for (.{ &self.item, &self.item_strong, &self.small, &self.icons, &self.icons_small }) |font| {
+        inline for (.{ &self.item, &self.item_strong, &self.small, &self.icons, &self.icons_small, &self.icons_tiny }) |font| {
             if (font.*) |f| _ = w32.DeleteObject(f);
             font.* = null;
         }
@@ -117,6 +126,8 @@ pub const State = struct {
     collapsed: []const []const u8,
     /// The tab being dragged, drawn as lifted.
     dragging: ?usize = null,
+    /// The arrow whose menu is open, which stays lit.
+    pressed: Target = .none,
 };
 
 /// How a folded group is remembered: the same folder can hold both local
@@ -249,30 +260,26 @@ fn paintSection(p: *Painter, section: Section, y: i32) i32 {
     const row: w32.RECT = .{ .left = p.px(pad), .top = y, .right = p.c.width - p.px(pad), .bottom = y + h };
     p.c.text(.{ .left = left, .top = y, .right = row.right, .bottom = y + h }, title, p.fonts.small, p.palette.text_dim, .left);
 
-    // A server's tabs come from SSH itself, so it has no "+".
+    // A server's tabs come from SSH itself, so it has no buttons.
     const can_add = section != .servers;
-    const hovered = can_add and (p.state.hover.eql(.{ .section = section }) or p.state.hover.eql(.{ .section_new = section }));
-    const button = p.px(button_size);
-    const add: w32.RECT = .{ .left = row.right - p.px(4) - button, .top = y + @divTrunc(h - button, 2), .right = row.right - p.px(4), .bottom = y + @divTrunc(h - button, 2) + button };
+    const buttons: NewTabButtons = .{ .plus = .{ .section_new = section }, .menu = .{ .section_menu = section } };
+    const hovered = can_add and (p.state.hover.eql(.{ .section = section }) or buttons.lit(p.state));
 
     const rule_left = left + p.c.textWidth(title, p.fonts.small) + p.px(10);
-    const rule_right = if (hovered) add.left - p.px(6) else row.right - p.px(6);
+    const rule_right = (if (hovered) newTabButtonsLeft(p, row) else row.right) - p.px(6);
     const mid = y + @divTrunc(h, 2);
     if (rule_right > rule_left) p.c.fill(.{ .left = rule_left, .top = mid, .right = rule_right, .bottom = mid + 1 }, p.palette.separator);
 
     if (can_add) p.spots.add(clip(row, p.list_top), .{ .section = section });
-    if (hovered) {
-        if (p.state.hover.eql(.{ .section_new = section })) p.c.fillRounded(add, p.px(corner), p.palette.hover);
-        p.c.glyph(add, icon_add, p.fonts.icons_small, p.palette.text);
-        p.spots.add(clip(add, p.list_top), .{ .section_new = section });
-    }
+    if (hovered) paintNewTabButtons(p, row, buttons, p.palette.strip);
     return y + h;
 }
 
 fn paintGroup(p: *Painter, first: Item, folded: bool, y: i32) i32 {
     const h = p.px(group_height);
     const row: w32.RECT = .{ .left = p.px(pad), .top = y, .right = p.c.width - p.px(pad), .bottom = y + h };
-    const hovered = p.state.hover.eql(.{ .group = first.tab }) or p.state.hover.eql(.{ .group_new = first.tab });
+    const buttons: NewTabButtons = .{ .plus = .{ .group_new = first.tab }, .menu = .{ .group_menu = first.tab } };
+    const hovered = p.state.hover.eql(.{ .group = first.tab }) or buttons.lit(p.state);
     if (hovered) p.c.fillRounded(row, p.px(corner), p.palette.hover);
 
     const active = groupHoldsActive(p.state, first);
@@ -281,19 +288,43 @@ fn paintGroup(p: *Painter, first: Item, folded: bool, y: i32) i32 {
     const icon: u16 = if (first.section == .servers) icon_server else if (folded) icon_folder else icon_folder_open;
     p.c.glyph(.{ .left = left, .top = y, .right = left + p.px(icon_size), .bottom = y + h }, icon, p.fonts.icons, color);
 
-    const button = p.px(button_size);
-    const add: w32.RECT = .{ .left = row.right - p.px(4) - button, .top = y + @divTrunc(h - button, 2), .right = row.right - p.px(4), .bottom = y + @divTrunc(h - button, 2) + button };
-    const label_right = if (hovered) add.left - p.px(4) else row.right - p.px(4);
+    const label_right = (if (hovered) newTabButtonsLeft(p, row) else row.right) - p.px(4);
     p.c.text(.{ .left = left + p.px(icon_size + 8), .top = y, .right = label_right, .bottom = y + h }, first.group_label, if (active) p.fonts.item_strong else p.fonts.item, color, .left);
 
     p.spots.add(clip(row, p.list_top), .{ .group = first.tab });
     // New tabs open in a folder; a server's tabs come from SSH itself.
-    if (hovered and first.section != .servers) {
-        if (p.state.hover.eql(.{ .group_new = first.tab })) p.c.fillRounded(add, p.px(corner), p.palette.hover.mix(p.palette.contrast, 0.1));
-        p.c.glyph(add, icon_add, p.fonts.icons_small, p.palette.text);
-        p.spots.add(clip(add, p.list_top), .{ .group_new = first.tab });
-    }
+    if (hovered and first.section != .servers) paintNewTabButtons(p, row, buttons, p.palette.hover);
     return y + h;
+}
+
+/// "+" and the shell menu's arrow, one split button as in the strip.
+const NewTabButtons = struct {
+    plus: Target,
+    menu: Target,
+
+    fn lit(self: NewTabButtons, state: State) bool {
+        return state.hover.eql(self.plus) or state.hover.eql(self.menu) or state.pressed.eql(self.menu);
+    }
+};
+
+fn newTabButtonsLeft(p: *Painter, row: w32.RECT) i32 {
+    return row.right - p.px(4 + button_size + arrow_width);
+}
+
+/// Draw the split button at the right end of `row`, over `under`.
+fn paintNewTabButtons(p: *Painter, row: w32.RECT, buttons: NewTabButtons, under: Rgb) void {
+    const size = p.px(button_size);
+    const top = row.top + @divTrunc(row.bottom - row.top - size, 2);
+    const right = row.right - p.px(4);
+    const arrow: w32.RECT = .{ .left = right - p.px(arrow_width), .top = top, .right = right, .bottom = top + size };
+    const plus: w32.RECT = .{ .left = arrow.left - size, .top = top, .right = arrow.left, .bottom = top + size };
+    const on_plus = p.state.hover.eql(buttons.plus);
+    const on_arrow = p.state.hover.eql(buttons.menu) or p.state.pressed.eql(buttons.menu);
+    if (on_plus or on_arrow) p.c.fillRounded(if (on_plus) plus else arrow, p.px(corner), under.mix(p.palette.contrast, 0.1));
+    p.c.glyph(plus, icon_add, p.fonts.icons_small, if (on_plus) p.palette.text else p.palette.text_dim);
+    p.c.glyph(arrow, icon_chevron_down, p.fonts.icons_tiny, if (on_arrow) p.palette.text else p.palette.text_dim);
+    p.spots.add(clip(plus, p.list_top), buttons.plus);
+    p.spots.add(clip(arrow, p.list_top), buttons.menu);
 }
 
 fn paintItem(p: *Painter, item: Item, y: i32) i32 {

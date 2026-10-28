@@ -26,6 +26,21 @@
             .icon = 0xE713,
             .sections = .{
                 .{
+                    .title = "Layout",
+                    .settings = .{
+                        .{
+                            // Workspace also reopens its tabs at the next start.
+                            .label = "Mode",
+                            .description = "Tabs on top, or folders at the side.",
+                            .key = "window-tab-bar-position",
+                            .choices = .{
+                                .{ .label = "Tabs", .value = "" },
+                                .{ .label = "Workspace", .value = "sidebar" },
+                            },
+                        },
+                    },
+                },
+                .{
                     .title = "New tabs",
                     .settings = .{
                         .{
@@ -89,17 +104,8 @@
                             },
                         },
                         .{
-                            .label = "Tabs",
-                            .description = "Along the top, or in a searchable list at the side.",
-                            .key = "window-tab-bar-position",
-                            .choices = .{
-                                .{ .label = "Top", .value = "" },
-                                .{ .label = "Sidebar", .value = "sidebar" },
-                            },
-                        },
-                        .{
                             .label = "Tab style",
-                            .description = "Chrome's flowing tabs, or Windows Terminal's flat ones.",
+                            .description = "Chrome's flowing tabs, or Windows Terminal's flat ones. Tabs mode only.",
                             .key = "window-tab-style",
                             .choices = .{
                                 .{ .label = "Chrome", .value = "" },
