@@ -124,6 +124,8 @@ pub fn surfaceWndProc(
         },
 
         w32.WM_KEYUP, w32.WM_SYSKEYUP => {
+            // Releasing Ctrl ends a round of Ctrl+Tab (tab_order.zig).
+            if (wparam == w32.VK_CONTROL) surface.parent_window.recent_tabs.end(surface.parent_window);
             surface.handleKeyEvent(wparam, lparam, .release);
             return 0;
         },

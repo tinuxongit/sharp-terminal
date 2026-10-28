@@ -146,6 +146,8 @@ commands and conventions; this file covers what is specific to Sharp.
   elevated, and opening a profile in an elevated Sharp.
 - `src/apprt/win32/tab_color.zig`: a tab's color and its picker
   (`tab_colors.zon`); the color lives on the tab's panes, like its icon.
+- `src/apprt/win32/tab_order.zig`: Ctrl+Tab in the order tabs were last
+  used (`tab-switch-order = recent`).
 - `src/apprt/win32/closed_tabs.zig`: the last ten closed tabs, for
   reopening.
 - `src/apprt/win32/user_environment.zig`: the variables a new tab starts

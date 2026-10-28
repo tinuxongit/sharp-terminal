@@ -2452,6 +2452,14 @@ else
 /// Currently only supported on Windows.
 @"clipboard-keys": ClipboardKeys = .windows,
 
+/// The order Ctrl+Tab and Ctrl+Shift+Tab (`next_tab`, `previous_tab`) go
+/// through tabs: `order`, as they sit in the strip, or `recent`, the one
+/// used before first, as Windows Terminal's tabSwitcherMode "mru". In
+/// `recent`, holding Ctrl and pressing Tab again goes further back.
+///
+/// Currently only supported on Windows.
+@"tab-switch-order": TabSwitchOrder = .order,
+
 /// Whether Sharp is Windows' default terminal: console programs started
 /// outside a terminal, from Explorer, the Run box or the Start menu, open
 /// in a Sharp tab. Turning it on remembers Windows' previous choice, and
@@ -10052,6 +10060,9 @@ pub const BackgroundImagePosition = enum {
 };
 
 /// See background-image-fit
+/// See tab-switch-order
+pub const TabSwitchOrder = enum { order, recent };
+
 /// See clipboard-keys
 pub const ClipboardKeys = enum {
     windows,

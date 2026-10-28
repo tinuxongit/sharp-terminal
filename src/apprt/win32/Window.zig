@@ -4,6 +4,7 @@
 const Window = @This();
 
 const std = @import("std");
+const tab_order = @import("tab_order.zig");
 const tab_color = @import("tab_color.zig");
 const apprt = @import("../../apprt.zig");
 
@@ -94,6 +95,8 @@ sidebar_search: SearchField = .{},
 server_field: SearchField = .{},
 /// Whether WSL is installed, so the sidebar always shows its section.
 has_wsl: bool = false,
+/// Tabs in the order last used, for Ctrl+Tab (`tab-switch-order`).
+recent_tabs: tab_order.Recent = .{},
 sidebar_hover: tab_sidebar.Target = .none,
 /// The sidebar arrow whose shell menu is open.
 sidebar_pressed: tab_sidebar.Target = .none,
@@ -741,6 +744,21 @@ fn tabNeedsConfirm(self: *Window, index: usize) bool {
 
 /// The id that names the tab at `index` across modal loops, where tab
 /// indexes can shift.
+/// What identifies tab `index` while it lives, even as its panes take
+/// focus: its first pane.
+pub fn tabKey(self: *const Window, index: usize) usize {
+    var it = self.tab_trees[index].iterator();
+    const first = it.next() orelse return 0;
+    return @intFromPtr(first.view);
+}
+
+pub fn tabIndexByKey(self: *const Window, key: usize) ?usize {
+    for (0..self.tab_count) |i| {
+        if (self.tabKey(i) == key) return i;
+    }
+    return null;
+}
+
 pub fn tabId(self: *Window, index: usize) u64 {
     return self.tab_active_surface[index].core_surface.id;
 }
@@ -936,6 +954,7 @@ pub fn selectTabIndex(self: *Window, idx: usize) void {
         }
     }
     self.active_tab = idx;
+    self.recent_tabs.used(self.tabKey(idx));
     const surface = self.tab_active_surface[idx];
     var panes = self.tab_trees[idx].iterator();
     while (panes.next()) |entry| entry.view.attention = false;
@@ -1083,17 +1102,18 @@ fn layoutNode(self: *Window, tree: SplitTree(Surface), handle: SplitTree(Surface
 /// Navigate to a tab by GotoTab target (previous, next, last, or index).
 pub fn selectTab(self: *Window, target: apprt.action.GotoTab) bool {
     if (self.tab_count <= 1) return false;
+    const recent = self.app.config.@"tab-switch-order" == .recent;
     const idx: usize = switch (target) {
-        .previous => if (self.active_tab > 0) self.active_tab - 1 else self.tab_count - 1,
-        .next => if (self.active_tab + 1 < self.tab_count) self.active_tab + 1 else 0,
+        .previous => if (recent) self.recent_tabs.step(self, true) orelse return false else if (self.active_tab > 0) self.active_tab - 1 else self.tab_count - 1,
+        .next => if (recent) self.recent_tabs.step(self, false) orelse return false else if (self.active_tab + 1 < self.tab_count) self.active_tab + 1 else 0,
         .last => self.tab_count - 1,
         _ => blk: {
-            // GotoTab carries a c_int; clamp non-negative before casting
-            // so a negative sentinel doesn't panic the @intCast.
+            // Numbered from 1, as Ghostty's goto_tab is (Alt+1 is the
+            // first tab); past the end means the last, as in GTK.
             const raw = @backingInt(target);
-            if (raw < 0) return false;
+            if (raw < 1) return false;
             const n: usize = @intCast(raw);
-            break :blk if (n < self.tab_count) n else return false;
+            break :blk @min(n - 1, self.tab_count - 1);
         },
     };
     self.selectTabIndex(idx);

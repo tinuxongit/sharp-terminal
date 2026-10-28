@@ -81,6 +81,15 @@
                             .default_on = false,
                         },
                         .{
+                            .label = "Ctrl+Tab goes to",
+                            .description = "The next tab in the strip, or the tab you used before.",
+                            .key = "tab-switch-order",
+                            .choices = .{
+                                .{ .label = "Next tab", .value = "" },
+                                .{ .label = "Last used tab", .value = "recent" },
+                            },
+                        },
+                        .{
                             .label = "Default terminal",
                             .description = "Programs started from Explorer or the Start menu open in a Sharp tab.",
                             .key = "default-terminal",
