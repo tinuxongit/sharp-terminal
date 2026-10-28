@@ -16,6 +16,23 @@ commands and conventions; this file covers what is specific to Sharp.
 
 - `src/apprt/win32/`: the Windows app (windows, tabs, splits, input, IME,
   clipboard, quick terminal). `win32.zig` holds the raw Win32 API bindings.
+  `App.zig` runs the app and its message loop, `Window.zig` is a window
+  with its tabs and layout, `Surface.zig` is one terminal pane. Their
+  other jobs are split out, and Ghostty has no Windows runtime, so
+  splitting them costs no merges:
+  - `actions.zig`: carries out each action the core asks for.
+  - `window_messages.zig`, `pane_messages.zig`: where each Windows message
+    to a window or a pane goes.
+  - `workspace.zig`: Workspace mode's side of a window (grouping, the
+    sidebar's input, opening tabs in folders or on servers, SSH polling).
+  - `splits.zig`, `tab_rename.zig`, `strip_mouse.zig`: split panes, renaming
+    a tab in place, the tab strip's mouse.
+  - `pane_mouse.zig`, `clipboard.zig`, `ime.zig`, `win32_input.zig`,
+    `key_map.zig`: a pane's mouse, clipboard, input methods, ConPTY's
+    mode 9001 and Windows keys in Ghostty's terms.
+  - `find_bar.zig`, `command_palette.zig`: a pane's find bar and command
+    palette.
+  - `global_hotkey.zig`: the quick terminal's system-wide hotkey.
 - `src/apprt/win32/UntrustedUrl.zig`: decides which links printed by programs
   may be opened. Anything that reaches `ShellExecuteW` from terminal output
   must go through it.
@@ -250,8 +267,5 @@ Baseline, 2026-10-28, two runs each:
 
 ## Tech debt
 
-- `App.zig`, `Surface.zig` and `Window.zig` in the Win32 runtime are each
-  2,600 to 3,400 lines and mix several jobs. Upstream's GTK files are just as
-  large, so splitting them makes merges from `winfork` harder.
 - The frame-time benchmark is run by hand, not after every commit: it
   takes a minute and opens a window.
