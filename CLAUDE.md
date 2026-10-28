@@ -41,6 +41,7 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/settings_view.zig`: lays out and paints the panel.
 - `src/apprt/win32/SettingsPanel.zig`: the panel's layered window, input,
   and state.
+- `src/apprt/win32/load_config.zig`: the exe's PE load configuration.
 - `src/apprt/win32/frame_pacer.zig`: one frame per display refresh for each
   renderer thread.
 - `src/apprt/win32/canvas.zig`: drawing shared by the strip and the panel
@@ -205,6 +206,12 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   The owner's rule is that no tests are written or run, and Sharp is only
   built for Windows on the owner's PC, so neither Ghostty's workflows nor
   the fork's are kept.
+- **DLLs load from System32 only.** The exe's load configuration
+  (`load_config.zig`, the `_load_config_used` symbol LLD picks up) sets
+  `DependentLoadFlags` to System32, so a dwmapi.dll or opengl32.dll planted
+  beside a portable copy is ignored; checked 2026-10-28 by planting junk
+  copies of each non-KnownDLL import. Windows ignores the field unless the
+  structure has its full Windows 10 size (0x140).
 - **Sharp has its own version (0.1.0), in `dist/windows/ghostty.rc`.**
   `TERM_PROGRAM_VERSION` keeps Ghostty's, which tells programs which
   Ghostty features to expect.
@@ -247,7 +254,3 @@ Baseline, 2026-10-28, two runs each:
   cmd`) ends with the tab, since only the GUI subsystem marks a program
   as independent. If Sharp crashes, nothing ends: the jobs don't kill on
   close, so GUI programs in them survive a normal close.
-- The exe's static imports that are not KnownDLLs (opengl32, dwmapi,
-  wininet...) are still searched for in its own folder first, so a
-  portable copy unzipped beside planted DLLs would load them. Only
-  `uxtheme.dll` (loaded at runtime) is pinned to System32.

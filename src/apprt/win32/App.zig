@@ -40,6 +40,11 @@ const OpenUrlRequest = struct {
 const build_config = @import("../../build_config.zig");
 const input = @import("../../input.zig");
 
+comptime {
+    // Exports the exe's load configuration; nothing references it.
+    _ = @import("load_config.zig");
+}
+
 /// A registered global system hotkey: the RegisterHotKey id and the binding
 /// action to perform when WM_HOTKEY delivers that id.
 const GlobalHotkey = struct { id: i32, action: input.Binding.Action };
