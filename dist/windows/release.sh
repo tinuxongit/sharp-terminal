@@ -70,7 +70,7 @@ irm https://github.com/$REPOSITORY/releases/download/$tag/install.ps1 | iex
 \`\`\`
 
 Sharp already installed updates itself."
-gh release create "$tag" "$OUT_DIR/$installer" "$OUT_DIR/SHA256SUMS" "$OUT_DIR/install.ps1" \
+gh release create "$tag" -R "$REPOSITORY" "$OUT_DIR/$installer" "$OUT_DIR/SHA256SUMS" "$OUT_DIR/install.ps1" \
     --target "$(git rev-parse HEAD)" --title "Sharp $version" \
     --notes "$notes" --generate-notes --latest
 echo "Published $tag"
