@@ -10,7 +10,8 @@ commands and conventions; this file covers what is specific to Sharp.
 
 - `upstream`: ghostty-org/ghostty. The shared terminal core comes from here.
 - `winfork`: shiweis/ghostty-windows. The Win32 runtime comes from here.
-- No `origin` yet. The repo is local only until we decide to publish it.
+- `origin`: tinuxongit/sharp-terminal on GitHub, public. Sharp's own
+  work is pushed there.
 
 ## Who owns what
 
