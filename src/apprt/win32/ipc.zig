@@ -6,6 +6,7 @@
 //! one), it starts Sharp with those arguments instead.
 const std = @import("std");
 const w32 = @import("win32.zig");
+const command_line = @import("command_line.zig");
 const configpkg = @import("../../config.zig");
 
 const log = std.log.scoped(.ipc);
@@ -43,18 +44,23 @@ pub fn send(alloc: std.mem.Allocator, msg_class: [*:0]const u16, kind: Kind, arg
 }
 
 fn startNew(alloc: std.mem.Allocator, arguments: ?[]const [:0]const u8) !void {
-    var line: std.ArrayList(u16) = .empty;
-    defer line.deinit(alloc);
     var exe: [1024]u16 = undefined;
     const exe_len = w32.GetModuleFileNameW(null, &exe, exe.len);
     if (exe_len == 0 or exe_len >= exe.len) return error.IPCFailed;
+    var args: std.Io.Writer.Allocating = .init(alloc);
+    defer args.deinit();
+    for (arguments orelse &.{}) |arg| {
+        try args.writer.writeByte(' ');
+        try command_line.quote(&args.writer, "", arg);
+    }
+    const args_w = try std.unicode.utf8ToUtf16LeAlloc(alloc, args.written());
+    defer alloc.free(args_w);
+    var line: std.ArrayList(u16) = .empty;
+    defer line.deinit(alloc);
     try line.append(alloc, '"');
     try line.appendSlice(alloc, exe[0..exe_len]);
     try line.append(alloc, '"');
-    for (arguments orelse &.{}) |arg| {
-        try line.appendSlice(alloc, std.unicode.utf8ToUtf16LeStringLiteral(" "));
-        try appendQuoted(alloc, &line, arg);
-    }
+    try line.appendSlice(alloc, args_w);
     try line.append(alloc, 0);
     var startup: STARTUPINFOW = std.mem.zeroes(STARTUPINFOW);
     startup.cb = @sizeOf(STARTUPINFOW);
@@ -62,30 +68,6 @@ fn startNew(alloc: std.mem.Allocator, arguments: ?[]const [:0]const u8) !void {
     if (windows.exp.kernel32.CreateProcessW(null, @ptrCast(line.items.ptr), null, null, windows.FALSE, 0, null, null, &startup, &info) == windows.FALSE) return error.IPCFailed;
     _ = windows.exp.kernel32.CloseHandle(info.hThread);
     _ = windows.exp.kernel32.CloseHandle(info.hProcess);
-}
-
-/// One argument quoted as Windows' command-line parser splits them.
-fn appendQuoted(alloc: std.mem.Allocator, out: *std.ArrayList(u16), arg: []const u8) !void {
-    try out.append(alloc, '"');
-    var backslashes: usize = 0;
-    var it = std.unicode.Utf8View.initUnchecked(arg).iterator();
-    while (it.nextCodepoint()) |cp| {
-        if (cp == '\\') {
-            backslashes += 1;
-            continue;
-        }
-        try out.appendNTimes(alloc, '\\', if (cp == '"') backslashes * 2 + 1 else backslashes);
-        backslashes = 0;
-        if (cp < 0x10000) {
-            try out.append(alloc, @intCast(cp));
-        } else {
-            const v = cp - 0x10000;
-            try out.append(alloc, @intCast(0xD800 + (v >> 10)));
-            try out.append(alloc, @intCast(0xDC00 + (v & 0x3FF)));
-        }
-    }
-    try out.appendNTimes(alloc, '\\', backslashes * 2);
-    try out.append(alloc, '"');
 }
 
 /// What a tab or window opened through IPC overrides, as GTK reads the

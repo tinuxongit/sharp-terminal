@@ -62,6 +62,7 @@ const default_terminal = @import("default_terminal.zig");
 const terminal_handoff = @import("terminal_handoff.zig");
 const elevation = @import("elevation.zig");
 const ipc = @import("ipc.zig");
+const jump_list = @import("jump_list.zig");
 
 comptime {
     // Exports the exe's load configuration; nothing references it.
@@ -318,6 +319,8 @@ pub fn init(
 
     self.configureUpdater();
     self.configureDefaultTerminal(false);
+    // The taskbar's list of shells, for the Sharp the user works in.
+    if (!elevation.active()) jump_list.update();
 
     // Claude's browser tools, only while the browser is switched on.
     browser_remote.target = self.msg_hwnd;

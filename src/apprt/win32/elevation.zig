@@ -6,6 +6,7 @@
 //! updates and the default terminal to the unelevated one.
 const std = @import("std");
 const w32 = @import("win32.zig");
+const command_line = @import("command_line.zig");
 
 const log = std.log.scoped(.elevation);
 
@@ -37,45 +38,24 @@ pub fn requested() bool {
 /// Open `command` (a profile's, as Ghostty's `command` setting reads it)
 /// in a new Sharp run as administrator, in `folder` when given.
 pub fn open(command: []const u8, folder: ?[]const u8) void {
-    var params: std.ArrayList(u8) = .empty;
-    defer params.deinit(std.heap.smp_allocator);
     const alloc = std.heap.smp_allocator;
-    appendArg(alloc, &params, "--command=", command) catch return;
+    var buf: [4096]u8 = undefined;
+    var params: std.Io.Writer = .fixed(&buf);
+    command_line.quote(&params, "--command=", command) catch return;
     if (folder) |dir| {
-        params.append(alloc, ' ') catch return;
-        appendArg(alloc, &params, "--working-directory=", dir) catch return;
+        params.writeByte(' ') catch return;
+        command_line.quote(&params, "--working-directory=", dir) catch return;
     }
 
     var exe: [1024:0]u16 = undefined;
     const exe_len = w32.GetModuleFileNameW(null, &exe, exe.len);
     if (exe_len == 0 or exe_len >= exe.len) return;
     exe[exe_len] = 0;
-    const wide = std.unicode.utf8ToUtf16LeAllocZ(alloc, params.items) catch return;
+    const wide = std.unicode.utf8ToUtf16LeAllocZ(alloc, params.buffered()) catch return;
     defer alloc.free(wide);
     // Windows asks for consent; saying no is not an error worth a dialog.
     const result = w32.ShellExecuteW(null, std.unicode.utf8ToUtf16LeStringLiteral("runas"), &exe, wide.ptr, null, w32.SW_SHOW);
     if (result <= 32) log.info("not opened as administrator: {d}", .{result});
-}
-
-/// One argument as Windows' command-line parser splits them: quoted, with
-/// backslashes before a quote doubled and the quote escaped.
-fn appendArg(alloc: std.mem.Allocator, out: *std.ArrayList(u8), prefix: []const u8, value: []const u8) !void {
-    try out.append(alloc, '"');
-    try out.appendSlice(alloc, prefix);
-    var backslashes: usize = 0;
-    for (value) |c| {
-        if (c == '\\') {
-            backslashes += 1;
-            continue;
-        }
-        if (c == '"') {
-            try out.appendNTimes(alloc, '\\', backslashes * 2 + 1);
-        } else try out.appendNTimes(alloc, '\\', backslashes);
-        backslashes = 0;
-        try out.append(alloc, c);
-    }
-    try out.appendNTimes(alloc, '\\', backslashes * 2);
-    try out.append(alloc, '"');
 }
 
 extern "advapi32" fn GetTokenInformation(token: w32.HANDLE, class: u32, info: *anyopaque, len: u32, ret_len: *u32) callconv(.winapi) i32;

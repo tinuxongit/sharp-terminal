@@ -153,6 +153,8 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/startup.zig`: starting Sharp at sign-in.
 - `src/apprt/win32/ipc.zig`: `sharp +new-tab` and `+new-window` reaching
   a running Sharp.
+- `src/apprt/win32/jump_list.zig`: the taskbar's list of shells.
+  `command_line.zig` quotes one argument of a Windows command line.
 - `src/apprt/win32/closed_tabs.zig`: the last ten closed tabs, for
   reopening.
 - `src/apprt/win32/user_environment.zig`: the variables a new tab starts
