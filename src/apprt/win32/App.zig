@@ -873,7 +873,7 @@ fn exportTerminalIo(self: *App, target: apprt.Target, contents: []const u8) bool
     };
 
     var file_buf: [32768]u16 = std.mem.zeroes([32768]u16);
-    const default_name = std.unicode.utf8ToUtf16LeStringLiteral("ghostty-terminal-io.txt");
+    const default_name = std.unicode.utf8ToUtf16LeStringLiteral("sharp-terminal-io.txt");
     @memcpy(file_buf[0..default_name.len], default_name);
 
     // The common-dialog filter is a sequence of NUL-terminated label/pattern

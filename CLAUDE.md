@@ -469,8 +469,10 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   and carry no mark either. The installer stays a release asset, since
   the updater needs it. Smart App Control, on only on some fresh Windows
   11 installs, still blocks unsigned programs.
-- **Sharp to people, Ghostty to programs.** The exe, window text, dialogs and
-  version info say Sharp. `TERM_PROGRAM`, terminfo, `GHOSTTY_*` variables,
+- **Sharp to people, Ghostty to programs.** The exe, window text, dialogs,
+  version info, the command palette, messages printed in the terminal and
+  the CLI's own text (`+version` shows Ghostty's version below Sharp's)
+  say Sharp. `TERM_PROGRAM`, terminfo, `GHOSTTY_*` variables,
   `share\ghostty` resources and the `%LOCALAPPDATA%\ghostty` config folder
   stay as they are, so programs keep their Ghostty support and Ghostty's
   themes and docs still apply. Only the Windows exe is renamed, which keeps

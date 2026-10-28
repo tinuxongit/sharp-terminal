@@ -376,7 +376,7 @@
                     .settings = .{
                         .{
                             .label = "Edit config file",
-                            .description = "Every Ghostty option, including the ones not shown here, lives in this text file.",
+                            .description = "Every option, including the ones not shown here, lives in this text file.",
                             .action = .edit_file,
                             .button = "Open",
                         },

@@ -28,15 +28,15 @@ pub fn run(alloc: Allocator) !u8 {
 
     if (tty) if (build_config.version.build) |commit_hash| {
         try stdout.print(
-            "\x1b]8;;https://github.com/ghostty-org/ghostty/commit/{s}\x1b\\",
+            "\x1b]8;;https://github.com/tinuxongit/sharp-terminal/commit/{s}\x1b\\",
             .{commit_hash},
         );
     };
-    try stdout.print("Ghostty {s}\n\n", .{build_config.version_string});
+    try stdout.print("Sharp {s}\n\n", .{@import("build_options").sharp_version});
     if (tty) try stdout.print("\x1b]8;;\x1b\\", .{});
 
     try stdout.print("Version\n", .{});
-    try stdout.print("  - version: {s}\n", .{build_config.version_string});
+    try stdout.print("  - ghostty: {s}\n", .{build_config.version_string});
     try stdout.print("  - channel: {t}\n", .{build_config.release_channel});
 
     try stdout.print("Build Config\n", .{});
