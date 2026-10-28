@@ -12,6 +12,7 @@ const Surface = @import("Surface.zig");
 const TabOverview = @import("TabOverview.zig");
 const SplitTree = @import("../../datastruct/split_tree.zig").SplitTree;
 const w32 = @import("win32.zig");
+const brand = @import("brand.zig");
 const wide_string = @import("wide_string.zig");
 
 const log = std.log.scoped(.win32);
@@ -295,7 +296,7 @@ pub fn init(self: *Window, app: *App, options: InitOptions) !void {
     const hwnd = w32.CreateWindowExW(
         ex_style,
         App.WINDOW_CLASS_NAME,
-        std.unicode.utf8ToUtf16LeStringLiteral("Ghostty"),
+        std.unicode.utf8ToUtf16LeStringLiteral(brand.name),
         style,
         cx,
         cy,
@@ -483,7 +484,7 @@ pub fn addTabWithOptions(self: *Window, options: AddTabOptions) !*Surface {
     self.tab_count += 1;
 
     // Set default title.
-    const default_title = std.unicode.utf8ToUtf16LeStringLiteral("Ghostty");
+    const default_title = std.unicode.utf8ToUtf16LeStringLiteral(brand.name);
     @memcpy(self.tab_titles[pos][0..default_title.len], default_title);
     self.tab_title_lens[pos] = @intCast(default_title.len);
 
@@ -538,7 +539,7 @@ pub fn requestCloseOverviewTab(self: *Window, id: u64) void {
     const result = w32.MessageBoxW(
         owner_hwnd,
         std.unicode.utf8ToUtf16LeStringLiteral("Processes are still running in this tab.\nClose the tab and all its splits?"),
-        std.unicode.utf8ToUtf16LeStringLiteral("Ghostty"),
+        std.unicode.utf8ToUtf16LeStringLiteral(brand.name),
         w32.MB_OKCANCEL | w32.MB_ICONWARNING | w32.MB_DEFBUTTON2,
     );
     if (result != w32.IDOK) return;
@@ -2210,7 +2211,7 @@ pub fn confirmCloseIfNeeded(self: *Window) bool {
         std.unicode.utf8ToUtf16LeStringLiteral(
             "Processes are still running in this window.\nClose anyway?",
         ),
-        std.unicode.utf8ToUtf16LeStringLiteral("Ghostty"),
+        std.unicode.utf8ToUtf16LeStringLiteral(brand.name),
         w32.MB_OKCANCEL | w32.MB_ICONWARNING | w32.MB_DEFBUTTON2,
     );
     return result == w32.IDOK;

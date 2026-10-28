@@ -1,11 +1,11 @@
 #!/bin/bash
-# Build and package Ghostty for Windows as a portable ZIP.
+# Build and package Sharp as a portable ZIP.
 #
 # Usage:
 #   ./dist/windows/package.sh              # fast, x86_64
 #   ./dist/windows/package.sh debug        # Debug build (Console subsystem)
 #
-# Output: dist/windows/ghostty-windows-x64-<version>.zip
+# Output: dist/windows/sharp-windows-x64-<version>.zip
 
 set -euo pipefail
 
@@ -15,10 +15,10 @@ OPTIMIZE="${1:-fast}"
 
 cd "$REPO_DIR"
 
-echo "Building ghostty (optimize=$OPTIMIZE)..."
+echo "Building sharp (optimize=$OPTIMIZE)..."
 zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize="$OPTIMIZE"
 
-for resource in bin/ghostty.exe bin/conpty.dll bin/OpenConsole.exe share/terminfo/ghostty.terminfo share/licenses/conpty/LICENSE.txt; do
+for resource in bin/sharp.exe bin/conpty.dll bin/OpenConsole.exe share/terminfo/ghostty.terminfo share/licenses/conpty/LICENSE.txt; do
     if [ ! -f "zig-out/$resource" ]; then
         echo "ERROR: Incomplete Windows build — zig-out/$resource not found" >&2
         exit 1
@@ -26,19 +26,19 @@ for resource in bin/ghostty.exe bin/conpty.dll bin/OpenConsole.exe share/terminf
 done
 
 # Get version string
-VERSION="$(powershell.exe -Command "& '.\\zig-out\\bin\\ghostty.exe' --version" 2>/dev/null | head -1 | tr -d '\r' | awk '{print $2}')" || true
+VERSION="$(powershell.exe -Command "& '.\\zig-out\\bin\\sharp.exe' --version" 2>/dev/null | head -1 | tr -d '\r' | awk '{print $2}')" || true
 if [ -z "$VERSION" ]; then
     VERSION="$(git describe --tags --always 2>/dev/null || echo 'dev')"
 fi
 echo "Version: $VERSION"
 
 # Create staging directory
-STAGE_DIR="$REPO_DIR/dist/windows/_stage/ghostty"
+STAGE_DIR="$REPO_DIR/dist/windows/_stage/sharp"
 rm -rf "$REPO_DIR/dist/windows/_stage"
 mkdir -p "$STAGE_DIR"
 
 # Keep the matching console runtime pair beside the executable.
-for binary in ghostty.exe conpty.dll OpenConsole.exe; do
+for binary in sharp.exe conpty.dll OpenConsole.exe; do
     cp "zig-out/bin/$binary" "$STAGE_DIR/"
     echo "  $binary"
 done
@@ -70,14 +70,13 @@ fi
 
 # Create a minimal README
 cat > "$STAGE_DIR/README.txt" << READMEEOF
-Ghostty for Windows — $VERSION
-https://github.com/shiweis/ghostty-windows
+Sharp — $VERSION
 
 QUICK START
-  1. Run ghostty.exe
+  1. Run sharp.exe
   2. Config file: %LOCALAPPDATA%\\ghostty\\config.ghostty
      (the legacy filename "config" is also supported)
-  Keep conpty.dll and OpenConsole.exe beside ghostty.exe.
+  Keep conpty.dll and OpenConsole.exe beside sharp.exe.
 
 KEYBOARD SHORTCUTS
   Ctrl+Shift+T        New tab
@@ -97,7 +96,7 @@ SHELL INTEGRATION (PowerShell)
   Windows PowerShell 5.1 (powershell.exe) and PowerShell 7 (pwsh.exe)
   load the bundled integration automatically when enabled.
   No PowerShell profile edit is required. Keep the share/ folder beside
-  ghostty.exe wherever you extract this portable package.
+  sharp.exe wherever you extract this portable package.
   The script is share/ghostty/shell-integration/powershell/ghostty-shell-integration.ps1.
   To disable integration, set shell-integration = none in your config.
 
@@ -106,22 +105,22 @@ READMEEOF
 echo "  README.txt"
 
 # Create ZIP
-ZIP_NAME="ghostty-windows-x64-${VERSION}.zip"
+ZIP_NAME="sharp-windows-x64-${VERSION}.zip"
 ZIP_PATH="$REPO_DIR/dist/windows/$ZIP_NAME"
 rm -f "$ZIP_PATH"
 cd "$REPO_DIR/dist/windows/_stage"
 if command -v zip &>/dev/null; then
-    zip -qr "$ZIP_PATH" ghostty/
+    zip -qr "$ZIP_PATH" sharp/
 else
     # PowerShell can't zip from WSL UNC paths. Copy to Windows temp first.
     WIN_TEMP="$(cmd.exe /c "echo %TEMP%" 2>/dev/null | tr -d '\r')"
     WIN_TEMP_WSL="$(wslpath "$WIN_TEMP")"
-    rm -rf "$WIN_TEMP_WSL/ghostty-zip-stage"
-    mkdir -p "$WIN_TEMP_WSL/ghostty-zip-stage"
-    cp -r "$REPO_DIR/dist/windows/_stage/ghostty" "$WIN_TEMP_WSL/ghostty-zip-stage/ghostty"
-    powershell.exe -Command "Compress-Archive -Path '${WIN_TEMP}\\ghostty-zip-stage\\ghostty' -DestinationPath '${WIN_TEMP}\\${ZIP_NAME}' -Force" 2>&1 | tr -d '\r'
+    rm -rf "$WIN_TEMP_WSL/sharp-zip-stage"
+    mkdir -p "$WIN_TEMP_WSL/sharp-zip-stage"
+    cp -r "$REPO_DIR/dist/windows/_stage/sharp" "$WIN_TEMP_WSL/sharp-zip-stage/sharp"
+    powershell.exe -Command "Compress-Archive -Path '${WIN_TEMP}\\sharp-zip-stage\\sharp' -DestinationPath '${WIN_TEMP}\\${ZIP_NAME}' -Force" 2>&1 | tr -d '\r'
     cp "$WIN_TEMP_WSL/$ZIP_NAME" "$ZIP_PATH" 2>/dev/null
-    rm -rf "$WIN_TEMP_WSL/ghostty-zip-stage" "$WIN_TEMP_WSL/$ZIP_NAME"
+    rm -rf "$WIN_TEMP_WSL/sharp-zip-stage" "$WIN_TEMP_WSL/$ZIP_NAME"
 fi
 
 # Clean up staging

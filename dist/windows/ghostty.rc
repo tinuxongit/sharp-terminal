@@ -35,13 +35,13 @@ BEGIN
         // 0409 = U.S. English, 04B0 = Unicode codepage 1200
         BLOCK "040904B0"
         BEGIN
-            VALUE "CompanyName",      "Ghostty Windows"
-            VALUE "FileDescription",  "Ghostty terminal emulator"
+            VALUE "CompanyName",      "Sharp"
+            VALUE "FileDescription",  "Sharp terminal emulator"
             VALUE "FileVersion",      "1.3.0.0"
-            VALUE "InternalName",     "ghostty"
+            VALUE "InternalName",     "sharp"
             VALUE "LegalCopyright",   "Original work copyright Mitchell Hashimoto. Windows port additions copyright Shiwei Song. MIT License."
-            VALUE "OriginalFilename", "ghostty.exe"
-            VALUE "ProductName",      "Ghostty"
+            VALUE "OriginalFilename", "sharp.exe"
+            VALUE "ProductName",      "Sharp"
             VALUE "ProductVersion",   "1.3.0.0"
         END
     END

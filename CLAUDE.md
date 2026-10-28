@@ -25,6 +25,8 @@ commands and conventions; this file covers what is specific to Sharp.
   fixed-size UTF-16 buffers. `std.unicode.utf8ToUtf16Le` does not
   bounds-check, so never call it on a fixed buffer with text whose length
   you have not checked first.
+- `src/apprt/win32/brand.zig`: the name shown in titles, dialogs and the
+  tray, and the prefix of the Win32 window classes.
 - `src/font/directwrite.zig`: finds system fonts on Windows.
 - `dist/windows/`: icon, resource file and packaging scripts.
 - Everything else in `src/` is the shared Ghostty core. Keep changes there
@@ -34,7 +36,7 @@ commands and conventions; this file covers what is specific to Sharp.
 
 Zig 0.17.0 lives in `C:\dev\tools\zig-x86_64-windows-0.17.0\`. The GNU
 target is required: the default MSVC target fails in translate-c. The
-output goes to `zig-out\bin\ghostty.exe`, next to the Microsoft-signed
+output goes to `zig-out\bin\sharp.exe`, next to the Microsoft-signed
 `conpty.dll` and `OpenConsole.exe`.
 
 ```
@@ -54,6 +56,12 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   that handles terminal output.
 - **Win32 + OpenGL (WGL), not WinUI or DirectX.** It reuses Ghostty's OpenGL
   renderer, so there is no second renderer to maintain.
+- **Sharp to people, Ghostty to programs.** The exe, window text, dialogs and
+  version info say Sharp. `TERM_PROGRAM`, terminfo, `GHOSTTY_*` variables,
+  `share\ghostty` resources and the `%LOCALAPPDATA%\ghostty` config folder
+  stay as they are, so programs keep their Ghostty support and Ghostty's
+  themes and docs still apply. Only the Windows exe is renamed, which keeps
+  merges from upstream simple.
 
 ## Performance budget
 
@@ -79,8 +87,8 @@ the scrollback.
 - The fork deleted upstream's `test.yml` CI, so upstream's core tests no
   longer run on its changes to shared files.
 - Leftover debug log lines in `Surface.init` (`"renderer created"` and so on).
-- The window still says "Ghostty" everywhere: title, exe name, icon, config
-  folder, taskbar ID. The rename to Sharp is not done yet.
+- The icon (`dist/windows/ghostty.ico`) is still Ghostty's ghost, and the
+  version info still says 1.3.0.0, inherited from the fork.
 - `App.zig`, `Surface.zig` and `Window.zig` in the Win32 runtime are each
   2,600 to 3,400 lines and mix several jobs. Upstream's GTK files are just as
   large, so splitting them makes merges from `winfork` harder.

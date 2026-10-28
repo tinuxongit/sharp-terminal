@@ -5,8 +5,9 @@ const TabOverview = @This();
 const std = @import("std");
 const Window = @import("Window.zig");
 const w32 = @import("win32.zig");
+const brand = @import("brand.zig");
 
-pub const class_name = std.unicode.utf8ToUtf16LeStringLiteral("GhosttyTabOverview");
+pub const class_name = std.unicode.utf8ToUtf16LeStringLiteral(brand.name ++ "TabOverview");
 pub const search_id = 1001;
 pub const list_id = 1002;
 const open_id = 1;

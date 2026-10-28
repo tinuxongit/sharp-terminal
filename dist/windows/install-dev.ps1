@@ -1,6 +1,6 @@
 param(
     [string]$BuildDir = (Join-Path $PSScriptRoot '..\..\zig-out'),
-    [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'ghostty-dev'),
+    [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'sharp-dev'),
     [string]$DesktopDir = [Environment]::GetFolderPath('Desktop')
 )
 
@@ -14,7 +14,7 @@ if ($InstallRoot.StartsWith('\\')) {
 }
 
 $requiredFiles = @(
-    'bin\ghostty.exe', 'bin\conpty.dll', 'bin\OpenConsole.exe',
+    'bin\sharp.exe', 'bin\conpty.dll', 'bin\OpenConsole.exe',
     'share\terminfo\ghostty.terminfo', 'share\licenses\conpty\LICENSE.txt'
 )
 $resourceDirs = @('share\ghostty\themes', 'share\ghostty\shell-integration')
@@ -83,15 +83,15 @@ if (-not (Test-Path -LiteralPath $buildPath)) {
 
 # Publish the link last so a failed copy leaves the previous launch intact.
 New-Item -ItemType Directory -Path $DesktopDir -Force | Out-Null
-$shortcutPath = Join-Path $DesktopDir 'Ghostty Dev.lnk'
-$temporaryLink = Join-Path $DesktopDir ('.ghostty-dev-' + [guid]::NewGuid().ToString('N') + '.lnk')
+$shortcutPath = Join-Path $DesktopDir 'Sharp Dev.lnk'
+$temporaryLink = Join-Path $DesktopDir ('.sharp-dev-' + [guid]::NewGuid().ToString('N') + '.lnk')
 try {
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($temporaryLink)
-    $shortcut.TargetPath = Join-Path $buildPath 'ghostty.exe'
+    $shortcut.TargetPath = Join-Path $buildPath 'sharp.exe'
     $shortcut.WorkingDirectory = [Environment]::GetFolderPath('UserProfile')
     $shortcut.IconLocation = $shortcut.TargetPath + ',0'
-    $shortcut.Description = 'Latest successful local Ghostty development build'
+    $shortcut.Description = 'Latest successful local Sharp development build'
     $shortcut.Save()
     Move-Item -LiteralPath $temporaryLink -Destination $shortcutPath -Force
 } finally {
@@ -102,4 +102,4 @@ try {
 
 Write-Output "Development build: $buildPath"
 Write-Output "Desktop shortcut: $shortcutPath"
-Write-Output 'Open Ghostty Dev to use this build. Existing terminals keep running.'
+Write-Output 'Open Sharp Dev to use this build. Existing terminals keep running.'

@@ -4,6 +4,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const w32 = @import("win32.zig");
+const brand = @import("brand.zig");
 const terminal = @import("../../terminal/main.zig");
 const Surface = @import("Surface.zig");
 const testing = std.testing;
@@ -138,7 +139,7 @@ pub fn readMode() Mode {
 // Scrollbar window class + struct
 // ---------------------------------------------------------------------------
 
-pub const WINDOW_CLASS_NAME = std.unicode.utf8ToUtf16LeStringLiteral("GhosttyScrollbar");
+pub const WINDOW_CLASS_NAME = std.unicode.utf8ToUtf16LeStringLiteral(brand.name ++ "Scrollbar");
 
 /// Test-only message: SendMessage(hwnd, WM_GHOSTTY_SCROLLBAR_QUERY, 0, 0)
 /// returns the current visibility state as an LRESULT.

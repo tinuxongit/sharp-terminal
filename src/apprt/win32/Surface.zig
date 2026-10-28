@@ -16,6 +16,7 @@ const global = @import("../../global.zig");
 const App = @import("App.zig");
 const Window = @import("Window.zig");
 const w32 = @import("win32.zig");
+const brand = @import("brand.zig");
 const wide_string = @import("wide_string.zig");
 const Scrollbar = @import("Scrollbar.zig").Scrollbar;
 
@@ -673,7 +674,7 @@ pub fn close(self: *Surface, process_active: bool) void {
             std.unicode.utf8ToUtf16LeStringLiteral(
                 "A process is still running in this terminal.\nClose anyway?",
             ),
-            std.unicode.utf8ToUtf16LeStringLiteral("Ghostty"),
+            std.unicode.utf8ToUtf16LeStringLiteral(brand.name),
             w32.MB_OKCANCEL | w32.MB_ICONWARNING | w32.MB_DEFBUTTON2,
         );
         if (result != w32.IDOK) return;
@@ -885,16 +886,16 @@ fn completeClipboardRequestWithConfirmation(
             error.UnsafePaste => self.confirmClipboard(
                 "The text being pasted contains characters that could run " ++
                     "commands unexpectedly (for example, newlines).\n\nPaste anyway?",
-                "Ghostty \u{2014} Potentially Unsafe Paste",
+                brand.name ++ " \u{2014} Potentially Unsafe Paste",
             ),
             error.UnauthorizedPaste => switch (state) {
                 .kitty_write, .osc_52_write => self.confirmClipboard(
                     "An application is requesting to write to the system clipboard.\n\nAllow this?",
-                    "Ghostty \u{2014} Authorize Clipboard Access",
+                    brand.name ++ " \u{2014} Authorize Clipboard Access",
                 ),
                 else => self.confirmClipboard(
                     "An application is requesting access to read the clipboard.\n\nAllow this?",
-                    "Ghostty \u{2014} Authorize Clipboard Access",
+                    brand.name ++ " \u{2014} Authorize Clipboard Access",
                 ),
             },
             else => {
@@ -950,7 +951,7 @@ pub fn setClipboard(
     if (confirm) {
         if (!self.confirmClipboard(
             "An application is requesting to write to the system clipboard.\n\nAllow this?",
-            "Ghostty \u{2014} Authorize Clipboard Access",
+            brand.name ++ " \u{2014} Authorize Clipboard Access",
         )) return;
     }
 

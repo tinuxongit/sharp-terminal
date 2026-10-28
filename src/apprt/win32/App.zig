@@ -18,6 +18,7 @@ const Window = @import("Window.zig");
 const TabOverview = @import("TabOverview.zig");
 const SplitTree = @import("../../datastruct/split_tree.zig").SplitTree;
 const w32 = @import("win32.zig");
+const brand = @import("brand.zig");
 const UntrustedUrl = @import("UntrustedUrl.zig");
 const wide_string = @import("wide_string.zig");
 
@@ -55,13 +56,13 @@ const WM_APP_OPEN_URL: u32 = w32.WM_APP + 4;
 const QUIT_TIMER_ID: usize = 1;
 
 /// Window class for the top-level container (GDI painting, no CS_OWNDC).
-pub const WINDOW_CLASS_NAME = std.unicode.utf8ToUtf16LeStringLiteral("GhosttyWindow");
+pub const WINDOW_CLASS_NAME = std.unicode.utf8ToUtf16LeStringLiteral(brand.name ++ "Window");
 
 /// Window class for terminal surfaces (OpenGL via WGL, needs CS_OWNDC).
-pub const TERMINAL_CLASS_NAME = std.unicode.utf8ToUtf16LeStringLiteral("GhosttyTerminal");
+pub const TERMINAL_CLASS_NAME = std.unicode.utf8ToUtf16LeStringLiteral(brand.name ++ "Terminal");
 
 /// Window class for the message-only HWND (WM_APP_WAKEUP, WM_TIMER).
-pub const MSG_CLASS_NAME = std.unicode.utf8ToUtf16LeStringLiteral("GhosttyMsg");
+pub const MSG_CLASS_NAME = std.unicode.utf8ToUtf16LeStringLiteral(brand.name ++ "Msg");
 
 /// The core application.
 core_app: *CoreApp,
@@ -238,7 +239,7 @@ pub fn init(
     self.msg_hwnd = w32.CreateWindowExW(
         0,
         MSG_CLASS_NAME,
-        std.unicode.utf8ToUtf16LeStringLiteral("GhosttyMsg"),
+        std.unicode.utf8ToUtf16LeStringLiteral(brand.name ++ "Msg"),
         0, // no style needed
         0,
         0,
@@ -952,7 +953,7 @@ pub fn performAction(
                             _ = w32.MessageBoxW(
                                 hwnd_val,
                                 std.unicode.utf8ToUtf16LeStringLiteral("The shell process exited unexpectedly."),
-                                std.unicode.utf8ToUtf16LeStringLiteral("Ghostty"),
+                                std.unicode.utf8ToUtf16LeStringLiteral(brand.name),
                                 w32.MB_ICONWARNING,
                             );
                             return true;
@@ -961,7 +962,7 @@ pub fn performAction(
                         _ = w32.MessageBoxW(
                             hwnd_val,
                             @ptrCast(&utf16_buf),
-                            std.unicode.utf8ToUtf16LeStringLiteral("Ghostty"),
+                            std.unicode.utf8ToUtf16LeStringLiteral(brand.name),
                             w32.MB_ICONWARNING,
                         );
                     }
@@ -1951,7 +1952,7 @@ fn showUpdateNotification(self: *App, ver: []const u8) void {
     nid.uVersion_or_uTimeout = 10000;
 
     // Title
-    const title = std.unicode.utf8ToUtf16LeStringLiteral("Ghostty Update Available");
+    const title = std.unicode.utf8ToUtf16LeStringLiteral(brand.name ++ " Update Available");
     @memcpy(nid.szInfoTitle[0..title.len], title);
     nid.szInfoTitle[title.len] = 0;
 
@@ -1963,7 +1964,7 @@ fn showUpdateNotification(self: *App, ver: []const u8) void {
     @memcpy(nid.szInfo[0..wlen], body_utf16[0..wlen]);
     nid.szInfo[wlen] = 0;
 
-    const tip = std.unicode.utf8ToUtf16LeStringLiteral("Ghostty");
+    const tip = std.unicode.utf8ToUtf16LeStringLiteral(brand.name);
     @memcpy(nid.szTip[0..tip.len], tip);
     nid.szTip[tip.len] = 0;
 
@@ -2105,7 +2106,7 @@ fn showDesktopNotificationText(self: *App, title: []const u8, body: []const u8) 
     _ = wide_string.fromUtf8(&nid.szInfo, body);
 
     // Tooltip
-    const tip = std.unicode.utf8ToUtf16LeStringLiteral("Ghostty");
+    const tip = std.unicode.utf8ToUtf16LeStringLiteral(brand.name);
     @memcpy(nid.szTip[0..tip.len], tip);
     nid.szTip[tip.len] = 0;
 
