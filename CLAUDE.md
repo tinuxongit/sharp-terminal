@@ -153,8 +153,8 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   Ghostty has no Sixel support.
 - **Shell profiles work like Windows Terminal's.** The arrow beside "+"
   lists installed shells with their icons; Ctrl+Shift+1..9 opens the Nth
-  in a new tab, Shift+click opens it in a new window, and each tab shows
-  its shell's icon. Visual Studio prompts come from the folders listed in
+  in a new tab (unless the config binds that chord to something else),
+  Shift+click opens it in a new window, and each tab shows its shell's icon. Visual Studio prompts come from the folders listed in
   `profiles.zon`, and WSL distributions from the Lxss registry key. The
   Settings > Shell dropdown uses the same list.
 - **Ctrl+, opens the settings panel**, not the config file: in Sharp the
@@ -243,8 +243,6 @@ Baseline, 2026-10-28, two runs each:
 - Only ssh.exe is recognized as a server session: PuTTY's plink, mosh or
   `wsl ssh` stay under their folder.
 - A saved session reopens shells, not their output or running programs.
-- Ctrl+Shift+1..9 is taken before Ghostty's keybindings run, so it can't
-  be rebound in the config file.
 - Visual Studio is found only in the folders `profiles.zon` lists, not
   through vswhere, so unusual install locations are missed.
 - A console program started from the tab in a window of its own (`start

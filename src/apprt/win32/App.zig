@@ -1777,6 +1777,13 @@ fn profileShortcut(self: *App, msg: w32.MSG) bool {
     if (w32.GetKeyState(@as(i32, w32.VK_CONTROL)) >= 0 or
         w32.GetKeyState(@as(i32, w32.VK_SHIFT)) >= 0 or
         w32.GetKeyState(@as(i32, w32.VK_MENU)) < 0) return false;
+    // A keybind in the config file for this chord wins, so the shortcut
+    // can be moved or switched off (`keybind = ctrl+shift+1=ignore`).
+    const digits = [_]input.Key{ .digit_1, .digit_2, .digit_3, .digit_4, .digit_5, .digit_6, .digit_7, .digit_8, .digit_9 };
+    const mods: input.Mods = .{ .ctrl = true, .shift = true };
+    const set = &self.config.keybind.set;
+    if (set.get(.{ .mods = mods, .key = .{ .physical = digits[vk - '1'] } }) != null or
+        set.get(.{ .mods = mods, .key = .{ .unicode = vk } }) != null) return false;
     const hwnd = msg.hwnd orelse return false;
     if (@as(u16, @truncate(w32.GetClassLongW(hwnd, w32.GCW_ATOM))) != self.terminal_class_atom) return false;
     const userdata = w32.GetWindowLongPtrW(hwnd, w32.GWLP_USERDATA);

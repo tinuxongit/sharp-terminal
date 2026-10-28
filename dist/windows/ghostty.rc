@@ -37,12 +37,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "Sharp"
             VALUE "FileDescription",  "Sharp terminal emulator"
-            VALUE "FileVersion",      "0.1.0.0"
+            VALUE "FileVersion",      "0.1.0"
             VALUE "InternalName",     "sharp"
             VALUE "LegalCopyright",   "MIT License. See share\\licenses\\sharp\\LICENSE.txt."
             VALUE "OriginalFilename", "sharp.exe"
             VALUE "ProductName",      "Sharp"
-            VALUE "ProductVersion",   "0.1.0.0"
+            VALUE "ProductVersion",   "0.1.0"
         END
     END
     BLOCK "VarFileInfo"
