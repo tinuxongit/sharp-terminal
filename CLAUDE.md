@@ -98,6 +98,13 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   that handles terminal output.
 - **Win32 + OpenGL (WGL), not WinUI or DirectX.** It reuses Ghostty's OpenGL
   renderer, so there is no second renderer to maintain.
+- **Resizing never shows an empty or stale terminal.** WGL has no
+  equivalent of Windows Terminal's `DXGI_SCALING_NONE` swap chain, so
+  every pane resize waits (up to 16 ms) for the renderer's frame at the
+  new size, panes keep their last frame when moved (no
+  `SWP_NOCOPYBITS`), the window has `WS_CLIPCHILDREN` and fills newly
+  exposed area with the terminal's color, and the sidebar's edge paints
+  synchronously while dragged.
 - **Tabs live in the title bar, as in Windows Terminal.** The Windows caption
   is removed and the tab strip draws its own caption buttons. Its colors are
   derived from the terminal's background and foreground, so every theme
@@ -239,5 +246,9 @@ Baseline, 2026-10-28, two runs each:
   cmd`) ends with the tab, since only the GUI subsystem marks a program
   as independent. If Sharp crashes, nothing ends: the jobs don't kill on
   close, so GUI programs in them survive a normal close.
+- The exe's static imports that are not KnownDLLs (opengl32, dwmapi,
+  wininet...) are still searched for in its own folder first, so a
+  portable copy unzipped beside planted DLLs would load them. Only
+  `uxtheme.dll` (loaded at runtime) is pinned to System32.
 - The fork removed upstream's CI workflows and contributor docs (`HACKING.md`,
   `CONTRIBUTING.md`).
