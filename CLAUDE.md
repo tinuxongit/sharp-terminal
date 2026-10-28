@@ -276,3 +276,4 @@ Measured 2026-10-28, two runs each, before frame pacing:
 
 ## Tech debt
 
+None.
