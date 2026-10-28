@@ -708,7 +708,6 @@ pub fn add(
                     step.root_module.linkSystemLibrary("dwmapi", .{});
                     step.root_module.linkSystemLibrary("imm32", .{});
                     step.root_module.linkSystemLibrary("shell32", .{});
-                    step.root_module.linkSystemLibrary("wininet", .{});
                     step.root_module.linkSystemLibrary("comdlg32", .{});
                 }
             },

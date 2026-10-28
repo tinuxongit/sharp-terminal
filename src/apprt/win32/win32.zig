@@ -1367,43 +1367,6 @@ pub const WS_EX_TOPMOST: u32 = 0x00000008;
 pub const SW_SHOWNOACTIVATE: i32 = 4;
 
 // -----------------------------------------------------------------------
-// WinINet — HTTP client for update checks
-// -----------------------------------------------------------------------
-
-pub const HINTERNET = *opaque {};
-
-pub const INTERNET_OPEN_TYPE_PRECONFIG: u32 = 0;
-pub const INTERNET_FLAG_SECURE: u32 = 0x00800000;
-pub const INTERNET_FLAG_NO_CACHE_WRITE: u32 = 0x04000000;
-pub const INTERNET_FLAG_RELOAD: u32 = 0x80000000;
-
-pub extern "wininet" fn InternetOpenW(
-    lpszAgent: [*:0]const u16,
-    dwAccessType: u32,
-    lpszProxy: ?[*:0]const u16,
-    lpszProxyBypass: ?[*:0]const u16,
-    dwFlags: u32,
-) callconv(.winapi) ?HINTERNET;
-
-pub extern "wininet" fn InternetOpenUrlW(
-    hInternet: HINTERNET,
-    lpszUrl: [*:0]const u16,
-    lpszHeaders: ?[*:0]const u16,
-    dwHeadersLength: u32,
-    dwFlags: u32,
-    dwContext: usize,
-) callconv(.winapi) ?HINTERNET;
-
-pub extern "wininet" fn InternetReadFile(
-    hFile: HINTERNET,
-    lpBuffer: [*]u8,
-    dwNumberOfBytesToRead: u32,
-    lpdwNumberOfBytesRead: *u32,
-) callconv(.winapi) i32;
-
-pub extern "wininet" fn InternetCloseHandle(hInternet: HINTERNET) callconv(.winapi) i32;
-
-// -----------------------------------------------------------------------
 // Layered window painting
 // -----------------------------------------------------------------------
 

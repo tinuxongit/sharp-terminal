@@ -217,9 +217,6 @@ Baseline, 2026-10-28, two runs each:
 
 ## Tech debt
 
-- The update checker in `src/apprt/win32/App.zig` still points at the
-  original fork's releases. It now runs only when `auto-update` is set.
-  Point it at Sharp's releases once they exist, or delete it.
 - The fork made renderer messages in the shared `src/Surface.zig` give up
   after 1 second, to survive a renderer that hangs in `SwapBuffers` after
   sleep. That hides the hang instead of fixing it, and a dropped config change
