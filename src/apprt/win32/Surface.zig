@@ -18,6 +18,7 @@ const Window = @import("Window.zig");
 const w32 = @import("win32.zig");
 const brand = @import("brand.zig");
 const wide_string = @import("wide_string.zig");
+const frame_log = @import("frame_log.zig");
 const Scrollbar = @import("Scrollbar.zig").Scrollbar;
 
 const log = std.log.scoped(.win32);
@@ -3012,6 +3013,13 @@ fn writeWin32InputSequence(
         seq,
     ) catch return;
     self.core_surface.io.queueMessage(msg, .unlocked);
+}
+
+/// Called by the renderer thread after each frame it updates and draws,
+/// for the performance benchmark (frame_log.zig).
+pub fn recordFrameTime(self: *Surface, total_ns: u64, swap_ns: u64) void {
+    _ = self;
+    frame_log.record(total_ns, swap_ns);
 }
 
 /// Called by the renderer thread after SwapBuffers to signal that a

@@ -2,6 +2,7 @@
 pub const OpenGL = @This();
 
 const std = @import("std");
+const global = @import("../global.zig");
 const Allocator = std.mem.Allocator;
 const gl = @import("opengl");
 const egl = gl.egl;
@@ -51,6 +52,9 @@ device: *const Device,
 
 egl_context: if (is_wgl) void else *gl.egl.Context,
 context_loaded: bool = false,
+
+/// How long the last SwapBuffers took (WGL only), for Sharp's frame log.
+last_swap_ns: u64 = 0,
 
 pub fn init(
     alloc: Allocator,
@@ -340,7 +344,9 @@ pub fn present(
             .{ .color_buffer_bit = true },
             .nearest,
         );
+        const swap_start: std.Io.Timestamp = .now(global.io(), .awake);
         if (w32.SwapBuffers(hdc) == 0) return error.SwapBuffersFailed;
+        self.last_swap_ns = @intCast(swap_start.durationTo(.now(global.io(), .awake)).nanoseconds);
         return;
     }
     // We only export DMABUFs when the apprt can present them.

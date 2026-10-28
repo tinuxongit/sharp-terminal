@@ -658,6 +658,8 @@ fn renderCallback(
     // Kitty graphics animations pause with us and resume on visibility.
     if (!t.flags.visible) return .disarm;
 
+    const frame_start: std.Io.Timestamp = .now(global.io(), .awake);
+
     // Update our frame data
     t.renderer.updateFrame(
         t.state,
@@ -667,6 +669,12 @@ fn renderCallback(
 
     // Draw
     t.drawFrame(false);
+
+    // Sharp's Windows build measures frames against its performance budget.
+    if (comptime @hasDecl(apprt.Surface, "recordFrameTime")) {
+        const total = frame_start.durationTo(.now(global.io(), .awake)).nanoseconds;
+        t.surface.recordFrameTime(@intCast(total), t.renderer.api.last_swap_ns);
+    }
 
     // Schedule the next animation wake, if the renderer needs one.
     t.armAnimationTimer();

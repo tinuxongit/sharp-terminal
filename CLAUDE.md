@@ -187,6 +187,18 @@ the scrollback.
 - Average frame: 4 ms or less.
 - Worst frame: 16 ms or less.
 
+A frame is the renderer's work for it: updating and drawing, without the
+wait for the display inside SwapBuffers. `python dist/windows/frame_benchmark.py
+zig-outin\sharp.exe` runs the load on the second monitor without taking
+focus, using `SHARP_FRAME_LOG` (`src/apprt/win32/frame_log.zig`, fed by a
+small hook in the shared `src/renderer/Thread.zig` and `OpenGL.zig`).
+
+Baseline, 2026-10-28, two runs each:
+
+- ReleaseFast: 2.0 ms average, 8.6 to 9.8 ms worst.
+- ReleaseSafe: 2.4 ms average, 9.0 to 11.9 ms worst.
+- The dump takes about 24 s either way; ConPTY, not Sharp, sets that pace.
+
 ## Tech debt
 
 - The update checker in `src/apprt/win32/App.zig` still points at the
@@ -207,7 +219,8 @@ the scrollback.
 - `App.zig`, `Surface.zig` and `Window.zig` in the Win32 runtime are each
   2,600 to 3,400 lines and mix several jobs. Upstream's GTK files are just as
   large, so splitting them makes merges from `winfork` harder.
-- The frame-time benchmark for the budget above does not exist yet.
+- The frame-time benchmark is run by hand, not after every commit: it
+  takes a minute and opens a window.
 - Replies to programs that probe for image support travel back through
   ConPTY's input side, which reportedly drops APC replies. Tools that
   insist on a reply may not detect image support. Unverified.

@@ -84,7 +84,11 @@ pub fn build(b: *std.Build) !void {
                 .files = &.{.{ .path = "wuffs-v0.4.c" }},
             } },
             .target = target,
-            .optimize = optimize,
+            // MinGW's string.h, fortified in ReleaseSafe, translates to a
+            // bool where __builtin_object_size wants an int. Wuffs is C
+            // without ubsan on Windows (see c_flags), so ReleaseSafe would
+            // add no checks to it anyway.
+            .optimize = if (windows and optimize == .safe) .fast else optimize,
             .include_paths = include_paths,
             .link_libc = windows,
             .extra_args = macro_flags,
