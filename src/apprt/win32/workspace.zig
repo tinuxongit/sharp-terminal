@@ -19,6 +19,7 @@ const servers = @import("servers.zig");
 const configpkg = @import("../../config.zig");
 const log = std.log.scoped(.win32);
 const Window = @import("Window.zig");
+const strip_mouse = @import("strip_mouse.zig");
 
 pub fn paintSidebar(self: *Window, hdc_screen: w32.HDC, palette: tab_strip.Palette) void {
     const rect = sidebarRect(self);
@@ -396,7 +397,7 @@ pub fn sidebarProfileMenu(self: *Window, arrow: tab_sidebar.Target, list: *const
     const hwnd = self.hwnd orelse return null;
     const corner = pressSidebarArrow(self, arrow) orelse return null;
     defer releaseSidebarArrow(self);
-    return new_tab_menu.show(hwnd, corner, list, list.selected(self.configuredCommand()), &self.app.profile_icons, self.scale, self.menusDark());
+    return new_tab_menu.show(hwnd, corner, list, list.selected(self.configuredCommand()), &self.app.profile_icons, self.scale, strip_mouse.menusDark(self));
 }
 
 /// The server menu dropped below Servers' arrow. Returns the server picked.
@@ -407,7 +408,7 @@ pub fn sidebarServerMenu(self: *Window, arrow: tab_sidebar.Target) ?servers.Name
     const configured = servers.Configured.read(self.app.core_app.alloc);
     var configured_names: [servers.Configured.capacity][]const u8 = undefined;
     var recent_names: [servers.Recent.capacity][]const u8 = undefined;
-    const picked = new_tab_menu.showServers(hwnd, corner, configured.names(&configured_names), self.app.recent_servers.names(&recent_names), self.menusDark()) orelse return null;
+    const picked = new_tab_menu.showServers(hwnd, corner, configured.names(&configured_names), self.app.recent_servers.names(&recent_names), strip_mouse.menusDark(self)) orelse return null;
     // The menu's names live in lists that end with this call.
     return .init(picked);
 }

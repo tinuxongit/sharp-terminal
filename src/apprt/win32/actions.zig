@@ -21,6 +21,7 @@ const splits = @import("splits.zig");
 const log = std.log.scoped(.win32);
 const App = @import("App.zig");
 const global_hotkey = @import("global_hotkey.zig");
+const pane_mouse = @import("pane_mouse.zig");
 
 pub fn performAction(
     self: *App,
@@ -240,7 +241,7 @@ pub fn performAction(
             switch (target) {
                 .app => {},
                 .surface => |core_surface| {
-                    core_surface.rt_surface.setMouseShape(value);
+                    pane_mouse.setMouseShape(core_surface.rt_surface, value);
                 },
             }
             return true;
@@ -272,7 +273,7 @@ pub fn performAction(
             switch (target) {
                 .app => {},
                 .surface => |core_surface| {
-                    core_surface.rt_surface.setMouseOverLink(value.url);
+                    pane_mouse.setMouseOverLink(core_surface.rt_surface, value.url);
                 },
             }
             return true;

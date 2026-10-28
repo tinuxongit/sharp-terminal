@@ -12,6 +12,9 @@ const log = std.log.scoped(.win32);
 const Surface = @import("Surface.zig");
 const command_palette = @import("command_palette.zig");
 
+/// Child window ID for the search edit control.
+pub const SEARCH_EDIT_ID: u16 = 100;
+
 /// Store the total match count from the search_total action and refresh
 /// the "selected/total" label in the search bar.
 pub fn setSearchTotal(self: *Surface, total: ?usize) void {
@@ -144,7 +147,7 @@ pub fn ensureSearchBar(self: *Surface) void {
         bar_w - pad * 2 - 2 - count_w,
         bar_h - pad * 2 - 2,
         popup,
-        @ptrFromInt(@as(usize, Surface.SEARCH_EDIT_ID)),
+        @ptrFromInt(@as(usize, SEARCH_EDIT_ID)),
         self.app.hinstance,
         null,
     ) orelse {

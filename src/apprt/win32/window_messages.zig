@@ -11,6 +11,7 @@ const tab_rename = @import("tab_rename.zig");
 const splits = @import("splits.zig");
 const log = std.log.scoped(.win32);
 const Window = @import("Window.zig");
+const strip_mouse = @import("strip_mouse.zig");
 
 /// Window procedure for top-level container HWNDs (GhosttyWindow class).
 /// GWLP_USERDATA stores a *Window pointer.
@@ -347,7 +348,7 @@ pub fn windowWndProc(
                 return 0;
             }
             if (y < window.tabBarHeight()) {
-                window.handleTabBarClick(@truncate(x), @truncate(y));
+                strip_mouse.handleTabBarClick(window, @truncate(x), @truncate(y));
             }
             return 0;
         },
@@ -401,12 +402,12 @@ pub fn windowWndProc(
             const x: i16 = @truncate(lparam & 0xFFFF);
             const y: i16 = @truncate((lparam >> 16) & 0xFFFF);
             if (y < window.tabBarHeight()) {
-                window.handleTabBarRightClick(x, y);
+                strip_mouse.handleTabBarRightClick(window, x, y);
                 return 0;
             }
             switch (workspace.sidebarTarget(window, x, y)) {
                 .tab, .close => |i| {
-                    window.showTabMenu(i, x, y);
+                    strip_mouse.showTabMenu(window, i, x, y);
                     return 0;
                 },
                 .none, .search, .resize, .group, .group_new, .group_menu, .section, .section_new, .section_menu, .server_field => {},
@@ -418,7 +419,7 @@ pub fn windowWndProc(
             const x: i16 = @truncate(lparam & 0xFFFF);
             const y: i16 = @truncate((lparam >> 16) & 0xFFFF);
             switch (window.stripLayout().hitTest(x, y)) {
-                .tab, .tab_close => |i| window.closeTabFromStrip(i),
+                .tab, .tab_close => |i| strip_mouse.closeTabFromStrip(window, i),
                 else => {},
             }
             switch (workspace.sidebarTarget(window, x, y)) {
@@ -454,7 +455,7 @@ pub fn windowWndProc(
                     // Tabs move within their folder; the folder decides the group.
                     switch (workspace.sidebarTarget(window, x, y)) {
                         .tab => |to| if (to != from and tab_sidebar.sameGroup(workspace.groupKey(window, from), workspace.groupKey(window, to))) {
-                            window.moveTabTo(from, to);
+                            strip_mouse.moveTabTo(window, from, to);
                             window.sidebar_drag = to;
                             _ = w32.UpdateWindow(hwnd);
                         },
@@ -474,7 +475,7 @@ pub fn windowWndProc(
                     const from: usize = @intCast(window.drag_tab);
                     const target = window.stripLayout().dropIndex(x);
                     if (target != from) {
-                        window.moveTabTo(from, target);
+                        strip_mouse.moveTabTo(window, from, target);
                         window.drag_tab = @intCast(target);
                         if (window.hwnd) |h| _ = w32.UpdateWindow(h);
                     }
@@ -482,10 +483,10 @@ pub fn windowWndProc(
                 return 0;
             }
             if (y < window.tabBarHeight()) {
-                window.handleTabBarMouseMove(@truncate(x), @truncate(y));
+                strip_mouse.handleTabBarMouseMove(window, @truncate(x), @truncate(y));
             } else {
-                window.releaseFrozenTabWidth();
-                if (workspace.inSidebar(window, x, y)) window.trackMouseLeave();
+                strip_mouse.releaseFrozenTabWidth(window);
+                if (workspace.inSidebar(window, x, y)) strip_mouse.trackMouseLeave(window);
             }
             workspace.setSidebarHover(window, workspace.sidebarTarget(window, x, y));
             return 0;
@@ -509,7 +510,7 @@ pub fn windowWndProc(
             return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
         },
         w32.WM_MOUSELEAVE => {
-            window.handleTabBarMouseLeave();
+            strip_mouse.handleTabBarMouseLeave(window);
             return 0;
         },
         w32.WM_ACTIVATE => {

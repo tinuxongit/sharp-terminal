@@ -9,6 +9,7 @@ const command_palette = @import("command_palette.zig");
 const ime = @import("ime.zig");
 const win32_input = @import("win32_input.zig");
 const App = @import("App.zig");
+const pane_mouse = @import("pane_mouse.zig");
 
 /// Window procedure for terminal surface child HWNDs (GhosttyTerminal class).
 /// GWLP_USERDATA stores a *Surface pointer.
@@ -243,29 +244,29 @@ pub fn surfaceWndProc(
             // an active sibling popup edit (tab rename, search, palette)
             // keeps focus and the click never commits/dismisses it.
             _ = w32.SetFocus(hwnd);
-            surface.handleMouseButton(.left, .press, lparam);
+            pane_mouse.handleMouseButton(surface, .left, .press, lparam);
             return 0;
         },
         w32.WM_LBUTTONUP => {
-            surface.handleMouseButton(.left, .release, lparam);
+            pane_mouse.handleMouseButton(surface, .left, .release, lparam);
             return 0;
         },
         w32.WM_RBUTTONDOWN => {
             _ = w32.SetFocus(hwnd);
-            surface.handleMouseButton(.right, .press, lparam);
+            pane_mouse.handleMouseButton(surface, .right, .press, lparam);
             return 0;
         },
         w32.WM_RBUTTONUP => {
-            surface.handleMouseButton(.right, .release, lparam);
+            pane_mouse.handleMouseButton(surface, .right, .release, lparam);
             return 0;
         },
         w32.WM_MBUTTONDOWN => {
             _ = w32.SetFocus(hwnd);
-            surface.handleMouseButton(.middle, .press, lparam);
+            pane_mouse.handleMouseButton(surface, .middle, .press, lparam);
             return 0;
         },
         w32.WM_MBUTTONUP => {
-            surface.handleMouseButton(.middle, .release, lparam);
+            pane_mouse.handleMouseButton(surface, .middle, .release, lparam);
             return 0;
         },
         w32.WM_XBUTTONDOWN => {
@@ -274,33 +275,33 @@ pub fn surfaceWndProc(
             _ = w32.SetFocus(hwnd);
             const btn: input.MouseButton =
                 if ((wparam >> 16) & 0xFFFF == w32.XBUTTON2) .five else .four;
-            surface.handleMouseButton(btn, .press, lparam);
+            pane_mouse.handleMouseButton(surface, btn, .press, lparam);
             return 1; // TRUE: handled; suppresses the default WM_APPCOMMAND.
         },
         w32.WM_XBUTTONUP => {
             const btn: input.MouseButton =
                 if ((wparam >> 16) & 0xFFFF == w32.XBUTTON2) .five else .four;
-            surface.handleMouseButton(btn, .release, lparam);
+            pane_mouse.handleMouseButton(surface, btn, .release, lparam);
             return 1;
         },
 
         w32.WM_MOUSEMOVE => {
-            surface.handleMouseMove(lparam);
+            pane_mouse.handleMouseMove(surface, lparam);
             return 0;
         },
 
         w32.WM_MOUSEWHEEL => {
-            surface.handleMouseWheel(wparam, .vertical);
+            pane_mouse.handleMouseWheel(surface, wparam, .vertical);
             return 0;
         },
 
         w32.WM_MOUSEHWHEEL => {
-            surface.handleMouseWheel(wparam, .horizontal);
+            pane_mouse.handleMouseWheel(surface, wparam, .horizontal);
             return 0;
         },
 
         w32.WM_DROPFILES => {
-            surface.handleDropFiles(wparam);
+            pane_mouse.handleDropFiles(surface, wparam);
             return 0;
         },
 
@@ -308,7 +309,7 @@ pub fn surfaceWndProc(
             // Only override the cursor in the client area. For non-client
             // areas (resize borders, title bar), let DefWindowProc handle it.
             const hit_test: u16 = @intCast(lparam & 0xFFFF);
-            if (hit_test == w32.HTCLIENT and surface.handleSetCursor()) {
+            if (hit_test == w32.HTCLIENT and pane_mouse.handleSetCursor(surface)) {
                 return 1; // TRUE = we set the cursor
             }
             return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
@@ -317,7 +318,7 @@ pub fn surfaceWndProc(
         w32.WM_COMMAND => {
             const notification: u16 = @intCast((wparam >> 16) & 0xFFFF);
             const control_id: u16 = @intCast(wparam & 0xFFFF);
-            if (control_id == Surface.SEARCH_EDIT_ID and notification == w32.EN_CHANGE) {
+            if (control_id == find_bar.SEARCH_EDIT_ID and notification == w32.EN_CHANGE) {
                 find_bar.handleSearchChange(surface);
                 return 0;
             }
@@ -335,7 +336,7 @@ pub fn surfaceWndProc(
                     command_palette.setCommandPaletteActive(surface, false);
                     return 0;
                 }
-                if (control_id == Surface.SEARCH_EDIT_ID and surface.search_active) {
+                if (control_id == find_bar.SEARCH_EDIT_ID and surface.search_active) {
                     find_bar.setSearchActive(surface, false, &[_:0]u8{});
                     return 0;
                 }
