@@ -754,7 +754,7 @@ pub fn setClipboard(self: *Surface, clipboard_type: apprt.Clipboard, contents: [
 
 pub fn defaultTermioEnv(self: *const Surface) !std.process.Environ.Map {
     _ = self;
-    const env = try global.environMap();
+    const env = try @import("user_environment.zig").current();
 
     // TERM and COLORTERM are set by termio/Exec.zig with platform-aware
     // logic (checking for terminfo, resources_dir, etc.). Do not set them here.

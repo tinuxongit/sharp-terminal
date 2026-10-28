@@ -142,6 +142,8 @@ commands and conventions; this file covers what is specific to Sharp.
   `terminal_handoff.zig` is the COM class Windows Terminal's console hands
   each console to; `src/os/console_handoff.zig` keeps it until its tab's
   IO thread takes it (`Pty.adopt` in `src/pty.zig`).
+- `src/apprt/win32/user_environment.zig`: the variables a new tab starts
+  with.
 - `src/apprt/win32/updater.zig`: finds, downloads and verifies a newer
   release on a background thread, and runs its installer. `updates.zon`
   holds the repository, timings, asset names and text;
@@ -417,6 +419,12 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   beside a portable copy is ignored; checked 2026-10-28 by planting junk
   copies of each non-KnownDLL import. Windows ignores the field unless the
   structure has its full Windows 10 size (0x140).
+- **New tabs see the environment Windows has now.** Each tab starts from
+  Sharp's own variables overlaid with the user's as Windows builds them
+  for a new sign-in (`CreateEnvironmentBlock`), as Windows Terminal's
+  `reloadEnvironmentVariables` does, so a PATH an installer changed
+  reaches the next tab without restarting Sharp. Variables only Sharp's
+  launcher set still pass through; a PATH it changed doesn't.
 - **Sharp can be Windows' default terminal.** Settings > General >
   Default terminal (`default-terminal`, off by default): console programs
   started from Explorer, the Run box or the Start menu open in a Sharp
