@@ -1532,11 +1532,6 @@ pub const StreamHandler = struct {
             return;
         }
 
-        if (builtin.target.os.tag == .windows) {
-            log.warn("reportPwd unimplemented on windows", .{});
-            return;
-        }
-
         // Attempt to parse this file-style URI using options appropriate
         // for this OSC 7 context (e.g. kitty-shell-cwd expects the full,
         // unencoded path).
@@ -1589,7 +1584,18 @@ pub const StreamHandler = struct {
         var stack_alloc_buf: [1024]u8 = undefined;
         var stack_alloc: std.heap.BufferFirstAllocator = .init(&stack_alloc_buf, arena_alloc.allocator());
         defer arena_alloc.deinit();
-        const path = try uri.path.toRawMaybeAlloc(stack_alloc.allocator());
+        const raw_path = try uri.path.toRawMaybeAlloc(stack_alloc.allocator());
+
+        // On Windows a file URI path is "/C:/dir". Only drive paths work as
+        // a working directory here: a Linux path from a WSL shell would
+        // break the folder new tabs start in.
+        const path = if (comptime builtin.target.os.tag == .windows)
+            windowsPwd(raw_path) orelse {
+                log.debug("ignoring OSC 7 path without a drive letter: {s}", .{raw_path});
+                return;
+            }
+        else
+            raw_path;
 
         log.debug("terminal pwd: {s}", .{path});
         try self.terminal.setPwd(path);
@@ -1607,6 +1613,12 @@ pub const StreamHandler = struct {
             try self.windowTitle(path);
             self.seen_title = false;
         }
+    }
+
+    fn windowsPwd(path: []const u8) ?[]const u8 {
+        const drive = if (path.len >= 1 and path[0] == '/') path[1..] else path;
+        if (drive.len < 2 or !std.ascii.isAlphabetic(drive[0]) or drive[1] != ':') return null;
+        return drive;
     }
 
     fn colorOperation(

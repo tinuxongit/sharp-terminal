@@ -22,7 +22,9 @@ pub fn isLocal(hostname: []const u8) LocalHostnameValidationError!bool {
             var nSize: windows.DWORD = buf.len;
             if (windows.exp.kernel32.GetComputerNameA(&buf, &nSize) == windows.FALSE) return false;
             const ourHostname = buf[0..nSize];
-            return std.mem.eql(u8, hostname, ourHostname);
+            // Windows host names ignore case: GetComputerName reports the
+            // upper-case NetBIOS name, shells usually the mixed-case DNS one.
+            return std.ascii.eqlIgnoreCase(hostname, ourHostname);
         },
         else => {
             var buf: [posix.HOST_NAME_MAX]u8 = undefined;
