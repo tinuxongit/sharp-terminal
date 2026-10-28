@@ -50,13 +50,7 @@
         .{ .name = "{distro}", .source = .wsl, .command = "wsl.exe -d {distro}", .icon = "wsl.exe" },
     },
     .menu = .{
-        .settings = "Settings",
-        .settings_shortcut = "Ctrl+,",
-        .command_palette = "Command palette",
-        .command_palette_shortcut = "Ctrl+Shift+P",
-        // Shown before the profile's number: the 3rd profile is Ctrl+Shift+3.
+        // Shown after a profile's name: the 3rd profile is Ctrl+Shift+3.
         .profile_shortcut = "Ctrl+Shift+",
-        .about = "About",
-        .about_text = "Sharp\nA Windows terminal built on Ghostty.\n\nMIT License. Ghostty by Mitchell Hashimoto; Windows port by Shiwei Song.",
     },
 }

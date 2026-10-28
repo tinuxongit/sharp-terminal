@@ -18,13 +18,7 @@ pub const Template = struct {
 };
 
 pub const Menu = struct {
-    settings: []const u8,
-    settings_shortcut: []const u8,
-    command_palette: []const u8,
-    command_palette_shortcut: []const u8,
     profile_shortcut: []const u8,
-    about: []const u8,
-    about_text: []const u8,
 };
 
 pub const Data = struct {

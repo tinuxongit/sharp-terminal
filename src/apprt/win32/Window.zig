@@ -20,7 +20,6 @@ const SettingsPanel = @import("SettingsPanel.zig");
 const profiles = @import("profiles.zig");
 const new_tab_menu = @import("new_tab_menu.zig");
 const configpkg = @import("../../config.zig");
-const build_config = @import("../../build_config.zig");
 
 const log = std.log.scoped(.win32);
 
@@ -1856,24 +1855,8 @@ fn showNewTabMenu(self: *Window) void {
     self.strip_pressed = .none;
     self.invalidateTabBar();
 
-    switch (pick orelse return) {
-        .profile => |i| self.openProfile(i, w32.GetKeyState(@as(i32, w32.VK_SHIFT)) < 0),
-        .settings => self.openSettings(),
-        .command_palette => if (self.getActiveSurface()) |surface| {
-            if (surface.core_surface_ready) _ = surface.core_surface.performBindingAction(.toggle_command_palette) catch |err| {
-                log.err("failed to open the command palette: {}", .{err});
-            };
-        },
-        .about => self.showAbout(),
-    }
-}
-
-fn showAbout(self: *Window) void {
-    var text: [512]u8 = undefined;
-    const message = std.fmt.bufPrint(&text, "{s}\n\nVersion {s}", .{ profiles.data.menu.about_text, build_config.version_string }) catch profiles.data.menu.about_text;
-    var wide: [512]u16 = undefined;
-    _ = wide_string.fromUtf8(&wide, message);
-    _ = w32.MessageBoxW(self.hwnd, @ptrCast(&wide), std.unicode.utf8ToUtf16LeStringLiteral(brand.name), w32.MB_ICONINFORMATION);
+    const index = pick orelse return;
+    self.openProfile(index, w32.GetKeyState(@as(i32, w32.VK_SHIFT)) < 0);
 }
 
 /// The terminal area below the strip, in screen pixels, which the
