@@ -964,19 +964,23 @@ fn setupPowershell(
         try cmd.appendArg(exe);
     } else return null;
 
-    // Add -NoExit so PowerShell stays interactive after sourcing.
-    try cmd.appendArg("-NoExit");
-
-    // Dot-source our integration script.
-    const source_cmd = try alloc.print(". '{s}'", .{script_path});
-    defer alloc.free(source_cmd);
-    try cmd.appendArg("-Command");
-    try cmd.appendArg(source_cmd);
-
-    // Pass through remaining arguments.
+    // Pass through the user's arguments first: PowerShell treats everything
+    // after -Command as part of the command text.
     while (iter.next()) |arg| {
         try cmd.appendArg(arg);
     }
+
+    // Add -NoExit so PowerShell stays interactive after sourcing.
+    try cmd.appendArg("-NoExit");
+
+    // Dot-source our integration script. Inside a single-quoted PowerShell
+    // string a quote is written twice, so paths like C:\Users\O'Brien work.
+    const quoted_path = try std.mem.replaceOwned(u8, alloc, script_path, "'", "''");
+    defer alloc.free(quoted_path);
+    const source_cmd = try alloc.print(". '{s}'", .{quoted_path});
+    defer alloc.free(source_cmd);
+    try cmd.appendArg("-Command");
+    try cmd.appendArg(source_cmd);
 
     const command_text = try cmd.toOwnedSlice();
     defer stack_fallback.allocator().free(command_text);

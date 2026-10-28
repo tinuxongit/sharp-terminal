@@ -16,6 +16,7 @@ const global = @import("../../global.zig");
 const App = @import("App.zig");
 const Window = @import("Window.zig");
 const w32 = @import("win32.zig");
+const wide_string = @import("wide_string.zig");
 const Scrollbar = @import("Scrollbar.zig").Scrollbar;
 
 const log = std.log.scoped(.win32);
@@ -1190,9 +1191,8 @@ pub fn setSearchActive(self: *Surface, active: bool, needle: [:0]const u8) void 
             if (needle.len > 0) {
                 if (self.search_edit) |edit| {
                     var wbuf: [512]u16 = undefined;
-                    const wlen = std.unicode.utf8ToUtf16Le(&wbuf, needle) catch 0;
-                    if (wlen < wbuf.len) {
-                        wbuf[wlen] = 0;
+                    const wlen = wide_string.fromUtf8(&wbuf, needle);
+                    if (wlen > 0) {
                         _ = w32.SetWindowTextW(edit, @ptrCast(&wbuf));
                     }
                 }
@@ -1365,11 +1365,13 @@ pub fn handleSearchChange(self: *Surface) void {
     var wbuf: [512]u16 = undefined;
     const wlen: usize = @intCast(w32.GetWindowTextW(search, &wbuf, @intCast(wbuf.len)));
 
-    var utf8_buf: [1024]u8 = undefined;
+    // A UTF-16 unit expands to at most 3 UTF-8 bytes, and the conversion
+    // does not bounds-check, so size for the worst case.
+    var utf8_buf: [wbuf.len * 3]u8 = undefined;
     const utf8_len = std.unicode.utf16LeToUtf8(&utf8_buf, wbuf[0..wlen]) catch 0;
 
     // Need a null-terminated slice for performBindingAction
-    var needle_buf: [1025]u8 = undefined;
+    var needle_buf: [utf8_buf.len + 1]u8 = undefined;
     @memcpy(needle_buf[0..utf8_len], utf8_buf[0..utf8_len]);
     needle_buf[utf8_len] = 0;
     const needle: [:0]const u8 = needle_buf[0..utf8_len :0];

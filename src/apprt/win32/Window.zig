@@ -12,6 +12,7 @@ const Surface = @import("Surface.zig");
 const TabOverview = @import("TabOverview.zig");
 const SplitTree = @import("../../datastruct/split_tree.zig").SplitTree;
 const w32 = @import("win32.zig");
+const wide_string = @import("wide_string.zig");
 
 const log = std.log.scoped(.win32);
 
@@ -1249,8 +1250,7 @@ pub fn setWindowTitle(self: *Window, title: [:0]const u8) void {
     if (title.len == 0) {
         self.window_title_override_len = null;
     } else {
-        const len = std.unicode.utf8ToUtf16Le(&self.window_title_override, title) catch 0;
-        self.window_title_override_len = @intCast(@min(len, self.window_title_override.len));
+        self.window_title_override_len = @intCast(wide_string.fromUtf8(&self.window_title_override, title));
     }
     self.updateWindowTitle();
 }
@@ -1260,8 +1260,7 @@ pub fn setWindowTitle(self: *Window, title: [:0]const u8) void {
 pub fn onTabTitleChanged(self: *Window, surface: *Surface, title: [:0]const u8) void {
     const tab_idx = self.findTabIndex(surface) orelse return;
     var wbuf: [256]u16 = undefined;
-    const wlen = std.unicode.utf8ToUtf16Le(&wbuf, title) catch 0;
-    const len: u16 = @intCast(@min(wlen, 255));
+    const len: u16 = @intCast(wide_string.fromUtf8(&wbuf, title));
     @memcpy(self.tab_titles[tab_idx][0..len], wbuf[0..len]);
     self.tab_title_lens[tab_idx] = len;
     if (tab_idx == self.active_tab) self.updateWindowTitle();

@@ -19,6 +19,7 @@ const TabOverview = @import("TabOverview.zig");
 const SplitTree = @import("../../datastruct/split_tree.zig").SplitTree;
 const w32 = @import("win32.zig");
 const UntrustedUrl = @import("UntrustedUrl.zig");
+const wide_string = @import("wide_string.zig");
 
 const OpenUrlRequest = struct {
     kind: apprt.action.OpenUrl.Kind,
@@ -1812,12 +1813,16 @@ const UPDATE_CHECK_INTERVAL_SECS: i64 = 60 * 60; // 1 hour
 /// Manual `.check_for_updates` actions force-refresh by setting
 /// `force=true`.
 fn startUpdateCheck(self: *App, force: bool) void {
+    // Sharp publishes no releases yet and UPDATE_URL belongs to the fork we
+    // started from, so background checks only run when the user opts in.
     if (!force) {
-        if (self.config.@"auto-update") |mode| {
-            if (mode == .off) {
-                log.debug("skipping update check (auto-update=off)", .{});
-                return;
-            }
+        const mode = self.config.@"auto-update" orelse {
+            log.debug("skipping update check (auto-update unset)", .{});
+            return;
+        };
+        if (mode == .off) {
+            log.debug("skipping update check (auto-update=off)", .{});
+            return;
         }
     }
     if (!self.shouldRunUpdateCheck(force)) {
@@ -2094,16 +2099,10 @@ fn showDesktopNotificationText(self: *App, title: []const u8, body: []const u8) 
     nid.uVersion_or_uTimeout = 5000; // 5 second timeout
 
     // Copy title (UTF-8 → UTF-16LE)
-    const title_z = title;
-    var title_len = std.unicode.utf8ToUtf16Le(&nid.szInfoTitle, title_z) catch 0;
-    if (title_len >= nid.szInfoTitle.len) title_len = nid.szInfoTitle.len - 1;
-    nid.szInfoTitle[title_len] = 0;
+    _ = wide_string.fromUtf8(&nid.szInfoTitle, title);
 
     // Copy body (UTF-8 → UTF-16LE)
-    const body_z = body;
-    var body_len = std.unicode.utf8ToUtf16Le(&nid.szInfo, body_z) catch 0;
-    if (body_len >= nid.szInfo.len) body_len = nid.szInfo.len - 1;
-    nid.szInfo[body_len] = 0;
+    _ = wide_string.fromUtf8(&nid.szInfo, body);
 
     // Tooltip
     const tip = std.unicode.utf8ToUtf16LeStringLiteral("Ghostty");
@@ -2531,6 +2530,9 @@ fn openUrlNow(value: apprt.action.OpenUrl) void {
     }
     const url = value.url;
     var wbuf: [2048]u16 = undefined;
+    // A truncated URL would open a different target, so refuse instead. A
+    // UTF-8 string never needs more UTF-16 units than it has bytes.
+    if (url.len >= wbuf.len) return;
     const wlen = std.unicode.utf8ToUtf16Le(&wbuf, url) catch return;
     if (wlen >= wbuf.len) return;
     wbuf[wlen] = 0;

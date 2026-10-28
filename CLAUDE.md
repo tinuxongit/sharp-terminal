@@ -21,6 +21,10 @@ commands and conventions; this file covers what is specific to Sharp.
   must go through it.
 - `src/os/Conpty.zig` and `pkg/conpty/`: the bundled Microsoft ConPTY. The
   package is pinned by version and SHA-256 in `pkg/conpty/fetch.zig`.
+- `src/apprt/win32/wide_string.zig`: the one place that converts text into
+  fixed-size UTF-16 buffers. `std.unicode.utf8ToUtf16Le` does not
+  bounds-check, so never call it on a fixed buffer with text whose length
+  you have not checked first.
 - `src/font/directwrite.zig`: finds system fonts on Windows.
 - `dist/windows/`: icon, resource file and packaging scripts.
 - Everything else in `src/` is the shared Ghostty core. Keep changes there
@@ -28,18 +32,26 @@ commands and conventions; this file covers what is specific to Sharp.
 
 ## Build
 
-Zig 0.17.0 lives in `C:\dev\tools\zig-x86_64-windows-0.17.0\`.
+Zig 0.17.0 lives in `C:\dev\tools\zig-x86_64-windows-0.17.0\`. The GNU
+target is required: the default MSVC target fails in translate-c. The
+output goes to `zig-out\bin\ghostty.exe`, next to the Microsoft-signed
+`conpty.dll` and `OpenConsole.exe`.
 
 ```
-zig build -Dapp-runtime=win32 -Doptimize=ReleaseFast
+zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
 ```
 
 ## Key decisions
 
-- **Built on the existing Windows fork, not from scratch.** We reviewed it on
-  2026-10-28: the ConPTY download is pinned and hash-checked, the DLL loads
-  only from the app folder, links from terminal output are filtered, and
-  clipboard reads by programs ask first. Its code follows upstream style.
+- **Built on the existing Windows fork, not from scratch.** A deep review on
+  2026-10-28 found the design sound: the ConPTY download is pinned and
+  hash-checked, the DLL loads only from the app folder, links from terminal
+  output are filtered, and clipboard reads by programs ask first. Much of the
+  fork is AI-written, and its careful comments hide real bugs. It wrote tab
+  titles, notifications and search text into fixed buffers without bounds
+  checks, so any program could overflow the stack with a long title. Those
+  are fixed. Review fork code before trusting it, and especially code
+  that handles terminal output.
 - **Win32 + OpenGL (WGL), not WinUI or DirectX.** It reuses Ghostty's OpenGL
   renderer, so there is no second renderer to maintain.
 
@@ -53,9 +65,20 @@ the scrollback.
 
 ## Tech debt
 
-- The update checker in `src/apprt/win32/App.zig` contacts the original fork's
-  GitHub releases every hour by default. Sharp should turn it off or point it
-  at its own releases.
+- The update checker in `src/apprt/win32/App.zig` still points at the
+  original fork's releases. It now runs only when `auto-update` is set.
+  Point it at Sharp's releases once they exist, or delete it.
+- The fork made renderer messages in the shared `src/Surface.zig` give up
+  after 1 second, to survive a renderer that hangs in `SwapBuffers` after
+  sleep. That hides the hang instead of fixing it, and a dropped config change
+  leaves the renderer and terminal with different settings.
+- Closing a tab kills only the shell (`TerminateProcess`). There is no Job
+  Object, so programs started from it in the background can keep running.
+- The PowerShell integration script reports the working directory in OSC 7
+  without percent-encoding, so folders containing `%` or `#` are misread.
+- The fork deleted upstream's `test.yml` CI, so upstream's core tests no
+  longer run on its changes to shared files.
+- Leftover debug log lines in `Surface.init` (`"renderer created"` and so on).
 - The window still says "Ghostty" everywhere: title, exe name, icon, config
   folder, taskbar ID. The rename to Sharp is not done yet.
 - `App.zig`, `Surface.zig` and `Window.zig` in the Win32 runtime are each
