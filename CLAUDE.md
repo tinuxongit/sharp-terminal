@@ -253,7 +253,8 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   and its command line parsed for the destination, user included. An ssh
   typed inside a WSL shell runs in Linux, out of Windows' sight.
 - **Servers open from the sidebar.** Local, WSL (when installed) and
-  Servers always show. Servers' "+" opens a box for `user@host`, and its
+  Servers always show; one without tabs is shorter and dimmed until
+  hovered, so the ones in use stand out. Servers' "+" opens a box for `user@host`, and its
   arrow lists the hosts in `~/.ssh/config` and the servers used recently,
   including ones reached by typing ssh. The tab runs `ssh.exe` directly,
   as Windows Terminal's SSH profiles do, so it ends with the connection.

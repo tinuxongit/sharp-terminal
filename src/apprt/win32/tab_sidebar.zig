@@ -21,6 +21,8 @@ pub const max_width = 600.0;
 const pad = 10.0;
 const search_height = 34.0;
 const section_height = 30.0;
+/// A section with no tabs is shorter and dimmer, so the ones in use stand out.
+const empty_section_height = 24.0;
 const group_height = 30.0;
 const item_height = 32.0;
 const item_indent = 22.0;
@@ -291,18 +293,22 @@ fn paintSection(p: *Painter, section: Section, y: i32) i32 {
         .wsl => profiles.data.sidebar.wsl,
         .servers => profiles.data.sidebar.servers,
     };
-    const h = p.px(section_height);
+    const empty = !sectionHasItems(p.state, section);
+    const h = p.px(if (empty) empty_section_height else section_height);
     const left = p.px(pad + 6);
     const row: w32.RECT = .{ .left = p.px(pad), .top = y, .right = p.c.width - p.px(pad), .bottom = y + h };
-    p.c.text(.{ .left = left, .top = y, .right = row.right, .bottom = y + h }, title, p.fonts.small, p.palette.text_dim, .left);
-
     const buttons: NewTabButtons = .{ .plus = .{ .section_new = section }, .menu = .{ .section_menu = section } };
     const hovered = p.state.hover.eql(.{ .section = section }) or buttons.lit(p.state);
+    // Hovering brings an empty section back up, with its buttons.
+    const faded = empty and !hovered;
+    const title_color = if (faded) p.palette.text_dim.mix(p.palette.strip, 0.5) else p.palette.text_dim;
+    p.c.text(.{ .left = left, .top = y, .right = row.right, .bottom = y + h }, title, p.fonts.small, title_color, .left);
 
     const rule_left = left + p.c.textWidth(title, p.fonts.small) + p.px(10);
     const rule_right = (if (hovered) newTabButtonsLeft(p, row) else row.right) - p.px(6);
     const mid = y + @divTrunc(h, 2);
-    if (rule_right > rule_left) p.c.fill(.{ .left = rule_left, .top = mid, .right = rule_right, .bottom = mid + 1 }, p.palette.separator);
+    const rule_color = if (faded) p.palette.separator.mix(p.palette.strip, 0.5) else p.palette.separator;
+    if (rule_right > rule_left) p.c.fill(.{ .left = rule_left, .top = mid, .right = rule_right, .bottom = mid + 1 }, rule_color);
 
     p.spots.add(clip(row, p), .{ .section = section });
     if (hovered) paintNewTabButtons(p, row, buttons, p.palette.strip);
