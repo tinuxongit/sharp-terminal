@@ -1,0 +1,62 @@
+// Shells offered by the new-tab dropdown (the arrow beside "+") and by
+// Settings > General > Shell. Like Windows Terminal's profiles: the Nth
+// shown profile also opens with Ctrl+Shift+N. Checked when Sharp is
+// compiled.
+//
+// A profile's .command is what the tab runs, written like Ghostty's
+// `command` setting. .icon names the program whose icon the tab and menu
+// show: a name on PATH or an absolute path. A profile is hidden when
+// .requires (same form) is missing.
+//
+// .source repeats a profile for what is installed:
+//   .visual_studio  once for the first Visual Studio found in
+//                   .visual_studio; {vs} becomes its folder
+//   .wsl            once per WSL distribution; {distro} becomes its name
+//
+// .default marks the shell new tabs run when `command` is not set.
+.{
+    .visual_studio = .{
+        "C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise",
+        "C:\\Program Files\\Microsoft Visual Studio\\2022\\Professional",
+        "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community",
+        "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools",
+    },
+    // Distributions WSL uses internally, hidden as in Windows Terminal.
+    .hidden_wsl_prefixes = .{"docker-desktop"},
+    .profiles = .{
+        .{ .name = "Windows PowerShell", .command = "powershell.exe", .icon = "powershell.exe", .requires = "powershell.exe" },
+        .{ .name = "Command Prompt", .command = "cmd.exe", .icon = "cmd.exe", .default = true },
+        .{ .name = "PowerShell 7", .command = "pwsh.exe", .icon = "pwsh.exe", .requires = "pwsh.exe" },
+        .{
+            .name = "Git Bash",
+            .command = "\"C:\\Program Files\\Git\\bin\\bash.exe\" -i -l",
+            .icon = "C:\\Program Files\\Git\\git-bash.exe",
+            .requires = "C:\\Program Files\\Git\\bin\\bash.exe",
+        },
+        .{
+            .name = "Developer Command Prompt for VS 2022",
+            .source = .visual_studio,
+            .command = "cmd.exe /k \"{vs}\\Common7\\Tools\\VsDevCmd.bat\"",
+            .icon = "cmd.exe",
+            .requires = "{vs}\\Common7\\Tools\\VsDevCmd.bat",
+        },
+        .{
+            .name = "Developer PowerShell for VS 2022",
+            .source = .visual_studio,
+            .command = "powershell.exe -NoExit -Command \"&{Import-Module '{vs}\\Common7\\Tools\\Microsoft.VisualStudio.DevShell.dll'; Enter-VsDevShell -VsInstallPath '{vs}' -SkipAutomaticLocation}\"",
+            .icon = "powershell.exe",
+            .requires = "{vs}\\Common7\\Tools\\Microsoft.VisualStudio.DevShell.dll",
+        },
+        .{ .name = "{distro}", .source = .wsl, .command = "wsl.exe -d {distro}", .icon = "wsl.exe" },
+    },
+    .menu = .{
+        .settings = "Settings",
+        .settings_shortcut = "Ctrl+,",
+        .command_palette = "Command palette",
+        .command_palette_shortcut = "Ctrl+Shift+P",
+        // Shown before the profile's number: the 3rd profile is Ctrl+Shift+3.
+        .profile_shortcut = "Ctrl+Shift+",
+        .about = "About",
+        .about_text = "Sharp\nA Windows terminal built on Ghostty.\n\nMIT License. Ghostty by Mitchell Hashimoto; Windows port by Shiwei Song.",
+    },
+}

@@ -2348,6 +2348,21 @@ else
 /// people expect it there, as in Windows Terminal.
 @"window-show-tab-bar": WindowShowTabBar = if (builtin.target.os.tag == .windows) .always else .auto,
 
+/// How tabs look in the tab bar. Valid values:
+///
+///  - `chrome` *(default)*
+///
+///    Rounded tabs that shrink as more open, with titles that fade out;
+///    the active tab flows into the terminal below, as in Chrome.
+///
+///  - `windows-terminal`
+///
+///    Flat tabs with rounded tops, no separators and titles cut with an
+///    ellipsis, as in Windows Terminal.
+///
+/// Currently only supported on Windows.
+@"window-tab-style": WindowTabStyle = .chrome,
+
 /// Background color for the window titlebar. This only takes effect if
 /// window-theme is set to ghostty. Currently only supported in the GTK app
 /// runtime.
@@ -9528,6 +9543,12 @@ pub const WindowShowTabBar = enum {
     always,
     auto,
     never,
+};
+
+/// See window-tab-style
+pub const WindowTabStyle = enum {
+    chrome,
+    @"windows-terminal",
 };
 
 /// See drag-handle

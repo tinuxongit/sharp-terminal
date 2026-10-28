@@ -250,7 +250,7 @@ pub fn loadEmbeddedFonts() EmbeddedFonts {
 }
 
 pub fn unloadEmbeddedFonts(fonts: EmbeddedFonts) void {
-    for (fonts) |font| if (font) |h| {
-        _ = w32.RemoveFontMemResourceEx(h);
-    };
+    for (fonts) |font| {
+        if (font) |h| _ = w32.RemoveFontMemResourceEx(h);
+    }
 }

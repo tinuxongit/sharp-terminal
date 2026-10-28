@@ -12,6 +12,7 @@ const canvas_mod = @import("canvas.zig");
 const config_file = @import("config_file.zig");
 const settings = @import("settings.zig");
 const view = @import("settings_view.zig");
+const profiles_mod = @import("profiles.zig");
 
 const Rgb = canvas_mod.Rgb;
 const log = std.log.scoped(.win32);
@@ -19,7 +20,7 @@ const log = std.log.scoped(.win32);
 pub const class_name = std.unicode.utf8ToUtf16LeStringLiteral(brand.name ++ "Settings");
 
 /// How dark the terminal behind the panel gets, out of 255.
-const backdrop_alpha = 110;
+pub const backdrop_alpha = 110;
 /// Pixels scrolled per wheel notch at 96 DPI.
 const wheel_step = 48.0;
 
@@ -58,6 +59,9 @@ focused: bool = true,
 /// Whether typing goes to the search box. Typing anywhere also focuses it.
 search_focused: bool = false,
 caret_visible: bool = true,
+
+/// Installed shells, detected when the panel opens or the config reloads.
+profiles: profiles_mod.List = .{},
 
 const caret_timer: usize = 1;
 
@@ -129,6 +133,7 @@ fn refresh(self: *SettingsPanel) void {
         log.warn("settings panel could not read the config file: {}", .{err});
         break :blk &.{};
     };
+    self.profiles = profiles_mod.detect();
     const colors = self.host.colors(self.host.ctx);
     self.palette = .fromTerminal(colors[0], colors[1], accentColor());
 }
@@ -166,6 +171,7 @@ fn render(self: *SettingsPanel) void {
         .search_focused = self.search_focused,
         .caret_visible = self.caret_visible,
         .config_text = self.config_text,
+        .profiles = &self.profiles,
     }, &self.spots);
     canvas.sync();
     applyAlpha(canvas, view.panelRect(width, height, self.scale), view.panelCorner(self.scale));
@@ -269,7 +275,8 @@ fn useControl(self: *SettingsPanel, ref: settings.Ref, rect: w32.RECT) void {
             const hwnd = self.hwnd orelse return;
             var below: w32.POINT = .{ .x = rect.left, .y = rect.bottom + @as(i32, @intFromFloat(@round(4 * self.scale))) };
             _ = w32.ClientToScreen(hwnd, &below);
-            const value = settings.pickChoice(hwnd, below, setting, self.config_text, self.palette.dark) orelse return;
+            var value_buf: [1024]u8 = undefined;
+            const value = settings.pickChoice(hwnd, below, setting, self.config_text, self.palette.dark, &value_buf) orelse return;
             self.change(setting.key, value);
         },
         .toggle => {

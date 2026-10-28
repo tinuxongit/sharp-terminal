@@ -5,11 +5,11 @@ const w32 = @import("win32.zig");
 const wide_string = @import("wide_string.zig");
 const config_file = @import("config_file.zig");
 const menu_theme = @import("menu_theme.zig");
+const profiles = @import("profiles.zig");
 
 pub const Choice = struct {
     label: []const u8,
     value: []const u8,
-    requires_program: ?[]const u8 = null,
     requires_font: ?[]const u8 = null,
 };
 
@@ -20,6 +20,8 @@ pub const Setting = struct {
     description: []const u8,
     key: []const u8 = "",
     choices: []const Choice = &.{},
+    /// Offer the installed shell profiles instead of fixed choices.
+    profiles: bool = false,
     on: ?[]const u8 = null,
     off: ?[]const u8 = null,
     default_on: bool = false,
@@ -63,8 +65,9 @@ comptime {
         for (category.sections) |section| {
             for (section.settings) |s| {
                 const where = "settings.zon: '" ++ s.label ++ "' ";
-                const kinds = @as(u8, @intFromBool(s.action != null)) + @intFromBool(s.on != null or s.off != null) + @intFromBool(s.choices.len > 0);
-                if (kinds != 1) @compileError(where ++ "needs exactly one of choices, on/off or action");
+                const kinds = @as(u8, @intFromBool(s.action != null)) + @intFromBool(s.on != null or s.off != null) + @intFromBool(s.choices.len > 0 or s.profiles);
+                if (kinds != 1) @compileError(where ++ "needs exactly one of choices, profiles, on/off or action");
+                if (s.profiles and s.choices.len > 0) @compileError(where ++ "can't have both choices and profiles");
                 if ((s.on == null) != (s.off == null)) @compileError(where ++ "needs both on and off");
                 if (s.action == null and s.key.len == 0) @compileError(where ++ "needs a key");
                 if (s.action != null and s.button.len == 0) @compileError(where ++ "needs a button label");
@@ -94,8 +97,12 @@ pub fn toggleIsOn(setting: Setting, config_text: []const u8) bool {
 
 /// What a dropdown shows: the label of the current choice, or the raw
 /// value when the file holds something the panel doesn't offer.
-pub fn currentLabel(setting: Setting, config_text: []const u8) []const u8 {
+pub fn currentLabel(setting: Setting, config_text: []const u8, list: *const profiles.List) []const u8 {
     const v = config_file.currentValue(config_text, setting.key);
+    if (setting.profiles) {
+        const i = list.selected(v) orelse return v orelse "";
+        return list.name(i);
+    }
     for (setting.choices) |choice| {
         const selected = if (v) |value| config_file.sameValue(value, choice.value) else choice.value.len == 0;
         if (selected) return choice.label;
@@ -119,39 +126,44 @@ fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
 }
 
 /// Show a dropdown's choices as a menu with its top-left corner at
-/// `point` (screen pixels) and return the value picked, if any.
-pub fn pickChoice(owner: w32.HWND, point: w32.POINT, setting: Setting, config_text: []const u8, dark: bool) ?[]const u8 {
+/// `point` (screen pixels). The value picked is copied into `out`, since
+/// profile commands live in a list that ends with this call.
+pub fn pickChoice(owner: w32.HWND, point: w32.POINT, setting: Setting, config_text: []const u8, dark: bool, out: []u8) ?[]const u8 {
     const menu = w32.CreatePopupMenu() orelse return null;
     defer _ = w32.DestroyMenu(menu);
     const hdc = w32.GetDC(owner) orelse return null;
     defer _ = w32.ReleaseDC(owner, hdc);
 
-    const current = currentLabel(setting, config_text);
-    for (setting.choices, 0..) |choice, i| {
-        if (!available(hdc, choice)) continue;
-        const checked = std.mem.eql(u8, choice.label, current);
+    const list = profiles.detect();
+    const current = currentLabel(setting, config_text, &list);
+    const count = if (setting.profiles) list.len else setting.choices.len;
+    for (0..count) |i| {
+        const label = if (setting.profiles) list.name(i) else setting.choices[i].label;
+        if (!setting.profiles and !fontAvailable(hdc, setting.choices[i])) continue;
+        const checked = std.mem.eql(u8, label, current);
         var buf: [128]u16 = undefined;
-        _ = wide_string.fromUtf8(&buf, choice.label);
+        _ = wide_string.fromUtf8(&buf, label);
         _ = w32.AppendMenuW(menu, if (checked) w32.MF_CHECKED else w32.MF_STRING, i + 1, @ptrCast(&buf));
     }
     menu_theme.apply(dark);
     const picked = w32.TrackPopupMenuEx(menu, w32.TPM_LEFTALIGN | w32.TPM_TOPALIGN | w32.TPM_RETURNCMD, point.x, point.y, owner, null);
     if (picked <= 0) return null;
-    return setting.choices[@as(usize, @intCast(picked)) - 1].value;
+    const i: usize = @as(usize, @intCast(picked)) - 1;
+    const value = if (!setting.profiles)
+        setting.choices[i].value
+    else if (list.items[i].default)
+        // The default shell is what an absent `command` runs.
+        ""
+    else
+        list.command(i);
+    if (value.len > out.len) return null;
+    @memcpy(out[0..value.len], value);
+    return out[0..value.len];
 }
 
-/// Hide choices whose program or font is missing: picking them would
-/// leave new tabs without a shell, or silently fall back to another font.
-fn available(hdc: w32.HDC, choice: Choice) bool {
-    if (choice.requires_program) |program| {
-        var name: [260]u16 = undefined;
-        _ = wide_string.fromUtf8(&name, program);
-        const found = if (std.fs.path.isAbsolute(program))
-            w32.GetFileAttributesW(@ptrCast(&name)) != w32.INVALID_FILE_ATTRIBUTES
-        else
-            w32.SearchPathW(null, @ptrCast(&name), null, 0, null, null) != 0;
-        if (!found) return false;
-    }
+/// Hide choices whose font is missing: Windows would silently fall back
+/// to another font.
+fn fontAvailable(hdc: w32.HDC, choice: Choice) bool {
     if (choice.requires_font) |font| {
         var face: [32]u16 = undefined;
         _ = wide_string.fromUtf8(&face, font);

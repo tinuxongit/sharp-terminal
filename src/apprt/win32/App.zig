@@ -18,6 +18,7 @@ const Window = @import("Window.zig");
 const TabOverview = @import("TabOverview.zig");
 const SettingsPanel = @import("SettingsPanel.zig");
 const canvas = @import("canvas.zig");
+const profiles = @import("profiles.zig");
 const SplitTree = @import("../../datastruct/split_tree.zig").SplitTree;
 const w32 = @import("win32.zig");
 const brand = @import("brand.zig");
@@ -88,6 +89,9 @@ settings_class_atom: u16 = 0,
 
 /// JetBrains Mono registered for Sharp's own UI; see canvas.zig.
 ui_fonts: canvas.EmbeddedFonts = .{ null, null },
+
+/// Shell profile icons shown on tabs and in the profile menu.
+profile_icons: profiles.Icons = .{},
 msg_class_atom: u16 = 0,
 
 /// List of active Window containers (tabbed windows).
@@ -409,6 +413,10 @@ pub fn run(self: *App) !void {
             }
         }
 
+        if (msg.message == w32.WM_KEYDOWN) {
+            if (self.profileShortcut(msg)) continue :loop;
+        }
+
         // Skip TranslateMessage for keyboard events on terminal surface
         // windows: handleKeyEvent (and sendWin32InputEvent in Win32 input
         // mode) calls ToUnicode directly, and TranslateMessage's internal
@@ -501,6 +509,7 @@ pub fn terminate(self: *App) void {
     }
     canvas.unloadEmbeddedFonts(self.ui_fonts);
     self.ui_fonts = .{ null, null };
+    self.profile_icons.deinit();
     if (self.class_atom != 0) {
         _ = w32.UnregisterClassW(WINDOW_CLASS_NAME, self.hinstance);
         self.class_atom = 0;
@@ -696,19 +705,19 @@ pub fn performAction(
         },
 
         .open_config => {
-            const config_path = configpkg.edit.openPath(
-                self.core_app.alloc,
-            ) catch |err| {
-                log.err("failed to get config path: {}", .{err});
-                return false;
+            // Sharp's settings panel is its config UI; the file itself is
+            // one click away inside it.
+            const window: ?*Window = switch (target) {
+                .surface => |core_surface| core_surface.rt_surface.parent_window,
+                .app => if (self.windows.items.len > 0) self.windows.items[0] else null,
             };
-            defer self.core_app.alloc.free(config_path);
-
-            return switch (value) {
-                .os_open => self.openConfigWithOs(config_path),
-                .new_window => (try self.openConfigInNewWindow(config_path)) or
-                    self.openConfigWithOs(config_path),
-            };
+            if (window) |w| {
+                if (!w.is_quick_terminal) {
+                    w.openSettings();
+                    return true;
+                }
+            }
+            return self.openConfigFile(value);
         },
 
         .scrollbar => {
@@ -1494,6 +1503,39 @@ pub fn performAction(
     }
 }
 
+/// Open the config file itself, in an editor.
+pub fn openConfigFile(self: *App, how: apprt.action.OpenConfig) bool {
+    const config_path = configpkg.edit.openPath(self.core_app.alloc) catch |err| {
+        log.err("failed to get config path: {}", .{err});
+        return false;
+    };
+    defer self.core_app.alloc.free(config_path);
+    return switch (how) {
+        .os_open => self.openConfigWithOs(config_path),
+        .new_window => (self.openConfigInNewWindow(config_path) catch false) or
+            self.openConfigWithOs(config_path),
+    };
+}
+
+/// Open a new window whose first tab uses `options`.
+pub fn openWindowWithTab(self: *App, options: Window.AddTabOptions) !void {
+    const alloc = self.core_app.alloc;
+    const window = try alloc.create(Window);
+    window.init(self, .{}) catch |err| {
+        alloc.destroy(window);
+        return err;
+    };
+    self.windows.append(alloc, window) catch |err| {
+        window.deinit();
+        alloc.destroy(window);
+        return err;
+    };
+    _ = window.addTabWithOptions(options) catch |err| {
+        window.close();
+        return err;
+    };
+}
+
 /// Open the configuration with the Windows file association, or Notepad
 /// when nothing is registered for `.ghostty` files, which is the usual
 /// case on a fresh machine.
@@ -1544,25 +1586,11 @@ fn openConfigInNewWindow(self: *App, path: [:0]const u8) !bool {
     );
     defer alloc.free(title);
 
-    const window = try alloc.create(Window);
-    window.init(self, .{}) catch |err| {
-        alloc.destroy(window);
-        return err;
-    };
-    self.windows.append(alloc, window) catch |err| {
-        window.deinit();
-        alloc.destroy(window);
-        return err;
-    };
-
-    _ = window.addTabWithOptions(.{
+    try self.openWindowWithTab(.{
         .context = .window,
         .command = &command,
         .title = title,
-    }) catch |err| {
-        window.close();
-        return err;
-    };
+    });
     return true;
 }
 
@@ -1639,6 +1667,23 @@ fn isEditShortcutVk(vk: u16) bool {
 /// Only surface-class parents store Surface userdata. A terminal child has
 /// a Window parent; interpreting that pointer as Surface is invalid even
 /// when we only intended to check whether a popup edit is active.
+/// Ctrl+Shift+1..9 on a terminal opens that profile in a new tab, as in
+/// Windows Terminal. Returns whether the key was used.
+fn profileShortcut(self: *App, msg: w32.MSG) bool {
+    const vk: u16 = @truncate(msg.wParam);
+    if (vk < '1' or vk > '9') return false;
+    if (w32.GetKeyState(@as(i32, w32.VK_CONTROL)) >= 0 or
+        w32.GetKeyState(@as(i32, w32.VK_SHIFT)) >= 0 or
+        w32.GetKeyState(@as(i32, w32.VK_MENU)) < 0) return false;
+    const hwnd = msg.hwnd orelse return false;
+    if (@as(u16, @truncate(w32.GetClassLongW(hwnd, w32.GCW_ATOM))) != self.terminal_class_atom) return false;
+    const userdata = w32.GetWindowLongPtrW(hwnd, w32.GWLP_USERDATA);
+    if (userdata == 0) return false;
+    const surface: *Surface = @ptrFromInt(@as(usize, @bitCast(userdata)));
+    surface.parent_window.openProfile(vk - '1', false);
+    return true;
+}
+
 fn popupSurface(self: *const App, child: w32.HWND) ?*Surface {
     const parent = w32.GetParent(child) orelse return null;
     if (self.terminal_class_atom == 0 or

@@ -21,6 +21,8 @@ pub const Part = union(enum) {
     tab: usize,
     tab_close: usize,
     new_tab,
+    /// The arrow beside "+" that opens the shell profile menu.
+    new_tab_menu,
     settings,
     minimize,
     maximize,
@@ -59,16 +61,29 @@ const title_fade = 24.0;
 const separator_width = 2.0;
 const separator_height = 16.0;
 const hover_inset = 3.0;
-const round_button_size = 28.0;
-const round_button_gap = 4.0;
+const new_tab_height = 28.0;
+const new_tab_width = 32.0;
+const new_tab_menu_width = 22.0;
+const new_tab_gap = 4.0;
+const tab_icon_size = 16.0;
+const tab_icon_gap = 8.0;
 const caption_button_width = 46.0;
 /// Space kept free between the buttons and the caption buttons so the
 /// window can always be dragged, however many tabs are open.
 const drag_space = 40.0;
 const edge_margin = 8.0;
 
+/// How tabs look; the `window-tab-style` setting.
+pub const Style = enum {
+    /// Rounded tabs whose active one flows into the terminal.
+    chrome,
+    /// Flat tabs with rounded tops and no separators.
+    windows_terminal,
+};
+
 pub const Layout = struct {
     scale: f32,
+    style: Style = .chrome,
     /// Client width of the window.
     width: i32,
     tab_count: usize,
@@ -111,7 +126,7 @@ pub const Layout = struct {
     pub fn tabWidth(self: Layout) i32 {
         if (self.tab_count == 0) return 0;
         const n: i32 = @intCast(self.tab_count);
-        const buttons = self.px(round_button_gap + round_button_size);
+        const buttons = self.px(new_tab_gap + new_tab_width + new_tab_menu_width);
         const available = self.limit() - self.tabsLeft() - buttons;
         if (self.frozen_tab_width) |w| {
             if (w * n <= available) return w;
@@ -145,26 +160,48 @@ pub const Layout = struct {
         return .{ .left = right - size, .top = top, .right = right, .bottom = top + size };
     }
 
+    /// Where the shell's icon sits, at the start of the tab.
+    fn tabIconRect(self: Layout, index: usize) w32.RECT {
+        const tab = self.tabRect(index);
+        const size = self.px(tab_icon_size);
+        // A tab too narrow for the padding still shows what it can.
+        const left = @min(tab.left + self.px(tab_text_pad), tab.left + @divTrunc(tab.right - tab.left, 6));
+        const top = tab.top + @divTrunc(tab.bottom - tab.top - size, 2);
+        return .{ .left = left, .top = top, .right = left + size, .bottom = top + size };
+    }
+
     fn tabTextRect(self: Layout, index: usize) w32.RECT {
         const tab = self.tabRect(index);
-        const pad = self.px(tab_text_pad);
         const right = if (self.showsClose(index))
             self.tabCloseRect(index).left - self.px(2)
         else
-            tab.right - pad;
-        // A tab too narrow for both paddings still shows what it can.
-        const left = @min(tab.left + pad, tab.left + @divTrunc(tab.right - tab.left, 4));
+            tab.right - self.px(tab_text_pad);
+        const left = self.tabIconRect(index).right + self.px(tab_icon_gap);
         return .{ .left = left, .top = tab.top, .right = @max(left, right), .bottom = tab.bottom };
     }
 
-    pub fn newTabRect(self: Layout) w32.RECT {
+    /// "+" and the profile arrow form one split button after the last tab.
+    fn newTabGroupRect(self: Layout) w32.RECT {
         const n: i32 = @intCast(self.tab_count);
+        const width = self.px(new_tab_width + new_tab_menu_width);
         var tabs_right = self.tabsLeft() + n * self.tabWidth();
-        tabs_right = @min(tabs_right, self.limit() - self.px(round_button_gap + round_button_size));
-        const size = self.px(round_button_size);
-        const left = tabs_right + self.px(round_button_gap);
-        const top = self.height() - self.px(tab_height) + @divTrunc(self.px(tab_height) - size, 2);
-        return .{ .left = left, .top = top, .right = left + size, .bottom = top + size };
+        tabs_right = @min(tabs_right, self.limit() - self.px(new_tab_gap) - width);
+        const height_ = self.px(new_tab_height);
+        const left = tabs_right + self.px(new_tab_gap);
+        const top = self.height() - self.px(tab_height) + @divTrunc(self.px(tab_height) - height_, 2);
+        return .{ .left = left, .top = top, .right = left + width, .bottom = top + height_ };
+    }
+
+    pub fn newTabRect(self: Layout) w32.RECT {
+        var r = self.newTabGroupRect();
+        r.right = r.left + self.px(new_tab_width);
+        return r;
+    }
+
+    pub fn newTabMenuRect(self: Layout) w32.RECT {
+        var r = self.newTabGroupRect();
+        r.left = r.right - self.px(new_tab_menu_width);
+        return r;
     }
 
     /// One of rightButtons(), as wide as a Windows caption button.
@@ -191,6 +228,7 @@ pub const Layout = struct {
                 return .{ .tab = i };
             }
             if (contains(self.newTabRect(), x, y)) return .new_tab;
+            if (contains(self.newTabMenuRect(), x, y)) return .new_tab_menu;
         }
         return .caption;
     }
@@ -248,6 +286,7 @@ const Glyph = enum(u16) {
     restore = 0xE923,
     close = 0xE8BB,
     add = 0xE710,
+    chevron_down = 0xE70D,
     settings = 0xE713,
 };
 
@@ -287,6 +326,8 @@ pub const View = struct {
 pub const Titles = struct {
     text: []const [256]u16,
     lens: []const u16,
+    /// Each tab's shell icon, drawn at tab_icon_size.
+    icons: []const ?w32.HICON,
 };
 
 /// Paint the whole strip. Shapes go straight into the pixels and text
@@ -300,7 +341,7 @@ pub fn paint(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, tit
             if (!layout.tabVisible(i)) break;
             paintTab(canvas, layout, palette, fonts, titles, view, i);
         }
-        paintRoundButton(canvas, layout.newTabRect(), .add, view.hover.eql(.new_tab), palette, fonts);
+        paintNewTabButton(canvas, layout, palette, fonts, view);
     }
 
     for (layout.rightButtons()) |part| {
@@ -342,8 +383,11 @@ fn paintTab(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, titl
     canvas.sync();
 
     const background = if (active) palette.active_tab else if (hovered) palette.hover else palette.strip;
+    const foot = if (layout.style == .chrome) layout.px(tab_foot) else 0;
     if (active) {
-        fillActiveTab(canvas, rect, layout.px(tab_top_corner), layout.px(tab_foot), palette.active_tab);
+        fillActiveTab(canvas, rect, layout.px(tab_top_corner), foot, palette.active_tab);
+    } else if (hovered and layout.style == .windows_terminal) {
+        fillActiveTab(canvas, rect, layout.px(tab_top_corner), 0, palette.hover);
     } else if (hovered) {
         const inset = layout.px(hover_inset);
         canvas.fillRounded(.{ .left = rect.left + inset, .top = rect.top + inset, .right = rect.right - inset, .bottom = rect.bottom - inset }, layout.px(tab_top_corner), palette.hover);
@@ -353,7 +397,7 @@ fn paintTab(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, titl
     const next = i + 1;
     const next_resting = next < layout.tab_count and next != layout.active and
         !view.hover.eql(.{ .tab = next }) and !view.hover.eql(.{ .tab_close = next });
-    if (!active and !hovered and next_resting) {
+    if (layout.style == .chrome and !active and !hovered and next_resting) {
         const w = @max(1, layout.px(separator_width));
         const h = layout.px(separator_height);
         const top = rect.top + @divTrunc(rect.bottom - rect.top - h, 2);
@@ -361,18 +405,26 @@ fn paintTab(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, titl
     }
 
     const text_color = if ((active or hovered) and view.window_active) palette.text else palette.text_dim;
+    if (titles.icons[i]) |icon| {
+        const r = layout.tabIconRect(i);
+        if (r.right <= rect.right) _ = w32.DrawIconEx(canvas.hdc, r.left, r.top, icon, r.right - r.left, r.bottom - r.top, 0, null, w32.DI_NORMAL);
+    }
+
     const text_rect = layout.tabTextRect(i);
     const len = titles.lens[i];
     if (len > 0 and text_rect.right > text_rect.left) {
-        _ = w32.SelectObject(canvas.hdc, fonts.title);
-        _ = w32.SetTextColor(canvas.hdc, text_color.ref());
-        var size: w32.SIZE = .{ .cx = 0, .cy = 0 };
-        _ = w32.GetTextExtentPoint32W(canvas.hdc, &titles.text[i], len, &size);
-        var r = text_rect;
-        _ = w32.DrawTextW(canvas.hdc, &titles.text[i], len, &r, w32.DT_LEFT | w32.DT_VCENTER | w32.DT_SINGLELINE | w32.DT_NOPREFIX);
-        if (size.cx > text_rect.right - text_rect.left) {
-            canvas.sync();
-            canvas.fadeRight(text_rect, layout.px(title_fade), background);
+        // Chrome fades a title that doesn't fit; Windows Terminal cuts it
+        // with an ellipsis.
+        const fade = layout.style == .chrome;
+        canvas.textWide(text_rect, titles.text[i][0..len], fonts.title, text_color, .left, if (fade) 0 else w32.DT_END_ELLIPSIS);
+        if (fade) {
+            _ = w32.SelectObject(canvas.hdc, fonts.title);
+            var size: w32.SIZE = .{ .cx = 0, .cy = 0 };
+            _ = w32.GetTextExtentPoint32W(canvas.hdc, &titles.text[i], len, &size);
+            if (size.cx > text_rect.right - text_rect.left) {
+                canvas.sync();
+                canvas.fadeRight(text_rect, layout.px(title_fade), background);
+            }
         }
     }
 
@@ -386,12 +438,20 @@ fn paintTab(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, titl
     }
 }
 
-fn paintRoundButton(canvas: Canvas, rect: w32.RECT, glyph: Glyph, hovered: bool, palette: Palette, fonts: Fonts) void {
-    if (hovered) {
+fn paintNewTabButton(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, view: View) void {
+    const plus = layout.newTabRect();
+    const arrow = layout.newTabMenuRect();
+    const on_plus = view.hover.eql(.new_tab);
+    const on_arrow = view.hover.eql(.new_tab_menu) or view.pressed.eql(.new_tab_menu);
+    const corner = layout.px(6);
+    if (on_plus or on_arrow) {
         canvas.sync();
-        canvas.fillRounded(rect, @divTrunc(rect.right - rect.left, 2), palette.hover);
+        canvas.fillRounded(.{ .left = plus.left, .top = plus.top, .right = arrow.right, .bottom = plus.bottom }, corner, palette.hover);
+        canvas.fillRounded(if (on_plus) plus else arrow, corner, palette.hover.mix(palette.contrast, 0.07));
+        canvas.fill(.{ .left = arrow.left, .top = plus.top + layout.px(6), .right = arrow.left + 1, .bottom = plus.bottom - layout.px(6) }, palette.separator);
     }
-    canvas.glyph(rect, @backingInt(glyph), fonts.icons_large, if (hovered) palette.text else palette.text_dim);
+    canvas.glyph(plus, @backingInt(Glyph.add), fonts.icons_large, if (on_plus) palette.text else palette.text_dim);
+    canvas.glyph(arrow, @backingInt(Glyph.chevron_down), fonts.icons_small, if (on_arrow) palette.text else palette.text_dim);
 }
 
 /// The active tab: rounded on top, and curving out at the bottom into the

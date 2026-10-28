@@ -1687,3 +1687,49 @@ pub const FW_BOLD: i32 = 700;
 pub extern "user32" fn GetCaretBlinkTime() callconv(.winapi) u32;
 pub extern "gdi32" fn AddFontMemResourceEx(pFileView: *const anyopaque, cjSize: u32, pvResrved: ?*anyopaque, pNumFonts: *u32) callconv(.winapi) ?HANDLE;
 pub extern "gdi32" fn RemoveFontMemResourceEx(h: HANDLE) callconv(.winapi) i32;
+
+// Shell profiles: WSL distributions live under Lxss in the registry, and
+// each profile shows its program's icon in the tab and the new-tab menu.
+pub const REG_SZ: u32 = 1;
+pub extern "advapi32" fn RegEnumKeyExW(hKey: HKEY, dwIndex: u32, lpName: [*]u16, lpcchName: *u32, lpReserved: ?*u32, lpClass: ?[*]u16, lpcchClass: ?*u32, lpftLastWriteTime: ?*anyopaque) callconv(.winapi) u32;
+pub extern "user32" fn PrivateExtractIconsW(szFileName: [*:0]const u16, nIconIndex: i32, cxIcon: i32, cyIcon: i32, phicon: *?HICON, piconid: ?*u32, nIcons: u32, flags: u32) callconv(.winapi) u32;
+pub extern "user32" fn DestroyIcon(hIcon: HICON) callconv(.winapi) i32;
+pub const DI_NORMAL: u32 = 0x0003;
+pub extern "user32" fn DrawIconEx(hdc: HDC, xLeft: i32, yTop: i32, hIcon: HICON, cxWidth: i32, cyWidth: i32, istepIfAniCur: u32, hbrFlickerFreeDraw: ?HBRUSH, diFlags: u32) callconv(.winapi) i32;
+
+pub const MIIM_STATE: u32 = 0x00000001;
+pub const MIIM_ID: u32 = 0x00000002;
+pub const MIIM_STRING: u32 = 0x00000040;
+pub const MIIM_BITMAP: u32 = 0x00000080;
+pub const MIIM_FTYPE: u32 = 0x00000100;
+pub const MFT_STRING: u32 = 0x00000000;
+pub const MFT_SEPARATOR: u32 = 0x00000800;
+pub const MFS_DEFAULT: u32 = 0x00001000;
+pub const MENUITEMINFOW = extern struct {
+    cbSize: u32 = @sizeOf(MENUITEMINFOW),
+    fMask: u32 = 0,
+    fType: u32 = 0,
+    fState: u32 = 0,
+    wID: u32 = 0,
+    hSubMenu: ?HMENU = null,
+    hbmpChecked: ?*anyopaque = null,
+    hbmpUnchecked: ?*anyopaque = null,
+    dwItemData: usize = 0,
+    dwTypeData: ?[*:0]const u16 = null,
+    cch: u32 = 0,
+    hbmpItem: ?*anyopaque = null,
+};
+pub extern "user32" fn InsertMenuItemW(hmenu: HMENU, item: u32, fByPosition: i32, lpmi: *const MENUITEMINFOW) callconv(.winapi) i32;
+pub const MIM_STYLE: u32 = 0x00000010;
+pub const MNS_CHECKORBMP: u32 = 0x04000000;
+pub const MENUINFO = extern struct {
+    cbSize: u32 = @sizeOf(MENUINFO),
+    fMask: u32 = 0,
+    dwStyle: u32 = 0,
+    cyMax: u32 = 0,
+    hbrBack: ?HBRUSH = null,
+    dwContextHelpID: u32 = 0,
+    dwMenuData: usize = 0,
+};
+pub extern "user32" fn SetMenuInfo(hmenu: HMENU, lpmi: *const MENUINFO) callconv(.winapi) i32;
+pub const MB_ICONINFORMATION: u32 = 0x00000040;

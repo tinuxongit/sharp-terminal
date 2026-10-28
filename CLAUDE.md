@@ -42,6 +42,13 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/canvas.zig`: drawing shared by the strip and the panel
   (colors, anti-aliased shapes, text, icon fonts).
 - `src/apprt/win32/menu_theme.zig`: dark or light native popup menus.
+- `src/apprt/win32/profiles.zon`: the shell profiles (PowerShell, Command
+  Prompt, Git Bash, Visual Studio prompts, WSL distributions) and the
+  new-tab menu's text. Add shells here, not in code.
+- `src/apprt/win32/profiles.zig`: resolves those against what is
+  installed, and caches program icons.
+- `src/apprt/win32/new_tab_menu.zig`: the menu behind the arrow beside
+  "+", with icons and shortcuts.
 - `src/apprt/win32/config_file.zig`: reads and changes one key of the
   user's Ghostty config file, leaving the rest of it untouched.
 - `src/font/directwrite.zig`: finds system fonts on Windows.
@@ -104,6 +111,16 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   through (checked 2026-10-28 with OpenConsole 1.25; the inbox Windows
   ConPTY strips it). `chafa` picks it automatically via `TERM_PROGRAM`.
   Ghostty has no Sixel support.
+- **Shell profiles work like Windows Terminal's.** The arrow beside "+"
+  lists installed shells with their icons; Ctrl+Shift+1..9 opens the Nth
+  in a new tab, Shift+click opens it in a new window, and each tab shows
+  its shell's icon. Visual Studio prompts come from the folders listed in
+  `profiles.zon`, and WSL distributions from the Lxss registry key. The
+  Settings > Shell dropdown uses the same list.
+- **Ctrl+, opens the settings panel**, not the config file: in Sharp the
+  panel is the config UI. The file is under Settings > Advanced.
+- **Two tab styles.** `window-tab-style` (a Sharp addition to Ghostty's
+  config) picks Chrome's flowing tabs or Windows Terminal's flat ones.
 - **Sharp to people, Ghostty to programs.** The exe, window text, dialogs and
   version info say Sharp. `TERM_PROGRAM`, terminfo, `GHOSTTY_*` variables,
   `share\ghostty` resources and the `%LOCALAPPDATA%\ghostty` config folder
@@ -144,6 +161,10 @@ the scrollback.
 - Replies to programs that probe for image support travel back through
   ConPTY's input side, which reportedly drops APC replies. Tools that
   insist on a reply may not detect image support. Unverified.
+- Ctrl+Shift+1..9 is taken before Ghostty's keybindings run, so it can't
+  be rebound in the config file.
+- Visual Studio is found only in the folders `profiles.zon` lists, not
+  through vswhere, so unusual install locations are missed.
 - `commandRunning` matches children by parent PID, which Windows reuses, so
   an unrelated process could rarely look like a running command.
 - The fork removed upstream's CI workflows and contributor docs (`HACKING.md`,

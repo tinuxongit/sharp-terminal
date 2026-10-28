@@ -7,12 +7,12 @@
 // .icon is a Segoe Fluent Icons code point.
 //
 // A setting is one of:
-//   a dropdown   .choices = .{ .{ .label, .value }, ... }
+//   a dropdown   .choices = .{ .{ .label, .value }, ... }, or .profiles =
+//                true to offer the installed shells from profiles.zon
 //   a toggle     .on / .off values, .default_on when the key is absent
 //   an action    .action = .edit_file or .reload, with a .button label
 //
-// Choices can name what they need; they are hidden when it is missing:
-//   .requires_program  an executable on PATH, or an absolute path
+// Choices can name a font they need; they are hidden when it is missing:
 //   .requires_font     an installed font family
 .{
     .title = "Settings",
@@ -32,17 +32,8 @@
                             .label = "Shell",
                             .description = "The program new tabs and windows start. Open tabs keep theirs.",
                             .key = "command",
-                            .choices = .{
-                                .{ .label = "Command Prompt", .value = "" },
-                                .{ .label = "Windows PowerShell", .value = "powershell.exe", .requires_program = "powershell.exe" },
-                                .{ .label = "PowerShell 7", .value = "pwsh.exe", .requires_program = "pwsh.exe" },
-                                .{ .label = "WSL", .value = "wsl.exe", .requires_program = "wsl.exe" },
-                                .{
-                                    .label = "Git Bash",
-                                    .value = "\"C:\\Program Files\\Git\\bin\\bash.exe\" -i -l",
-                                    .requires_program = "C:\\Program Files\\Git\\bin\\bash.exe",
-                                },
-                            },
+                            // The choices are the installed shells from profiles.zon.
+                            .profiles = true,
                         },
                     },
                 },
@@ -95,6 +86,15 @@
                                 .{ .label = "Solarized Dark", .value = "iTerm2 Solarized Dark" },
                                 .{ .label = "GitHub Dark", .value = "GitHub Dark Default" },
                                 .{ .label = "GitHub Light", .value = "GitHub Light Default" },
+                            },
+                        },
+                        .{
+                            .label = "Tab style",
+                            .description = "Chrome's flowing tabs, or Windows Terminal's flat ones.",
+                            .key = "window-tab-style",
+                            .choices = .{
+                                .{ .label = "Chrome", .value = "" },
+                                .{ .label = "Windows Terminal", .value = "windows-terminal" },
                             },
                         },
                         .{

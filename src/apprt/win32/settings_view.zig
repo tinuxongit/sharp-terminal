@@ -5,6 +5,7 @@ const std = @import("std");
 const w32 = @import("win32.zig");
 const canvas_mod = @import("canvas.zig");
 const settings = @import("settings.zig");
+const profiles_mod = @import("profiles.zig");
 
 const Canvas = canvas_mod.Canvas;
 const Rgb = canvas_mod.Rgb;
@@ -132,6 +133,8 @@ pub const State = struct {
     search_focused: bool,
     caret_visible: bool,
     config_text: []const u8,
+    /// Installed shells, for the Shell dropdown's label.
+    profiles: *const profiles_mod.List,
 };
 
 /// Segoe Fluent Icons code points used by the panel.
@@ -293,7 +296,7 @@ fn paintRow(p: *Painter, row: w32.RECT, ref: settings.Ref) void {
     switch (setting.kind()) {
         .dropdown => {
             p.c.fillRounded(control, p.px(control_corner), if (hovered) pal.control_hover else pal.control);
-            const label = settings.currentLabel(setting, p.state.config_text);
+            const label = settings.currentLabel(setting, p.state.config_text, p.state.profiles);
             p.c.text(.{ .left = control.left + p.px(12), .top = control.top, .right = control.right - p.px(30), .bottom = control.bottom }, label, p.fonts.body, pal.text, .left);
             p.c.glyph(.{ .left = control.right - p.px(30), .top = control.top, .right = control.right - p.px(8), .bottom = control.bottom }, icon_chevron, p.fonts.icons_small, pal.text_dim);
         },

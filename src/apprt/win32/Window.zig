@@ -17,6 +17,10 @@ const wide_string = @import("wide_string.zig");
 const tab_strip = @import("tab_strip.zig");
 const menu_theme = @import("menu_theme.zig");
 const SettingsPanel = @import("SettingsPanel.zig");
+const profiles = @import("profiles.zig");
+const new_tab_menu = @import("new_tab_menu.zig");
+const configpkg = @import("../../config.zig");
+const build_config = @import("../../build_config.zig");
 
 const log = std.log.scoped(.win32);
 
@@ -397,6 +401,10 @@ fn stripLayout(self: *const Window) tab_strip.Layout {
     if (self.hwnd) |hwnd| _ = w32.GetClientRect(hwnd, &client);
     return .{
         .scale = self.scale,
+        .style = switch (self.app.config.@"window-tab-style") {
+            .chrome => .chrome,
+            .@"windows-terminal" => .windows_terminal,
+        },
         .width = client.right - client.left,
         .tab_count = self.tab_count,
         .active = self.active_tab,
@@ -562,9 +570,13 @@ pub fn addTabWithOptions(self: *Window, options: AddTabOptions) !*Surface {
     self.cancelTabRename();
     self.frozen_tab_width = null;
 
+    // Tabs without a picked profile show the default profile's icon.
+    var with_icon = options;
+    if (with_icon.icon == null) with_icon.icon = self.defaultTabIcon();
+
     const alloc = self.app.core_app.alloc;
     const surface = try alloc.create(Surface);
-    try surface.initWithOptions(self.app, self, options);
+    try surface.initWithOptions(self.app, self, with_icon);
     // After surface.init succeeds, create the SplitTree which takes ownership
     // via ref(). If this fails, we manually clean up.
     var tree = SplitTree(Surface).init(alloc, surface) catch |err| {
@@ -1463,14 +1475,25 @@ fn paintTabBar(self: *Window) void {
 
     const bg = self.app.config.background;
     const fg = self.app.config.foreground;
+    var palette: tab_strip.Palette = .fromTerminal(.{ .r = bg.r, .g = bg.g, .b = bg.b }, .{ .r = fg.r, .g = fg.g, .b = fg.b });
+    // The settings panel dims the terminal; the active tab is part of the
+    // same surface, so it dims with it.
+    if (self.settings_panel != null) {
+        palette.active_tab = palette.active_tab.mix(tab_strip.Rgb.black, @as(f32, SettingsPanel.backdrop_alpha) / 255);
+    }
     tab_strip.paint(
         .{ .hdc = mem_dc, .pixels = @ptrCast(@alignCast(bits orelse return)), .width = layout.width, .height = height },
         layout,
-        .fromTerminal(.{ .r = bg.r, .g = bg.g, .b = bg.b }, .{ .r = fg.r, .g = fg.g, .b = fg.b }),
+        palette,
         self.strip_fonts,
         .{
             .text = self.tab_titles[0..self.tab_count],
             .lens = self.tab_title_lens[0..self.tab_count],
+            .icons = icons: {
+                var icons: [MAX_TABS]?w32.HICON = undefined;
+                for (0..self.tab_count) |i| icons[i] = self.tabIcon(i);
+                break :icons icons[0..self.tab_count];
+            },
         },
         .{
             .hover = self.strip_hover,
@@ -1724,6 +1747,7 @@ fn handleTabBarClick(self: *Window, x: i16, y: i16) void {
         },
         .tab_close => |i| self.closeTabFromStrip(i),
         .settings => self.openSettings(),
+        .new_tab_menu => self.showNewTabMenu(),
         .tab => |i| {
             self.selectTabIndex(i);
             // Start tracking potential tab drag
@@ -1738,7 +1762,7 @@ fn handleTabBarClick(self: *Window, x: i16, y: i16) void {
 }
 
 /// Open the settings panel over the terminal, or focus it if it is open.
-fn openSettings(self: *Window) void {
+pub fn openSettings(self: *Window) void {
     if (self.settings_panel) |panel| return panel.focus();
     const hwnd = self.hwnd orelse return;
     const alloc = self.app.core_app.alloc;
@@ -1764,6 +1788,94 @@ fn openSettings(self: *Window) void {
     };
 }
 
+/// The text of the configured `command`, as profiles compare it.
+fn configuredCommand(self: *Window) ?[]const u8 {
+    const command = self.app.config.command orelse return null;
+    return switch (command) {
+        .shell => |text| text,
+        .direct => |argv| if (argv.len > 0) argv[0] else null,
+    };
+}
+
+fn tabIconSize(self: *const Window) i32 {
+    return @intFromFloat(@round(16 * self.scale));
+}
+
+/// The icon of the profile new tabs run when none is picked.
+fn defaultTabIcon(self: *Window) ?w32.HICON {
+    const list = profiles.detect();
+    const i = list.selected(self.configuredCommand()) orelse return null;
+    return self.app.profile_icons.get(list.icon(i), self.tabIconSize());
+}
+
+/// A tab shows the icon of the first of its panes that has one.
+fn tabIcon(self: *Window, index: usize) ?w32.HICON {
+    var it = self.tab_trees[index].iterator();
+    while (it.next()) |entry| {
+        if (entry.view.icon) |icon| return icon;
+    }
+    return null;
+}
+
+/// Open installed profile `index` in a new tab, or a new window. Indexes
+/// past the last profile do nothing, as in Windows Terminal.
+pub fn openProfile(self: *Window, index: usize, new_window: bool) void {
+    const list = profiles.detect();
+    if (index >= list.len) return;
+    const alloc = self.app.core_app.alloc;
+    // The surface copies the command into its own config during init.
+    const text = alloc.dupeSentinel(u8, list.command(index), 0) catch return;
+    defer alloc.free(text);
+    const command: configpkg.Command = .{ .shell = text };
+    const options: AddTabOptions = .{
+        .context = if (new_window) .window else .tab,
+        .command = &command,
+        .icon = self.app.profile_icons.get(list.icon(index), self.tabIconSize()),
+    };
+    if (new_window) {
+        self.app.openWindowWithTab(options) catch |err| log.err("failed to open {s} in a new window: {}", .{ list.name(index), err });
+        return;
+    }
+    _ = self.addTabWithOptions(options) catch |err| log.err("failed to open {s}: {}", .{ list.name(index), err });
+}
+
+/// Drop the profile menu below the arrow beside "+". Shift+click opens the
+/// profile in a new window, as in Windows Terminal.
+fn showNewTabMenu(self: *Window) void {
+    const hwnd = self.hwnd orelse return;
+    const arrow = self.stripLayout().newTabMenuRect();
+    var corner: w32.POINT = .{ .x = arrow.left, .y = arrow.bottom + @as(i32, @intFromFloat(@round(4 * self.scale))) };
+    _ = w32.ClientToScreen(hwnd, &corner);
+    const bg = self.app.config.background;
+    const dark = tab_strip.Rgb.isDark(.{ .r = bg.r, .g = bg.g, .b = bg.b });
+    const list = profiles.detect();
+
+    self.strip_pressed = .new_tab_menu;
+    self.invalidateTabBar();
+    const pick = new_tab_menu.show(hwnd, corner, &list, list.selected(self.configuredCommand()), &self.app.profile_icons, self.scale, dark);
+    self.strip_pressed = .none;
+    self.invalidateTabBar();
+
+    switch (pick orelse return) {
+        .profile => |i| self.openProfile(i, w32.GetKeyState(@as(i32, w32.VK_SHIFT)) < 0),
+        .settings => self.openSettings(),
+        .command_palette => if (self.getActiveSurface()) |surface| {
+            if (surface.core_surface_ready) _ = surface.core_surface.performBindingAction(.toggle_command_palette) catch |err| {
+                log.err("failed to open the command palette: {}", .{err});
+            };
+        },
+        .about => self.showAbout(),
+    }
+}
+
+fn showAbout(self: *Window) void {
+    var text: [512]u8 = undefined;
+    const message = std.fmt.bufPrint(&text, "{s}\n\nVersion {s}", .{ profiles.data.menu.about_text, build_config.version_string }) catch profiles.data.menu.about_text;
+    var wide: [512]u16 = undefined;
+    _ = wide_string.fromUtf8(&wide, message);
+    _ = w32.MessageBoxW(self.hwnd, @ptrCast(&wide), std.unicode.utf8ToUtf16LeStringLiteral(brand.name), w32.MB_ICONINFORMATION);
+}
+
 /// The terminal area below the strip, in screen pixels, which the
 /// settings panel covers.
 fn settingsArea(self: *Window) w32.RECT {
@@ -1786,9 +1898,7 @@ fn settingsReload(ctx: *anyopaque) void {
 
 fn settingsEditFile(ctx: *anyopaque) void {
     const self: *Window = @ptrCast(@alignCast(ctx));
-    _ = self.app.performAction(.app, .open_config, .os_open) catch |err| {
-        log.err("failed to open the config file: {}", .{err});
-    };
+    _ = self.app.openConfigFile(.os_open);
 }
 
 fn settingsColors(ctx: *anyopaque) [2]tab_strip.Rgb {

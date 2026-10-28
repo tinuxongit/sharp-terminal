@@ -45,6 +45,9 @@ app: *App,
 /// The parent Window that contains this Surface as a tab.
 parent_window: *Window = undefined,
 
+/// The shell profile's icon shown on this surface's tab, owned by App.
+icon: ?w32.HICON = null,
+
 /// Last title reported by the core for getTitle/copy-title consumers.
 title_len: usize = 0,
 title: [4096]u8 = std.mem.zeroes([4096]u8),
@@ -218,6 +221,8 @@ pub const InitOptions = struct {
     context: apprt.surface.NewSurfaceContext,
     command: ?*const configpkg.Command = null,
     title: ?[:0]const u8 = null,
+    /// The shell profile's icon, owned by App's icon cache.
+    icon: ?w32.HICON = null,
 };
 
 /// Initialize a surface with optional per-surface config overrides. The
@@ -232,6 +237,7 @@ pub fn initWithOptions(
     self.* = .{
         .app = app,
         .parent_window = parent,
+        .icon = options.icon,
     };
 
     // Create a manual-reset event for synchronizing resize with the
