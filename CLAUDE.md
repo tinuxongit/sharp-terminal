@@ -77,7 +77,8 @@ commands and conventions; this file covers what is specific to Sharp.
   per tool with its plan windows or spending.
 - `src/apprt/win32/logos.zon`: the tools' logos as outlines, made by
   `dist/windows/make_logos.py` from the SVGs in `dist/windows/logos/`
-  (thesvg.org, MIT). `logos.zig` fills them, anti-aliased, at any size.
+  (thesvg.org: Claude, OpenAI and opencode, under MIT or CC0).
+  `logos.zig` fills them, anti-aliased, by either fill rule, at any size.
 - `src/apprt/win32/session.zig`: saves and loads the sidebar layout's
   open tabs (`sharp-session`, beside the config file).
 - `src/apprt/win32/ssh.zig`: finds the server a tab's ssh is connected to.

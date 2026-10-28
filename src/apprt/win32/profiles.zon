@@ -66,7 +66,7 @@
             .claude = "Claude Code",
             .codex = "Codex",
             .opencode = "OpenCode",
-            .logos = .{ "claude-code", "codex", "opencode" },
+            .logos = .{ "claude", "openai", "opencode" },
             // A plan window reads "5-hour limit   71% left", a bar, then
             // "Resets in 1h 18m" (or "Resets Nov 24" a week or more away).
             // A single model's limit adds its name: "Weekly limit · Fable".

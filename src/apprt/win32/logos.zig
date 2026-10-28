@@ -10,7 +10,10 @@ pub const Logo = struct {
     name: []const u8,
     /// Its own color, or null to draw in the caller's.
     color: ?u24,
-    /// Closed outlines as x, y pairs in a 24-unit square, filled even-odd.
+    /// Fill where outlines cross an odd number of times; otherwise where
+    /// they wind around a nonzero number of times (SVG's default).
+    even_odd: bool,
+    /// Closed outlines as x, y pairs in a 24-unit square.
     shapes: []const []const f32,
 };
 
@@ -41,7 +44,7 @@ pub fn draw(c: Canvas, logo: *const Logo, x: i32, y: i32, size: i32, color: Rgb)
         var coverage: [max_size]f32 = @splat(0);
         for (0..samples) |sy| {
             const sample_y = (@as(f32, @floatFromInt(py)) + (@as(f32, @floatFromInt(sy)) + 0.5) / samples) / scale;
-            var crossings: [max_crossings]f32 = undefined;
+            var crossings: [max_crossings]Crossing = undefined;
             var count: usize = 0;
             for (logo.shapes) |shape| {
                 const points = shape.len / 2;
@@ -51,20 +54,40 @@ pub fn draw(c: Canvas, logo: *const Logo, x: i32, y: i32, size: i32, color: Rgb)
                     const x1 = shape[2 * ((k + 1) % points)];
                     const y1 = shape[2 * ((k + 1) % points) + 1];
                     if ((y0 <= sample_y) == (y1 <= sample_y) or count == max_crossings) continue;
-                    crossings[count] = (x0 + (sample_y - y0) * (x1 - x0) / (y1 - y0)) * scale;
+                    crossings[count] = .{
+                        .x = (x0 + (sample_y - y0) * (x1 - x0) / (y1 - y0)) * scale,
+                        .up = y1 < y0,
+                    };
                     count += 1;
                 }
             }
-            std.mem.sort(f32, crossings[0..count], {}, std.sort.asc(f32));
-            // Even-odd: inside between the 1st and 2nd crossing, 3rd and 4th...
-            var i: usize = 0;
-            while (i + 1 < count) : (i += 2) addSpan(&coverage, n, crossings[i], crossings[i + 1]);
+            std.mem.sort(Crossing, crossings[0..count], {}, Crossing.before);
+            // Walk the row left to right, filling while inside.
+            var winding: i32 = 0;
+            var entered: f32 = 0;
+            for (crossings[0..count]) |cross| {
+                const was_inside = winding != 0;
+                winding = if (logo.even_odd) winding ^ 1 else winding + @as(i32, if (cross.up) 1 else -1);
+                const inside = winding != 0;
+                if (!was_inside and inside) entered = cross.x;
+                if (was_inside and !inside) addSpan(&coverage, n, entered, cross.x);
+            }
         }
         for (0..n) |px| {
             if (coverage[px] > 0) c.blend(x + @as(i32, @intCast(px)), y + @as(i32, @intCast(py)), paint, @min(1, coverage[px] / samples));
         }
     }
 }
+
+const Crossing = struct {
+    x: f32,
+    /// Which way the outline crosses, for the winding rule.
+    up: bool,
+
+    fn before(_: void, a: Crossing, b: Crossing) bool {
+        return a.x < b.x;
+    }
+};
 
 /// Add the part of each pixel the span from `a` to `b` covers.
 fn addSpan(coverage: *[max_size]f32, n: usize, a: f32, b: f32) void {
