@@ -10,7 +10,7 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
 ```
 
 The app lands in `zig-out\bin\sharp.exe`. A change is checked by building
-it, as CI does on every push; Sharp keeps no test suites.
+it locally; Sharp keeps no test suites and no CI.
 
 ## Where things live
 
