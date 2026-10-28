@@ -5,6 +5,7 @@ const std = @import("std");
 const w32 = @import("win32.zig");
 const wide_string = @import("wide_string.zig");
 const config_file = @import("config_file.zig");
+const global = @import("../../global.zig");
 
 pub const Source = enum { fixed, visual_studio, wsl };
 
@@ -35,7 +36,6 @@ pub const Sidebar = struct {
 };
 
 pub const Data = struct {
-    visual_studio: []const []const u8,
     hidden_wsl_prefixes: []const []const u8,
     profiles: []const Template,
     sidebar: Sidebar,
@@ -116,14 +116,17 @@ pub const List = struct {
         return null;
     }
 
-    fn add(self: *List, t: Template, placeholder: []const u8, value: []const u8) void {
+    /// A placeholder and what replaces it.
+    const Sub = struct { []const u8, []const u8 };
+
+    fn add(self: *List, t: Template, subs: []const Sub) void {
         if (self.len == self.items.len) return;
         const start = self.used;
-        const name_ = self.expand(t.name, placeholder, value) orelse return;
-        const command_ = self.expand(t.command, placeholder, value) orelse return;
-        const icon_ = self.expand(t.icon, placeholder, value) orelse return;
+        const name_ = self.expand(t.name, subs) orelse return;
+        const command_ = self.expand(t.command, subs) orelse return;
+        const icon_ = self.expand(t.icon, subs) orelse return;
         if (t.requires) |r| {
-            const requires = self.expand(r, placeholder, value) orelse return;
+            const requires = self.expand(r, subs) orelse return;
             const exists = programExists(self.str(requires));
             // The requirement is only checked, never kept.
             self.used = requires.start;
@@ -136,22 +139,31 @@ pub const List = struct {
         self.len += 1;
     }
 
-    fn expand(self: *List, template: []const u8, placeholder: []const u8, value: []const u8) ?Text {
+    fn expand(self: *List, template: []const u8, subs: []const Sub) ?Text {
         const out = self.text[self.used..];
         var n: usize = 0;
         var rest = template;
         while (rest.len > 0) {
-            const at = if (placeholder.len > 0) std.mem.indexOf(u8, rest, placeholder) else null;
+            // The earliest placeholder in what is left.
+            var at: ?usize = null;
+            var sub: Sub = .{ "", "" };
+            for (subs) |s| {
+                const i = std.mem.indexOf(u8, rest, s[0]) orelse continue;
+                if (at == null or i < at.?) {
+                    at = i;
+                    sub = s;
+                }
+            }
             const literal = rest[0 .. at orelse rest.len];
             if (n + literal.len > out.len) return null;
             @memcpy(out[n..][0..literal.len], literal);
             n += literal.len;
             rest = rest[literal.len..];
             if (at != null) {
-                if (n + value.len > out.len) return null;
-                @memcpy(out[n..][0..value.len], value);
-                n += value.len;
-                rest = rest[placeholder.len..];
+                if (n + sub[1].len > out.len) return null;
+                @memcpy(out[n..][0..sub[1].len], sub[1]);
+                n += sub[1].len;
+                rest = rest[sub[0].len..];
             }
         }
         const start: u16 = @intCast(self.used);
@@ -162,27 +174,94 @@ pub const List = struct {
 
 pub fn detect() List {
     var list: List = .{};
-    var vs_root: ?[]const u8 = null;
-    for (data.visual_studio) |root| {
-        if (programExists(root)) {
-            vs_root = root;
-            break;
-        }
-    }
     var distros: Distros = .{};
     distros.load();
 
     for (data.profiles) |t| {
         switch (t.source) {
-            .fixed => list.add(t, "", ""),
-            .visual_studio => if (vs_root) |root| list.add(t, "{vs}", root),
+            .fixed => list.add(t, &.{}),
+            .visual_studio => for (VisualStudio.all()) |*vs| {
+                list.add(t, &.{ .{ "{vs}", vs.folder() }, .{ "{vs_year}", vs.year() } });
+            },
             .wsl => {
-                for (distros.names[0..distros.len]) |*name| list.add(t, "{distro}", std.mem.sliceTo(name, 0));
+                for (distros.names[0..distros.len]) |*name| list.add(t, &.{.{ "{distro}", std.mem.sliceTo(name, 0) }});
             },
         }
     }
     return list;
 }
+
+/// Visual Studio installations as its installer records them, the source
+/// vswhere reads: a folder per instance under %ProgramData%\Microsoft\
+/// VisualStudio\Packages\_Instances whose state.json names the install
+/// folder and product year. Read once per run, since detect() runs often.
+const VisualStudio = struct {
+    folder_buf: [260]u8,
+    folder_len: usize,
+    year_buf: [8]u8,
+    year_len: usize,
+
+    var found: [4]VisualStudio = undefined;
+    var count: usize = 0;
+    var loaded = false;
+
+    fn folder(self: *const VisualStudio) []const u8 {
+        return self.folder_buf[0..self.folder_len];
+    }
+
+    fn year(self: *const VisualStudio) []const u8 {
+        return self.year_buf[0..self.year_len];
+    }
+
+    fn all() []const VisualStudio {
+        if (!loaded) {
+            loaded = true;
+            load();
+            // Newest first, as vswhere lists them.
+            std.mem.sort(VisualStudio, found[0..count], {}, struct {
+                fn newer(_: void, a: VisualStudio, b: VisualStudio) bool {
+                    return std.mem.order(u8, a.year(), b.year()) == .gt;
+                }
+            }.newer);
+        }
+        return found[0..count];
+    }
+
+    fn load() void {
+        const alloc = std.heap.page_allocator;
+        const io = global.io();
+        const program_data = global.environ().getAlloc(alloc, "ProgramData") catch return;
+        defer alloc.free(program_data);
+        const root = std.fs.path.join(alloc, &.{ program_data, "Microsoft", "VisualStudio", "Packages", "_Instances" }) catch return;
+        defer alloc.free(root);
+        var dir = std.Io.Dir.cwd().openDir(io, root, .{ .iterate = true }) catch return;
+        defer dir.close(io);
+
+        var it = dir.iterate();
+        while (it.next(io) catch null) |entry| {
+            if (entry.kind != .directory or count == found.len) continue;
+            const path = std.fs.path.join(alloc, &.{ root, entry.name, "state.json" }) catch continue;
+            defer alloc.free(path);
+            const text = std.Io.Dir.cwd().readFileAlloc(io, path, alloc, .limited(16 * 1024 * 1024)) catch continue;
+            defer alloc.free(text);
+            const json = if (std.mem.startsWith(u8, text, "\xEF\xBB\xBF")) text[3..] else text;
+            const State = struct {
+                installationPath: []const u8,
+                catalogInfo: struct { productLineVersion: []const u8 = "" } = .{},
+            };
+            const parsed = std.json.parseFromSlice(State, alloc, json, .{ .ignore_unknown_fields = true }) catch continue;
+            defer parsed.deinit();
+            const state = parsed.value;
+            const vs_year = state.catalogInfo.productLineVersion;
+            if (state.installationPath.len > 260 or vs_year.len > 8) continue;
+            var vs: VisualStudio = .{ .folder_buf = undefined, .folder_len = state.installationPath.len, .year_buf = undefined, .year_len = vs_year.len };
+            @memcpy(vs.folder_buf[0..vs.folder_len], state.installationPath);
+            @memcpy(vs.year_buf[0..vs.year_len], vs_year);
+            found[count] = vs;
+            count += 1;
+        }
+    }
+};
 
 /// A program name on PATH, or an absolute path to a file or folder.
 pub fn programExists(name: []const u8) bool {

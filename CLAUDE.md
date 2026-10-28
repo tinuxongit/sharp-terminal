@@ -154,8 +154,9 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
 - **Shell profiles work like Windows Terminal's.** The arrow beside "+"
   lists installed shells with their icons; Ctrl+Shift+1..9 opens the Nth
   in a new tab (unless the config binds that chord to something else),
-  Shift+click opens it in a new window, and each tab shows its shell's icon. Visual Studio prompts come from the folders listed in
-  `profiles.zon`, and WSL distributions from the Lxss registry key. The
+  Shift+click opens it in a new window, and each tab shows its shell's icon. Visual Studio prompts come from every installation its
+  installer records (the `_Instances` state files vswhere reads), and WSL
+  distributions from the Lxss registry key. The
   Settings > Shell dropdown uses the same list.
 - **Ctrl+, opens the settings panel**, not the config file: in Sharp the
   panel is the config UI. The file is under Settings > Advanced.
@@ -243,8 +244,6 @@ Baseline, 2026-10-28, two runs each:
 - Only ssh.exe is recognized as a server session: PuTTY's plink, mosh or
   `wsl ssh` stay under their folder.
 - A saved session reopens shells, not their output or running programs.
-- Visual Studio is found only in the folders `profiles.zon` lists, not
-  through vswhere, so unusual install locations are missed.
 - A console program started from the tab in a window of its own (`start
   cmd`) ends with the tab, since only the GUI subsystem marks a program
   as independent. If Sharp crashes, nothing ends: the jobs don't kill on

@@ -9,18 +9,13 @@
 // .requires (same form) is missing.
 //
 // .source repeats a profile for what is installed:
-//   .visual_studio  once for the first Visual Studio found in
-//                   .visual_studio; {vs} becomes its folder
+//   .visual_studio  once per Visual Studio installation, newest first, as
+//                   its installer records them; {vs} becomes its folder
+//                   and {vs_year} its version (2022)
 //   .wsl            once per WSL distribution; {distro} becomes its name
 //
 // .default marks the shell new tabs run when `command` is not set.
 .{
-    .visual_studio = .{
-        "C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise",
-        "C:\\Program Files\\Microsoft Visual Studio\\2022\\Professional",
-        "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community",
-        "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools",
-    },
     // Distributions WSL uses internally, hidden as in Windows Terminal.
     .hidden_wsl_prefixes = .{"docker-desktop"},
     .profiles = .{
@@ -34,14 +29,14 @@
             .requires = "C:\\Program Files\\Git\\bin\\bash.exe",
         },
         .{
-            .name = "Developer Command Prompt for VS 2022",
+            .name = "Developer Command Prompt for VS {vs_year}",
             .source = .visual_studio,
             .command = "cmd.exe /k \"{vs}\\Common7\\Tools\\VsDevCmd.bat\"",
             .icon = "cmd.exe",
             .requires = "{vs}\\Common7\\Tools\\VsDevCmd.bat",
         },
         .{
-            .name = "Developer PowerShell for VS 2022",
+            .name = "Developer PowerShell for VS {vs_year}",
             .source = .visual_studio,
             .command = "powershell.exe -NoExit -Command \"&{Import-Module '{vs}\\Common7\\Tools\\Microsoft.VisualStudio.DevShell.dll'; Enter-VsDevShell -VsInstallPath '{vs}' -SkipAutomaticLocation}\"",
             .icon = "powershell.exe",
