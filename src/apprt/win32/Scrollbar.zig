@@ -2,6 +2,7 @@
 //! docs/superpowers/specs/2026-04-29-win32-themed-scrollbar-design.md
 
 const std = @import("std");
+const prompt_marks = @import("prompt_marks.zig");
 const builtin = @import("builtin");
 const w32 = @import("win32.zig");
 const brand = @import("brand.zig");
@@ -161,6 +162,8 @@ pub const Scrollbar = struct {
 
     /// Latest scroll state from the core. Initially zero.
     state: terminal.Scrollbar = .zero,
+    /// Where prompts start, drawn as ticks on the track.
+    marks: prompt_marks.Marks = .{},
     /// True until the first update() call — used to suppress fade-in on startup.
     first_update: bool = true,
 
@@ -251,7 +254,8 @@ pub const Scrollbar = struct {
     /// Update the cached scroll state and repaint if anything changed.
     pub fn update(self: *Scrollbar, state: terminal.Scrollbar) void {
         const was_first = self.first_update;
-        const changed =
+        const marks_changed = prompt_marks.refresh(&self.marks, &self.surface.core_surface, state.total, w32.GetTickCount64());
+        const changed = marks_changed or
             self.state.total != state.total or
             self.state.offset != state.offset or
             self.state.len != state.len;
@@ -435,6 +439,19 @@ pub const Scrollbar = struct {
             var x: i32 = 0;
             while (x < w) : (x += 1) {
                 pixels[@intCast(y * w + x)] = thumb_color;
+            }
+        }
+
+        // A tick where each prompt starts, over the track and the thumb.
+        if (self.state.total == 0 or thumb_alpha == 0) return;
+        const tick = packBGRA(self.fg, @max(thumb_alpha, 200));
+        const tick_h = @max(1, self.dpiScaled(2));
+        for (self.marks.slice()) |row| {
+            const top: i32 = @intCast(@as(u64, row) * @as(u64, @intCast(h)) / self.state.total);
+            var ty = top;
+            while (ty < top + tick_h and ty < h) : (ty += 1) {
+                var x: i32 = @divTrunc(w, 4);
+                while (x < w) : (x += 1) pixels[@intCast(ty * w + x)] = tick;
             }
         }
     }
