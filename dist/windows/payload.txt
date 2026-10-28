@@ -1,0 +1,15 @@
+# What a Sharp install holds, relative to the build's prefix (zig-out).
+# A path ending in / is a folder copied whole. Read by stage.sh (for
+# package.sh and release.sh) and by install-dev.ps1.
+bin/sharp.exe
+bin/conpty.dll
+bin/OpenConsole.exe
+bin/WebView2Loader.dll
+bin/sharp-mcp.exe
+share/terminfo/ghostty.terminfo
+share/licenses/conpty/LICENSE.txt
+share/licenses/sharp/LICENSE.txt
+share/licenses/webview2/LICENSE.txt
+share/licenses/thesvg/LICENSE.txt
+share/ghostty/themes/
+share/ghostty/shell-integration/

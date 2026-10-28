@@ -55,6 +55,7 @@ const window_messages = @import("window_messages.zig");
 const global_hotkey = @import("global_hotkey.zig");
 const background_style = @import("background_style.zig");
 const clipboard_keys = @import("clipboard_keys.zig");
+const updater = @import("updater.zig");
 const browser_remote = @import("browser_remote.zig");
 const mcp_server = @import("mcp_server.zig");
 
@@ -82,6 +83,9 @@ pub const WM_APP_OPEN_URL: u32 = w32.WM_APP + 4;
 
 /// Posted by ai_usage.zig's thread when it has read new usage.
 pub const WM_APP_AI_USAGE: u32 = w32.WM_APP + 5;
+
+/// Posted by updater.zig's thread when an update's state changes.
+pub const WM_APP_UPDATE: u32 = w32.WM_APP + 7;
 
 /// Timer ID for the quit-after-last-window-closed delay.
 const QUIT_TIMER_ID: usize = 1;
@@ -305,6 +309,8 @@ pub fn init(
     // Register global hotkey for quick terminal (if configured).
     global_hotkey.registerGlobalHotkey(self);
 
+    self.configureUpdater();
+
     // Claude's browser tools, only while the browser is switched on.
     browser_remote.target = self.msg_hwnd;
     mcp_server.setEnabled(self.config.@"ai-tools-browser");
@@ -502,6 +508,7 @@ pub fn run(self: *App) !void {
 
 pub fn terminate(self: *App) void {
     self.stopQuitTimer();
+    updater.installOnQuit();
 
     // Unregister all global hotkeys.
     for (self.global_hotkeys.items) |hk| _ = w32.UnregisterHotKey(null, hk.id);
@@ -612,6 +619,32 @@ pub fn openConfigFile(self: *App, how: apprt.action.OpenConfig) bool {
 }
 
 /// Save the open tabs for the sidebar layout to reopen at startup.
+/// Follow the auto-update settings: `auto-update = off` stops the
+/// automatic checks (check and download both download on Windows), and
+/// `auto-update-channel = tip` follows nightlies.
+pub fn configureUpdater(self: *App) void {
+    const hwnd = self.msg_hwnd orelse return;
+    const channel: updater.Channel = if (self.config.@"auto-update-channel") |c| switch (c) {
+        .stable => .stable,
+        .tip => .nightly,
+    } else updater.buildChannel();
+    updater.configure(hwnd, WM_APP_UPDATE, self.config.@"auto-update" != .off, channel);
+}
+
+/// Restart into a downloaded update, after asking: running programs end.
+pub fn restartToUpdate(self: *App, owner: ?w32.HWND) void {
+    var buf: [600]u8 = undefined;
+    var wide: [600]u16 = undefined;
+    _ = wide_string.fromUtf8(&wide, updater.restartPrompt(&buf));
+    var title: [64]u16 = undefined;
+    _ = wide_string.fromUtf8(&title, updater.data.restart_title);
+    if (w32.MessageBoxW(owner, @ptrCast(&wide), @ptrCast(&title), w32.MB_YESNO | w32.MB_ICONQUESTION) != w32.IDYES) return;
+    self.saveSession();
+    if (!updater.install(true)) return;
+    self.quit_requested = true;
+    w32.PostQuitMessage(0);
+}
+
 pub fn saveSession(self: *App) void {
     if (self.config.@"window-tab-bar-position" != .sidebar or self.restoring_session) return;
     var windows: [16]session.Window = undefined;
@@ -1089,6 +1122,20 @@ fn msgWndProc(
 
     if (msg == WM_APP_AI_USAGE) {
         for (app.windows.items) |window| window.invalidateTabBar();
+        return 0;
+    }
+
+    if (msg == WM_APP_UPDATE) {
+        for (app.windows.items) |window| window.invalidateTabBar();
+        var buf: [1024]u8 = undefined;
+        if (updater.takeReport(&buf)) |text| {
+            var wide: [512]u16 = undefined;
+            _ = wide_string.fromUtf8(&wide, text);
+            var title: [64]u16 = undefined;
+            _ = wide_string.fromUtf8(&title, updater.data.restart_title);
+            const owner = if (app.windows.items.len > 0) app.windows.items[0].hwnd else null;
+            _ = w32.MessageBoxW(owner, @ptrCast(&wide), @ptrCast(&title), w32.MB_OK | w32.MB_ICONINFORMATION);
+        }
         return 0;
     }
 

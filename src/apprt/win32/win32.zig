@@ -925,7 +925,9 @@ pub extern "user32" fn SendMessageW(
 // MessageBox API
 // -----------------------------------------------------------------------
 
+pub const MB_OK: u32 = 0x00000000;
 pub const MB_OKCANCEL: u32 = 0x00000001;
+pub const MB_ICONQUESTION: u32 = 0x00000020;
 pub const MB_YESNO: u32 = 0x00000004;
 pub const MB_ICONWARNING: u32 = 0x00000030;
 pub const MB_DEFBUTTON2: u32 = 0x00000100;
@@ -1908,3 +1910,20 @@ pub const FILE_ATTRIBUTE_NORMAL: u32 = 0x80;
 pub const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
 pub extern "kernel32" fn CreateDirectoryW(lpPathName: [*:0]const u16, lpSecurityAttributes: ?*anyopaque) callconv(.winapi) i32;
 pub extern "kernel32" fn MoveFileExW(lpExistingFileName: [*:0]const u16, lpNewFileName: [*:0]const u16, dwFlags: u32) callconv(.winapi) i32;
+
+// WinHTTP, Windows' own HTTP client, for the updater.
+pub const HINTERNET = *opaque {};
+pub const WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY: u32 = 4;
+pub const WINHTTP_FLAG_SECURE: u32 = 0x00800000;
+pub const WINHTTP_QUERY_STATUS_CODE: u32 = 19;
+pub const WINHTTP_QUERY_FLAG_NUMBER: u32 = 0x20000000;
+pub extern "winhttp" fn WinHttpOpen(pszAgentW: [*:0]const u16, dwAccessType: u32, pszProxyW: ?[*:0]const u16, pszProxyBypassW: ?[*:0]const u16, dwFlags: u32) callconv(.winapi) ?HINTERNET;
+pub extern "winhttp" fn WinHttpSetTimeouts(hInternet: HINTERNET, nResolveTimeout: c_int, nConnectTimeout: c_int, nSendTimeout: c_int, nReceiveTimeout: c_int) callconv(.winapi) i32;
+pub extern "winhttp" fn WinHttpConnect(hSession: HINTERNET, pswzServerName: [*:0]const u16, nServerPort: u16, dwReserved: u32) callconv(.winapi) ?HINTERNET;
+pub extern "winhttp" fn WinHttpOpenRequest(hConnect: HINTERNET, pwszVerb: [*:0]const u16, pwszObjectName: [*:0]const u16, pwszVersion: ?[*:0]const u16, pwszReferrer: ?[*:0]const u16, ppwszAcceptTypes: ?*const ?[*:0]const u16, dwFlags: u32) callconv(.winapi) ?HINTERNET;
+pub extern "winhttp" fn WinHttpSendRequest(hRequest: HINTERNET, lpszHeaders: ?[*]const u16, dwHeadersLength: u32, lpOptional: ?*anyopaque, dwOptionalLength: u32, dwTotalLength: u32, dwContext: usize) callconv(.winapi) i32;
+pub extern "winhttp" fn WinHttpReceiveResponse(hRequest: HINTERNET, lpReserved: ?*anyopaque) callconv(.winapi) i32;
+pub extern "winhttp" fn WinHttpQueryHeaders(hRequest: HINTERNET, dwInfoLevel: u32, pwszName: ?[*:0]const u16, lpBuffer: ?*anyopaque, lpdwBufferLength: *u32, lpdwIndex: ?*u32) callconv(.winapi) i32;
+pub extern "winhttp" fn WinHttpReadData(hRequest: HINTERNET, lpBuffer: [*]u8, dwNumberOfBytesToRead: u32, lpdwNumberOfBytesRead: *u32) callconv(.winapi) i32;
+pub extern "winhttp" fn WinHttpCloseHandle(hInternet: HINTERNET) callconv(.winapi) i32;
+pub extern "kernel32" fn DeleteFileW(lpFileName: [*:0]const u16) callconv(.winapi) i32;

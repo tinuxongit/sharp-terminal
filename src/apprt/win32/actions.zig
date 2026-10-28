@@ -23,6 +23,7 @@ const App = @import("App.zig");
 const global_hotkey = @import("global_hotkey.zig");
 const mcp_server = @import("mcp_server.zig");
 const claude_mcp = @import("claude_mcp.zig");
+const updater = @import("updater.zig");
 const pane_mouse = @import("pane_mouse.zig");
 
 pub fn performAction(
@@ -147,6 +148,7 @@ pub fn performAction(
                 const browser_was = self.config.@"ai-tools-browser";
                 self.config.deinit();
                 self.config = new_config;
+                self.configureUpdater();
 
                 // The browser switch also connects Claude Code to Sharp.
                 if (new_config.@"ai-tools-browser" != browser_was) {
@@ -977,7 +979,10 @@ pub fn performAction(
         },
 
         // Sharp publishes no releases to check against.
-        .check_for_updates => return false,
+        .check_for_updates => {
+            updater.checkNow();
+            return true;
+        },
 
         .toggle_command_palette => {
             switch (target) {

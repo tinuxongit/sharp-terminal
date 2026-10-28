@@ -273,6 +273,7 @@ fn useControl(self: *SettingsPanel, ref: settings.Ref, rect: w32.RECT) void {
         },
         .action => switch (setting.action.?) {
             .edit_file => self.host.edit_file(self.host.ctx),
+            .check_updates => @import("updater.zig").checkNow(),
             .reload => {
                 self.host.reload(self.host.ctx);
                 self.refresh();

@@ -195,6 +195,7 @@ pub fn handleTabBarClick(self: *Window, x: i16, y: i16) void {
         .tab_close => |i| Window.strip_mouse.closeTabFromStrip(self, i),
         .settings => self.openSettings(),
         .browser => browser_dock.toggle(self),
+        .update => self.app.restartToUpdate(self.hwnd),
         .new_tab_menu => self.showNewTabMenu(),
         .tab => |i| {
             self.selectTabIndex(i);

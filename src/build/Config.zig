@@ -38,6 +38,11 @@ wasm_shared: bool = true,
 /// Ghostty exe properties
 exe_entrypoint: ExeEntrypoint = .ghostty,
 version: std.SemanticVersion = .{ .major = 0, .minor = 0, .patch = 0 },
+/// Sharp's own version (dist/windows/VERSION, or -Dsharp-version for a
+/// release) and the update channel the build follows; programs still see
+/// Ghostty's version above.
+sharp_version: []const u8 = "0.0.0",
+sharp_channel: SharpChannel = .dev,
 lib_version: std.SemanticVersion = .{ .major = 0, .minor = 0, .patch = 0 },
 
 /// Binary properties
@@ -73,6 +78,9 @@ is_dep: bool = false,
 
 /// Environmental properties
 env: *const std.process.Environ.Map,
+
+/// The update channel a Sharp build follows; see sharp_channel.
+pub const SharpChannel = enum { dev, stable, nightly };
 
 pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Config {
     // Setup our standard Zig target and optimize options, i.e.
@@ -194,6 +202,22 @@ pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Conf
         "font-backend",
         "The font backend to use for discovery and rasterization.",
     ) orelse FontBackend.default(target.result, wasm_target);
+
+    config.sharp_version = b.option(
+        []const u8,
+        "sharp-version",
+        "Sharp's version, as releases publish it. Defaults to dist/windows/VERSION.",
+    ) orelse if (b.root.root_dir.handle.readFileAlloc(
+        b.graph.io,
+        "dist/windows/VERSION",
+        b.allocator,
+        .limited(64),
+    )) |content| std.mem.trim(u8, content, &std.ascii.whitespace) else |_| "0.0.0";
+    config.sharp_channel = b.option(
+        SharpChannel,
+        "sharp-channel",
+        "The update channel a Sharp release follows; dev builds never update.",
+    ) orelse .dev;
 
     config.app_runtime = b.option(
         ApprtRuntime,
@@ -701,6 +725,8 @@ pub fn addOptions(self: *const Config, step: *std.Build.Step.Options) !void {
     // accommodate realistic large branch names for dev versions.
     var app_version_buf: [1024]u8 = undefined;
     step.addOption(std.SemanticVersion, "app_version", self.version);
+    step.addOption([]const u8, "sharp_version", self.sharp_version);
+    step.addOption(SharpChannel, "sharp_channel", self.sharp_channel);
     step.addOption([:0]const u8, "app_version_string", try std.mem.printSentinel(
         &app_version_buf,
         "{f}",

@@ -17,6 +17,7 @@ const tab_strip = @import("tab_strip.zig");
 const SettingsPanel = @import("SettingsPanel.zig");
 const BrowserPanel = @import("BrowserPanel.zig");
 const browser_dock = @import("browser_dock.zig");
+const updater = @import("updater.zig");
 const profiles = @import("profiles.zig");
 const new_tab_menu = @import("new_tab_menu.zig");
 const tab_sidebar = @import("tab_sidebar.zig");
@@ -462,6 +463,7 @@ pub fn stripLayout(self: *const Window) tab_strip.Layout {
         .sidebar = self.sidebarMode(),
         .caption_buttons = self.integratedTitleBar(),
         .browser = browser_dock.enabled(self),
+        .update = !self.is_quick_terminal and updater.snapshot().status == .ready,
         .frozen_tab_width = self.frozen_tab_width,
     };
 }

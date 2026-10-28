@@ -13,13 +13,12 @@ if ($InstallRoot.StartsWith('\\')) {
     throw 'InstallRoot must be a local Windows path, not a WSL or network path.'
 }
 
-$requiredFiles = @(
-    'bin\sharp.exe', 'bin\conpty.dll', 'bin\OpenConsole.exe', 'bin\WebView2Loader.dll', 'bin\sharp-mcp.exe',
-    'share\terminfo\ghostty.terminfo', 'share\licenses\conpty\LICENSE.txt',
-    'share\licenses\sharp\LICENSE.txt', 'share\licenses\webview2\LICENSE.txt',
-    'share\licenses\thesvg\LICENSE.txt'
-)
-$resourceDirs = @('share\ghostty\themes', 'share\ghostty\shell-integration')
+# payload.txt lists what an install holds: files, and folders ending in /.
+$payload = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'payload.txt') |
+    Where-Object { $_ -and -not $_.StartsWith('#') } |
+    ForEach-Object { $_.Replace('/', '\') }
+$requiredFiles = @($payload | Where-Object { -not $_.EndsWith('\') })
+$resourceDirs = @($payload | Where-Object { $_.EndsWith('\') } | ForEach-Object { $_.TrimEnd('\') })
 foreach ($relativePath in $requiredFiles) {
     if (-not (Test-Path -LiteralPath (Join-Path $BuildDir $relativePath) -PathType Leaf)) {
         throw "Incomplete build: missing $relativePath"

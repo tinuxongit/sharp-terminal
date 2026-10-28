@@ -18,57 +18,14 @@ cd "$REPO_DIR"
 echo "Building sharp (optimize=$OPTIMIZE)..."
 zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize="$OPTIMIZE"
 
-for resource in bin/sharp.exe bin/conpty.dll bin/OpenConsole.exe bin/WebView2Loader.dll bin/sharp-mcp.exe share/terminfo/ghostty.terminfo share/licenses/conpty/LICENSE.txt share/licenses/sharp/LICENSE.txt share/licenses/webview2/LICENSE.txt share/licenses/thesvg/LICENSE.txt; do
-    if [ ! -f "zig-out/$resource" ]; then
-        echo "ERROR: Incomplete Windows build — zig-out/$resource not found" >&2
-        exit 1
-    fi
-done
-
-# Get version string
-VERSION="$(powershell.exe -Command "& '.\\zig-out\\bin\\sharp.exe' --version" 2>/dev/null | head -1 | tr -d '\r' | awk '{print $2}')" || true
-if [ -z "$VERSION" ]; then
-    VERSION="$(git describe --tags --always 2>/dev/null || echo 'dev')"
-fi
+# Sharp's own version; sharp.exe --version prints Ghostty's.
+VERSION="$(tr -d '[:space:]' < "$SCRIPT_DIR/VERSION")"
 echo "Version: $VERSION"
 
-# Create staging directory
+# Stage the payload (payload.txt) as Sharp runs from it.
 STAGE_DIR="$REPO_DIR/dist/windows/_stage/sharp"
 rm -rf "$REPO_DIR/dist/windows/_stage"
-mkdir -p "$STAGE_DIR"
-
-# Keep the matching console runtime pair beside the executable.
-for binary in sharp.exe conpty.dll OpenConsole.exe WebView2Loader.dll sharp-mcp.exe; do
-    cp "zig-out/bin/$binary" "$STAGE_DIR/"
-    echo "  $binary"
-done
-for license in conpty sharp webview2; do
-    mkdir -p "$STAGE_DIR/share/licenses/$license"
-    cp "zig-out/share/licenses/$license/LICENSE.txt" "$STAGE_DIR/share/licenses/$license/"
-    echo "  share/licenses/$license/LICENSE.txt"
-done
-
-# Copy share resources (themes, shell-integration)
-if [ -d zig-out/share/ghostty ]; then
-    mkdir -p "$STAGE_DIR/share/ghostty"
-    cp -r zig-out/share/ghostty/themes "$STAGE_DIR/share/ghostty/"
-    cp -r zig-out/share/ghostty/shell-integration "$STAGE_DIR/share/ghostty/"
-    THEME_COUNT=$(ls "$STAGE_DIR/share/ghostty/themes/" 2>/dev/null | wc -l)
-    echo "  share/ghostty/themes/ ($THEME_COUNT themes)"
-    echo "  share/ghostty/shell-integration/"
-fi
-
-# Copy the terminfo source file. resourcesDir() (src/os/resourcesdir.zig)
-# uses share/terminfo/ghostty.terminfo as the Windows sentinel; without it,
-# theme loading silently fails on fresh extracts. The compiled terminfo
-# tree contains symlinks Windows ZIP tools can't handle, so we ship only
-# the plain-text source — native Windows apps don't read terminfo anyway,
-# and WSL/SSH users get terminfo from the Linux side.
-if [ -f zig-out/share/terminfo/ghostty.terminfo ]; then
-    mkdir -p "$STAGE_DIR/share/terminfo"
-    cp zig-out/share/terminfo/ghostty.terminfo "$STAGE_DIR/share/terminfo/"
-    echo "  share/terminfo/ghostty.terminfo (resource sentinel)"
-fi
+"$SCRIPT_DIR/stage.sh" zig-out "$STAGE_DIR"
 
 # Create a minimal README
 cat > "$STAGE_DIR/README.txt" << READMEEOF
@@ -88,11 +45,11 @@ KEYBOARD SHORTCUTS
   Ctrl+Shift+O        Split right
   Ctrl+Shift+E        Split down
   Ctrl+Shift+[ / ]    Navigate splits
-  Ctrl+Shift+C / V    Copy / Paste
+  Ctrl+C / Ctrl+V     Copy (a selection) / Paste
   Ctrl+Shift+F        Find
   Ctrl+Enter          Toggle fullscreen
   Ctrl+= / - / 0      Zoom in / out / reset
-  Ctrl+,              Open config file
+  Ctrl+,              Settings
 
 SHELL INTEGRATION (PowerShell)
   Windows PowerShell 5.1 (powershell.exe) and PowerShell 7 (pwsh.exe)

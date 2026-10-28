@@ -23,6 +23,8 @@ pub const Part = union(enum) {
     new_tab,
     /// The arrow beside "+" that opens the shell profile menu.
     new_tab_menu,
+    /// Shown once an update is downloaded: restarts into it.
+    update,
     /// The globe that shows or hides the browser panel.
     browser,
     settings,
@@ -100,6 +102,8 @@ pub const Layout = struct {
     sidebar: bool = false,
     /// Settings > AI > Tools > Browser is on, so the globe shows.
     browser: bool = false,
+    /// An update is ready to install.
+    update: bool = false,
 
     pub fn height(self: Layout) i32 {
         if (!self.show_tabs and !self.caption_buttons and !self.sidebar) return 0;
@@ -116,22 +120,44 @@ pub const Layout = struct {
 
     /// The right edge that tabs and buttons may not cross.
     fn limit(self: Layout) i32 {
-        const buttons: i32 = @intCast(self.rightButtons().len);
+        const buttons: i32 = @intCast(self.rightButtons().len());
         const gap = if (self.caption_buttons) self.px(drag_space) else self.px(edge_margin);
         return self.width - buttons * self.px(caption_button_width) - gap;
     }
 
-    /// The buttons at the right end of the strip, left to right. Settings
-    /// sits beside minimize, with the globe before it.
-    pub fn rightButtons(self: Layout) []const Part {
+    /// The buttons at the right end of the strip, left to right: the
+    /// update button and the globe when they show, then settings beside
+    /// minimize.
+    pub fn rightButtons(self: Layout) RightButtons {
+        var buttons: RightButtons = .{};
+        if (self.update) buttons.add(.update);
+        if (self.browser) buttons.add(.browser);
+        buttons.add(.settings);
         if (self.caption_buttons) {
-            return if (self.browser)
-                &.{ .browser, .settings, .minimize, .maximize, .close }
-            else
-                &.{ .settings, .minimize, .maximize, .close };
+            buttons.add(.minimize);
+            buttons.add(.maximize);
+            buttons.add(.close);
         }
-        return if (self.browser) &.{ .browser, .settings } else &.{.settings};
+        return buttons;
     }
+
+    pub const RightButtons = struct {
+        items: [6]Part = undefined,
+        count: usize = 0,
+
+        fn add(self: *RightButtons, part: Part) void {
+            self.items[self.count] = part;
+            self.count += 1;
+        }
+
+        pub fn len(self: *const RightButtons) usize {
+            return self.count;
+        }
+
+        pub fn slice(self: *const RightButtons) []const Part {
+            return self.items[0..self.count];
+        }
+    };
 
     pub fn tabWidth(self: Layout) i32 {
         if (self.tab_count == 0) return 0;
@@ -218,17 +244,18 @@ pub const Layout = struct {
     pub fn rightButtonRect(self: Layout, part: Part) w32.RECT {
         const buttons = self.rightButtons();
         const w = self.px(caption_button_width);
-        const index = for (buttons, 0..) |b, i| {
+        const index = for (buttons.slice(), 0..) |b, i| {
             if (b.eql(part)) break i;
         } else unreachable;
-        const from_right: i32 = @intCast(buttons.len - index);
+        const from_right: i32 = @intCast(buttons.len() - index);
         const left = self.width - from_right * w;
         return .{ .left = left, .top = 0, .right = left + w, .bottom = self.height() };
     }
 
     pub fn hitTest(self: Layout, x: i32, y: i32) Part {
         if (y < 0 or y >= self.height() or x < 0 or x >= self.width) return .none;
-        for (self.rightButtons()) |part| {
+        const buttons = self.rightButtons();
+        for (buttons.slice()) |part| {
             if (contains(self.rightButtonRect(part), x, y)) return part;
         }
         if (self.show_tabs) {
@@ -270,6 +297,9 @@ pub const Palette = struct {
     text_dim: Rgb,
     contrast: Rgb,
 
+    /// The update button's green, which stands out on any theme.
+    const update: Rgb = .{ .r = 0x3F, .g = 0xB9, .b = 0x50 };
+
     /// Windows 11's close-button red.
     const close_hover: Rgb = .{ .r = 0xC4, .g = 0x2B, .b = 0x1C };
     const close_pressed: Rgb = .{ .r = 0xB2, .g = 0x27, .b = 0x1A };
@@ -301,6 +331,8 @@ const Glyph = enum(u16) {
     chevron_down = 0xE70D,
     settings = 0xE713,
     globe = 0xE774,
+    /// Segoe's "update restore": an arrow around, as Windows Update shows.
+    update = 0xE777,
 };
 
 pub const Fonts = struct {
@@ -365,7 +397,8 @@ pub fn paint(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, tit
         }
     }
 
-    for (layout.rightButtons()) |part| {
+    const buttons = layout.rightButtons();
+    for (buttons.slice()) |part| {
         const rect = layout.rightButtonRect(part);
         const hovered = view.hover.eql(part);
         // The settings button stays lit while its panel is open, and the
@@ -384,18 +417,21 @@ pub fn paint(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, tit
         const glyph: Glyph = switch (part) {
             .settings => .settings,
             .browser => .globe,
+            .update => .update,
             .minimize => .minimize,
             .maximize => if (view.maximized) .restore else .maximize,
             else => .close,
         };
         const color = if (hovered and is_close)
             Rgb.white
+        else if (part == .update)
+            Palette.update
         else if (view.window_active or hovered)
             palette.text
         else
             palette.text_dim;
         // The gear reads smaller than the caption glyphs at the same size.
-        const large = part == .settings or part == .browser;
+        const large = part == .settings or part == .browser or part == .update;
         canvas.glyph(rect, @backingInt(glyph), if (large) fonts.icons_large else fonts.icons, color);
     }
     canvas.sync();

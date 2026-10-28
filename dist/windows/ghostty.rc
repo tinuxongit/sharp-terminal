@@ -8,13 +8,11 @@ RT_MANIFEST 24 "ghostty.manifest"
 #define ID_ICON_GHOSTTY 1
 ID_ICON_GHOSTTY ICON "sharp.ico"
 
-// Version info — shown in Explorer's Properties → Details and used by
-// signtool / installer tooling. The numbers here are baseline; the
-// actual build-time version comes from build_config.version, but the
-// PE resource needs static values at link time.
-//
-// Update FILEVERSION/PRODUCTVERSION when bumping for a release. The
-// commas in the comma-form are 16-bit fields: MAJOR,MINOR,PATCH,BUILD.
+// Version info — shown in Explorer's Properties → Details and read by the
+// installer and the updater. The build defines SHARP_FILEVERSION and
+// SHARP_VERSION_STR from dist/windows/VERSION (or a release's
+// -Dsharp-version). The comma form is 16-bit fields: MAJOR,MINOR,PATCH,
+// and a nightly's run number.
 //
 // VS_VERSION_INFO must resolve to numeric resource ID 1; winres.h
 // normally defines it, but this file is compiled without it, so the
@@ -22,8 +20,8 @@ ID_ICON_GHOSTTY ICON "sharp.ico"
 // and Explorer never find.
 #define VS_VERSION_INFO 1
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION    0,1,0,0
-PRODUCTVERSION 0,1,0,0
+FILEVERSION    SHARP_FILEVERSION
+PRODUCTVERSION SHARP_FILEVERSION
 FILEFLAGSMASK  0x3F
 FILEFLAGS      0x0
 FILEOS         0x40004 // VOS_NT_WINDOWS32
@@ -37,12 +35,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "Sharp"
             VALUE "FileDescription",  "Sharp terminal emulator"
-            VALUE "FileVersion",      "0.1.0"
+            VALUE "FileVersion",      SHARP_VERSION_STR
             VALUE "InternalName",     "sharp"
             VALUE "LegalCopyright",   "MIT License. See share\\licenses\\sharp\\LICENSE.txt."
             VALUE "OriginalFilename", "sharp.exe"
             VALUE "ProductName",      "Sharp"
-            VALUE "ProductVersion",   "0.1.0"
+            VALUE "ProductVersion",   SHARP_VERSION_STR
         END
     END
     BLOCK "VarFileInfo"

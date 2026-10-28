@@ -137,6 +137,18 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/spots.zig`: clickable regions recorded while painting.
 - `src/apprt/win32/config_file.zig`: reads and changes one key of the
   user's Ghostty config file, leaving the rest of it untouched.
+- `src/apprt/win32/updater.zig`: finds, downloads and verifies a newer
+  release on a background thread, and runs its installer. `updates.zon`
+  holds the repository, timings, asset names and text;
+  `release_version.zig` reads and orders release versions; `https.zig`
+  fetches over WinHTTP.
+- `dist/windows/VERSION`: Sharp's version, read by the build
+  (`-Dsharp-version`) for the exe's version resource and the updater.
+- `dist/windows/payload.txt`: the files a Sharp install holds, read by
+  `stage.sh` (for `package.sh` and `release.sh`) and `install-dev.ps1`.
+- `dist/windows/installer.nsi`: the NSIS installer and uninstaller.
+- `dist/windows/release.sh`: builds, packages and publishes a stable or
+  nightly release on GitHub (`--dry-run` stops before publishing).
 - `src/font/directwrite.zig`: finds system fonts on Windows.
 - `dist/windows/`: icon, resource file and packaging scripts. `sharp.ico`
   is drawn by `make_logo.py` (Pillow): `python make_logo.py sharp.ico
@@ -398,9 +410,29 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   beside a portable copy is ignored; checked 2026-10-28 by planting junk
   copies of each non-KnownDLL import. Windows ignores the field unless the
   structure has its full Windows 10 size (0x140).
-- **Sharp has its own version (0.1.0), in `dist/windows/ghostty.rc`.**
-  `TERM_PROGRAM_VERSION` keeps Ghostty's, which tells programs which
-  Ghostty features to expect.
+- **Sharp has its own version, in `dist/windows/VERSION`.** The build
+  writes it into the exe's version resource. `TERM_PROGRAM_VERSION` keeps
+  Ghostty's, which tells programs which Ghostty features to expect.
+- **Sharp installs and updates itself as T3 Code does.** The installer is
+  NSIS, one-click and per user: no wizard, no admin rights,
+  `%LOCALAPPDATA%\Programs\Sharp`, a Start Menu shortcut, a desktop one
+  on the first interactive install, and an entry in Installed apps.
+  Releases live on GitHub in two channels: stable `vX.Y.Z` (latest) and
+  nightly `vX.Y.Z-nightly.YYYYMMDD.N` (prerelease), each with its
+  installer and `SHA256SUMS`. Sharp asks GitHub's API 20 s after starting
+  and then every 4 minutes, downloads a newer installer of its channel in
+  the background, and installs it only if the hash matches. A green button
+  beside the gear restarts into it; otherwise it installs silently when
+  Sharp quits. Ghostty's own keys drive it: `auto-update` (`off` stops
+  it) and `auto-update-channel` (`stable`, or `tip` for nightly; unset
+  means the channel the copy was built for), offered under Settings >
+  General > Updates. A local build (`-Dsharp-channel=dev`, the default)
+  never updates. The installer waits for a running Sharp to let go of its
+  files before replacing them. Checked 2026-10-28 with a nightly
+  installer: silent install, waiting on a locked `sharp.exe`, and a clean
+  uninstall; an update from a real release is not checked yet. There is
+  no code signing, so SmartScreen warns on the first manual install
+  (T3 Code signs with Azure Trusted Signing).
 - **Sharp to people, Ghostty to programs.** The exe, window text, dialogs and
   version info say Sharp. `TERM_PROGRAM`, terminfo, `GHOSTTY_*` variables,
   `share\ghostty` resources and the `%LOCALAPPDATA%\ghostty` config folder

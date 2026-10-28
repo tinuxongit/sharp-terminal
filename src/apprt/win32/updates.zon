@@ -1,0 +1,23 @@
+// How Sharp updates itself (updater.zig): where releases are published,
+// how often it asks, and what it tells the user. Checked when Sharp is
+// compiled. {version} and {error} are filled in.
+.{
+    .repository = "tinuxongit/sharp-terminal",
+    // How often Sharp asks GitHub for a newer release, as T3 Code does,
+    // and how long after starting it asks first, so startup stays quick.
+    .check_minutes = 4,
+    .first_check_seconds = 20,
+    // A release's installer and checksums, as dist/windows/release.sh
+    // names them.
+    .installer = "Sharp-{version}-x64-setup.exe",
+    .checksums = "SHA256SUMS",
+    .max_installer_mb = 200,
+
+    .restart_title = "Update Sharp",
+    .restart_prompt = "Restart Sharp to update to {version}?\n\nPrograms running in its tabs will end. In Workspace mode the tabs reopen, with their folders and Claude Code conversations.",
+    .up_to_date = "Sharp {version} is up to date.",
+    .downloading = "Sharp {version} is downloading. When it's ready, an update button appears beside the gear.",
+    .ready = "Sharp {version} is ready. Click the update button beside the gear to restart into it, or it installs when Sharp closes.",
+    .dev_build = "This copy of Sharp was built locally, so it doesn't update itself. Install Sharp from its releases to get updates.",
+    .check_failed = "Sharp couldn't check for updates ({error}). It tries again in a few minutes.",
+}

@@ -40,3 +40,7 @@ dist/windows/ghostty-windows-x64-*.zip
 .claude/
 
 /sprite_face_test*
+
+# Packaging and release output (package.sh, release.sh)
+dist/windows/_stage/
+dist/windows/_release/
