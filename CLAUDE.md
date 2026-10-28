@@ -142,6 +142,8 @@ commands and conventions; this file covers what is specific to Sharp.
   `terminal_handoff.zig` is the COM class Windows Terminal's console hands
   each console to; `src/os/console_handoff.zig` keeps it until its tab's
   IO thread takes it (`Pty.adopt` in `src/pty.zig`).
+- `src/apprt/win32/elevation.zig`: administrator tabs: whether Sharp is
+  elevated, and opening a profile in an elevated Sharp.
 - `src/apprt/win32/closed_tabs.zig`: the last ten closed tabs, for
   reopening.
 - `src/apprt/win32/user_environment.zig`: the variables a new tab starts
@@ -425,6 +427,15 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   beside a portable copy is ignored; checked 2026-10-28 by planting junk
   copies of each non-KnownDLL import. Windows ignores the field unless the
   structure has its full Windows 10 size (0x140).
+- **Administrator tabs open in an elevated window, as in Windows
+  Terminal.** An unelevated process can't start an elevated console, so
+  Ctrl+click on a profile (the "+" menu and the sidebar's menus) starts
+  Sharp as administrator through `runas` with `--command` and
+  `--working-directory`. An elevated Sharp shows a shield before its tabs
+  and "Administrator:" in its title, and neither restores nor saves the
+  session, installs updates or takes default-terminal consoles. Checked
+  2026-10-28 that those arguments open the profile in the folder; the
+  consent prompt itself needs a person.
 - **Closed tabs reopen as the session would restore them.** Windows has
   no undo manager, so Ghostty's `undo` (the palette's "Reopen Closed
   Tab", and the tab menu) reopens the last of ten closed tabs: shell,

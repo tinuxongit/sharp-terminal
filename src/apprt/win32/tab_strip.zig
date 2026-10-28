@@ -76,6 +76,8 @@ const caption_button_width = 46.0;
 /// window can always be dragged, however many tabs are open.
 const drag_space = 40.0;
 const edge_margin = 8.0;
+/// The administrator shield before the tabs.
+const shield_width = 28.0;
 
 /// How tabs look; the `window-tab-style` setting.
 pub const Style = enum {
@@ -104,6 +106,8 @@ pub const Layout = struct {
     browser: bool = false,
     /// An update is ready to install.
     update: bool = false,
+    /// Sharp runs as administrator: a shield leads the tabs.
+    admin: bool = false,
 
     pub fn height(self: Layout) i32 {
         if (!self.show_tabs and !self.caption_buttons and !self.sidebar) return 0;
@@ -115,7 +119,12 @@ pub const Layout = struct {
     }
 
     fn tabsLeft(self: Layout) i32 {
-        return self.px(edge_margin);
+        return self.px(edge_margin) + if (self.admin) self.px(shield_width) else 0;
+    }
+
+    fn shieldRect(self: Layout) w32.RECT {
+        const left = self.px(edge_margin);
+        return .{ .left = left, .top = 0, .right = left + self.px(shield_width), .bottom = self.height() };
     }
 
     /// The right edge that tabs and buttons may not cross.
@@ -333,6 +342,7 @@ const Glyph = enum(u16) {
     globe = 0xE774,
     /// Segoe's "update restore": an arrow around, as Windows Update shows.
     update = 0xE777,
+    shield = 0xEA18,
 };
 
 pub const Fonts = struct {
@@ -382,6 +392,7 @@ pub const Titles = struct {
 pub fn paint(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, titles: Titles, view: View) void {
     canvas.fill(.{ .left = 0, .top = 0, .right = layout.width, .bottom = layout.height() }, palette.strip);
     _ = w32.SetBkMode(canvas.hdc, w32.TRANSPARENT);
+    if (layout.admin) canvas.glyph(layout.shieldRect(), @backingInt(Glyph.shield), fonts.icons, palette.text_dim);
 
     if (layout.show_tabs) {
         for (0..layout.tab_count) |i| {

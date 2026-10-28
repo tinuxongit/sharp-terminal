@@ -60,6 +60,7 @@ const browser_remote = @import("browser_remote.zig");
 const mcp_server = @import("mcp_server.zig");
 const default_terminal = @import("default_terminal.zig");
 const terminal_handoff = @import("terminal_handoff.zig");
+const elevation = @import("elevation.zig");
 
 comptime {
     // Exports the exe's load configuration; nothing references it.
@@ -340,7 +341,8 @@ pub fn run(self: *App) !void {
     errdefer alloc.destroy(window);
     try window.init(self, .{});
     try self.windows.append(alloc, window);
-    const restored = self.restoreSession(window) catch |err| restored: {
+    // The session belongs to the unelevated Sharp.
+    const restored = !elevation.active() and self.restoreSession(window) catch |err| restored: {
         log.err("failed to restore the session: {}", .{err});
         break :restored false;
     };
@@ -639,6 +641,8 @@ pub fn openConfigFile(self: *App, how: apprt.action.OpenConfig) bool {
 /// automatic checks (check and download both download on Windows).
 pub fn configureUpdater(self: *App) void {
     const hwnd = self.msg_hwnd orelse return;
+    // An installer run from here would install as administrator.
+    if (elevation.active()) return;
     updater.configure(hwnd, WM_APP_UPDATE, self.config.@"auto-update" != .off);
 }
 
@@ -647,6 +651,8 @@ pub fn configureUpdater(self: *App) void {
 /// setting (`changed`) claims Windows' choice or gives it back, so a
 /// terminal picked in Windows' own settings since then stays picked.
 pub fn configureDefaultTerminal(self: *App, changed: bool) void {
+    // Windows hands consoles only to an unelevated terminal.
+    if (elevation.active()) return;
     const on = self.config.@"default-terminal";
     if (changed) {
         if (on) {
@@ -721,7 +727,7 @@ pub fn restartToUpdate(self: *App, owner: ?w32.HWND) void {
 }
 
 pub fn saveSession(self: *App) void {
-    if (self.config.@"window-tab-bar-position" != .sidebar or self.restoring_session) return;
+    if (self.config.@"window-tab-bar-position" != .sidebar or self.restoring_session or elevation.active()) return;
     var windows: [16]session.Window = undefined;
     var tabs: [16][64]session.Tab = undefined;
     var count: usize = 0;

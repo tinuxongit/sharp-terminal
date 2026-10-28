@@ -3,6 +3,7 @@
 //! opening tabs in folders or on servers from it, and the polling that
 //! files SSH sessions under Servers. tab_sidebar.zig lays it out and paints.
 const std = @import("std");
+const elevation = @import("elevation.zig");
 const Surface = @import("Surface.zig");
 const w32 = @import("win32.zig");
 const wide_string = @import("wide_string.zig");
@@ -192,7 +193,7 @@ pub fn sidebarClick(self: *Window, x: i32, y: i32) void {
         .group_menu => |i| {
             const list = profiles.detect();
             const index = sidebarProfileMenu(self, target, &list) orelse return;
-            _ = self.openProfileIn(&list, index, self.tab_active_surface[i].folderPath(), false);
+            self.openPicked(&list, index, self.tab_active_surface[i].folderPath(), false);
         },
         .section, .server_field => {},
         .usage_title => toggleCollapsed(self, usage_fold_key),
@@ -208,6 +209,12 @@ pub fn sidebarClick(self: *Window, x: i32, y: i32) void {
             else => {
                 const list = profiles.detect();
                 const index = sidebarProfileMenu(self, target, &list) orelse return;
+                // Ctrl is read now: the folder picker comes in between.
+                if (elevation.requested()) {
+                    var buf: [1024]u8 = undefined;
+                    const folder = pickFolder(self, &buf) orelse return;
+                    return elevation.open(list.command(index), folder);
+                }
                 pickFolderAndOpen(self, section, index);
             },
         },
@@ -435,11 +442,16 @@ pub fn pollTabs(self: *Window) void {
 /// Ask for a folder, then open a tab there: profile `index` when given,
 /// else the default shell of `section`.
 pub fn pickFolderAndOpen(self: *Window, section: tab_sidebar.Section, index: ?usize) void {
-    const hwnd = self.hwnd orelse return;
-    const start = if (self.getActiveSurface()) |s| s.folderPath() else "";
     var buf: [1024]u8 = undefined;
-    const folder = folder_picker.pick(hwnd, profiles.data.sidebar.pick_folder, start, &buf) orelse return;
+    const folder = pickFolder(self, &buf) orelse return;
     openInSection(self, section, index, folder);
+}
+
+/// Windows' folder picker, starting where the active tab is.
+fn pickFolder(self: *Window, buf: *[1024]u8) ?[]const u8 {
+    const hwnd = self.hwnd orelse return null;
+    const start = if (self.getActiveSurface()) |s| s.folderPath() else "";
+    return folder_picker.pick(hwnd, profiles.data.sidebar.pick_folder, start, buf);
 }
 
 /// Open profile `index` in `folder`, or without one the default shell of

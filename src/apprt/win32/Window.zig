@@ -28,6 +28,7 @@ const servers = @import("servers.zig");
 const configpkg = @import("../../config.zig");
 const workspace = @import("workspace.zig");
 const closed_tabs = @import("closed_tabs.zig");
+const elevation = @import("elevation.zig");
 const tab_rename = @import("tab_rename.zig");
 const splits = @import("splits.zig");
 const actions = @import("actions.zig");
@@ -465,6 +466,7 @@ pub fn stripLayout(self: *const Window) tab_strip.Layout {
         .caption_buttons = self.integratedTitleBar(),
         .browser = browser_dock.enabled(self),
         .update = !self.is_quick_terminal and updater.snapshot().status == .ready,
+        .admin = elevation.active(),
         .frozen_tab_width = self.frozen_tab_width,
     };
 }
@@ -1256,13 +1258,16 @@ pub fn updateWindowTitle(self: *Window) void {
     if (self.tab_count == 0) return;
     const len = self.window_title_override_len orelse
         self.tab_title_lens[self.active_tab];
-    var buf: [257]u16 = undefined;
+    // "Administrator: " leads an elevated window's title, as in consoles.
+    const prefix = if (elevation.active()) std.unicode.utf8ToUtf16LeStringLiteral("Administrator: ") else &[_]u16{};
+    var buf: [257 + 16]u16 = undefined;
+    @memcpy(buf[0..prefix.len], prefix);
     if (self.window_title_override_len != null) {
-        @memcpy(buf[0..len], self.window_title_override[0..len]);
+        @memcpy(buf[prefix.len..][0..len], self.window_title_override[0..len]);
     } else {
-        @memcpy(buf[0..len], self.tab_titles[self.active_tab][0..len]);
+        @memcpy(buf[prefix.len..][0..len], self.tab_titles[self.active_tab][0..len]);
     }
-    buf[len] = 0;
+    buf[prefix.len + len] = 0;
     _ = w32.SetWindowTextW(hwnd, @ptrCast(&buf));
 }
 
@@ -1720,7 +1725,8 @@ pub fn openProfileIn(self: *Window, list: *const profiles.List, index: usize, fo
 }
 
 /// Drop the profile menu below the arrow beside "+". Shift+click opens the
-/// profile in a new window, as in Windows Terminal.
+/// profile in a new window and Ctrl+click as administrator, as in Windows
+/// Terminal.
 pub fn showNewTabMenu(self: *Window) void {
     const hwnd = self.hwnd orelse return;
     const arrow = self.stripLayout().newTabMenuRect();
@@ -1735,7 +1741,15 @@ pub fn showNewTabMenu(self: *Window) void {
     self.invalidateTabBar();
 
     const index = pick orelse return;
-    self.openProfile(index, w32.GetKeyState(@as(i32, w32.VK_SHIFT)) < 0);
+    self.openPicked(&list, index, null, w32.GetKeyState(@as(i32, w32.VK_SHIFT)) < 0);
+}
+
+/// Open a profile picked from a menu: as administrator when Ctrl was
+/// held (elevation.zig), else in a tab or, with `new_window`, a window.
+pub fn openPicked(self: *Window, list: *const profiles.List, index: usize, folder: ?[]const u8, new_window: bool) void {
+    if (index >= list.len) return;
+    if (elevation.requested()) return elevation.open(list.command(index), folder);
+    _ = self.openProfileIn(list, index, folder, new_window);
 }
 
 /// The terminal area below the strip, in screen pixels, which the
