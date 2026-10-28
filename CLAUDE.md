@@ -196,6 +196,13 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   new tabs now open in the current tab's folder.
 - **Two tab styles.** `window-tab-style` (a Sharp addition to Ghostty's
   config) picks Chrome's flowing tabs or Windows Terminal's flat ones.
+- **Changes are checked by building, not by tests.** The owner's rule is
+  that no tests are written or run, so neither Ghostty's test workflows
+  nor the fork's are kept. `.github/workflows/windows-ci.yml` builds
+  ReleaseSafe on every push; `CONTRIBUTING.md` says the same to others.
+- **Sharp has its own version (0.1.0), in `dist/windows/ghostty.rc`.**
+  `TERM_PROGRAM_VERSION` keeps Ghostty's, which tells programs which
+  Ghostty features to expect.
 - **Sharp to people, Ghostty to programs.** The exe, window text, dialogs and
   version info say Sharp. `TERM_PROGRAM`, terminfo, `GHOSTTY_*` variables,
   `share\ghostty` resources and the `%LOCALAPPDATA%\ghostty` config folder
@@ -225,9 +232,6 @@ Baseline, 2026-10-28, two runs each:
 
 ## Tech debt
 
-- The fork deleted upstream's `test.yml` CI, so upstream's core tests no
-  longer run on its changes to shared files.
-- The version info still says 1.3.0.0, inherited from the fork.
 - `App.zig`, `Surface.zig` and `Window.zig` in the Win32 runtime are each
   2,600 to 3,400 lines and mix several jobs. Upstream's GTK files are just as
   large, so splitting them makes merges from `winfork` harder.
@@ -251,5 +255,3 @@ Baseline, 2026-10-28, two runs each:
   wininet...) are still searched for in its own folder first, so a
   portable copy unzipped beside planted DLLs would load them. Only
   `uxtheme.dll` (loaded at runtime) is pinned to System32.
-- The fork removed upstream's CI workflows and contributor docs (`HACKING.md`,
-  `CONTRIBUTING.md`).

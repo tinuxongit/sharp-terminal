@@ -22,8 +22,8 @@ ID_ICON_GHOSTTY ICON "sharp.ico"
 // and Explorer never find.
 #define VS_VERSION_INFO 1
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION    1,3,0,0
-PRODUCTVERSION 1,3,0,0
+FILEVERSION    0,1,0,0
+PRODUCTVERSION 0,1,0,0
 FILEFLAGSMASK  0x3F
 FILEFLAGS      0x0
 FILEOS         0x40004 // VOS_NT_WINDOWS32
@@ -37,12 +37,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "Sharp"
             VALUE "FileDescription",  "Sharp terminal emulator"
-            VALUE "FileVersion",      "1.3.0.0"
+            VALUE "FileVersion",      "0.1.0.0"
             VALUE "InternalName",     "sharp"
             VALUE "LegalCopyright",   "MIT License. See share\\licenses\\sharp\\LICENSE.txt."
             VALUE "OriginalFilename", "sharp.exe"
             VALUE "ProductName",      "Sharp"
-            VALUE "ProductVersion",   "1.3.0.0"
+            VALUE "ProductVersion",   "0.1.0.0"
         END
     END
     BLOCK "VarFileInfo"
