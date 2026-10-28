@@ -18,7 +18,7 @@ cd "$REPO_DIR"
 echo "Building sharp (optimize=$OPTIMIZE)..."
 zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize="$OPTIMIZE"
 
-for resource in bin/sharp.exe bin/conpty.dll bin/OpenConsole.exe share/terminfo/ghostty.terminfo share/licenses/conpty/LICENSE.txt share/licenses/sharp/LICENSE.txt; do
+for resource in bin/sharp.exe bin/conpty.dll bin/OpenConsole.exe bin/WebView2Loader.dll share/terminfo/ghostty.terminfo share/licenses/conpty/LICENSE.txt share/licenses/sharp/LICENSE.txt share/licenses/webview2/LICENSE.txt; do
     if [ ! -f "zig-out/$resource" ]; then
         echo "ERROR: Incomplete Windows build — zig-out/$resource not found" >&2
         exit 1
@@ -38,11 +38,11 @@ rm -rf "$REPO_DIR/dist/windows/_stage"
 mkdir -p "$STAGE_DIR"
 
 # Keep the matching console runtime pair beside the executable.
-for binary in sharp.exe conpty.dll OpenConsole.exe; do
+for binary in sharp.exe conpty.dll OpenConsole.exe WebView2Loader.dll; do
     cp "zig-out/bin/$binary" "$STAGE_DIR/"
     echo "  $binary"
 done
-for license in conpty sharp; do
+for license in conpty sharp webview2; do
     mkdir -p "$STAGE_DIR/share/licenses/$license"
     cp "zig-out/share/licenses/$license/LICENSE.txt" "$STAGE_DIR/share/licenses/$license/"
     echo "  share/licenses/$license/LICENSE.txt"
@@ -78,7 +78,7 @@ QUICK START
   1. Run sharp.exe
   2. Config file: %LOCALAPPDATA%\\ghostty\\config.ghostty
      (the legacy filename "config" is also supported)
-  Keep conpty.dll and OpenConsole.exe beside sharp.exe.
+  Keep conpty.dll, OpenConsole.exe and WebView2Loader.dll beside sharp.exe.
 
 KEYBOARD SHORTCUTS
   Ctrl+Shift+T        New tab

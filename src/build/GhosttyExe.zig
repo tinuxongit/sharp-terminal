@@ -101,6 +101,17 @@ pub fn install(self: *const Ghostty) void {
             b.path("LICENSE"),
             "share/licenses/sharp/LICENSE.txt",
         ).step);
+        // The browser panel's engine: Microsoft's loader for the WebView2
+        // runtime Windows ships, loaded by full path like conpty.dll.
+        const webview2 = b.lazyDependency("webview2", .{ .target = target }) orelse return;
+        b.getInstallStep().dependOn(&b.addInstallBinFile(
+            webview2.namedLazyPath("loader"),
+            "WebView2Loader.dll",
+        ).step);
+        b.getInstallStep().dependOn(&b.addInstallFile(
+            webview2.namedLazyPath("license"),
+            "share/licenses/webview2/LICENSE.txt",
+        ).step);
     }
 }
 
