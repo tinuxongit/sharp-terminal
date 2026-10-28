@@ -1104,9 +1104,26 @@ pub fn needsConfirmQuit(self: *Surface) bool {
         .always => true,
         .false => false,
         .true => true: {
-            self.renderer_state.mutex.lockUncancelable(global.io());
-            defer self.renderer_state.mutex.unlock(global.io());
-            break :true !self.io.terminal.cursorIsAtPrompt();
+            // The prompt test is trustworthy when the shell sends prompt
+            // marks, or when a full-screen program owns the alternate screen.
+            const at_prompt, const prompt_known = state: {
+                self.renderer_state.mutex.lockUncancelable(global.io());
+                defer self.renderer_state.mutex.unlock(global.io());
+                const t = &self.io.terminal;
+                break :state .{
+                    t.cursorIsAtPrompt(),
+                    t.screens.active_key == .alternate or t.screens.active.semantic_prompt.seen,
+                };
+            };
+            if (at_prompt) break :true false;
+
+            // Shells without prompt marks (cmd.exe) can't say whether they
+            // are at a prompt. Where the OS can tell whether the shell is
+            // running a command, trust that instead of always asking.
+            if (!prompt_known) {
+                if (self.io.commandRunning()) |running| break :true running;
+            }
+            break :true true;
         },
     };
 }

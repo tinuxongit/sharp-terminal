@@ -417,6 +417,11 @@ pub fn run(self: *App) !void {
                 // dead. This does not disturb the ToUnicode dead-key state:
                 // handleKeyEvent never calls ToUnicode for VK_PROCESSKEY.
                 if (msg.wParam == w32.VK_PROCESSKEY) break :blk false;
+                // VK_PACKET carries text from SendInput (on-screen keyboard,
+                // dictation, AutoHotkey, password managers). Only
+                // TranslateMessage turns it into the WM_CHAR holding the
+                // character, and it never touches dead-key state.
+                if (msg.wParam == w32.VK_PACKET) break :blk false;
                 const h = msg.hwnd orelse break :blk false;
                 const atom: u16 = @truncate(w32.GetClassLongW(h, w32.GCW_ATOM));
                 break :blk atom != 0 and atom == self.terminal_class_atom;
@@ -1475,7 +1480,9 @@ pub fn performAction(
     }
 }
 
-/// Open the configuration with the Windows file association.
+/// Open the configuration with the Windows file association, or Notepad
+/// when nothing is registered for `.ghostty` files, which is the usual
+/// case on a fresh machine.
 fn openConfigWithOs(self: *App, path: [:0]const u8) bool {
     const alloc = self.core_app.alloc;
     const path_w = std.unicode.utf8ToUtf16LeAllocZ(alloc, path) catch |err| {
@@ -1484,15 +1491,16 @@ fn openConfigWithOs(self: *App, path: [:0]const u8) bool {
     };
     defer alloc.free(path_w);
 
-    const result = w32.ShellExecuteW(
-        null,
-        std.unicode.utf8ToUtf16LeStringLiteral("open"),
-        path_w,
-        null,
-        null,
-        w32.SW_SHOW,
-    );
-    return result > 32;
+    const open = std.unicode.utf8ToUtf16LeStringLiteral("open");
+    if (w32.ShellExecuteW(null, open, path_w, null, null, w32.SW_SHOW) > 32) return true;
+
+    // Windows paths cannot contain a double quote, so quoting is enough.
+    const quoted = std.fmt.allocPrint(alloc, "\"{s}\"", .{path}) catch return false;
+    defer alloc.free(quoted);
+    const quoted_w = std.unicode.utf8ToUtf16LeAllocZ(alloc, quoted) catch return false;
+    defer alloc.free(quoted_w);
+    const notepad = std.unicode.utf8ToUtf16LeStringLiteral("notepad.exe");
+    return w32.ShellExecuteW(null, open, notepad, quoted_w, null, w32.SW_SHOW) > 32;
 }
 
 /// Open the configuration in a new Ghostty window using VISUAL or EDITOR.
@@ -2272,12 +2280,16 @@ fn surfaceWndProc(
         },
 
         w32.WM_CHAR => {
-            // In Win32 Input Mode, the Unicode character is already
-            // included in the WM_KEYDOWN event (Uc parameter). WM_CHAR
-            // from TranslateMessage would duplicate it. IME text arrives
-            // via WM_IME_COMPOSITION (handled separately), so suppress
-            // all WM_CHAR in this mode.
-            if (surface.isWin32InputMode()) return 0;
+            // In Win32 Input Mode, keys typed on the keyboard already carry
+            // their character in the WM_KEYDOWN event (Uc parameter), and
+            // their messages skip TranslateMessage, so no WM_CHAR follows
+            // them. A WM_CHAR here is text without a key (VK_PACKET or a
+            // posted message) and must be sent as a key-less event, or
+            // it is lost: ConPTY always enables this mode.
+            if (surface.isWin32InputMode()) {
+                surface.sendWin32CharEvent(@intCast(wparam & 0xFFFF));
+                return 0;
+            }
 
             // If handleKeyEvent already produced text via ToUnicode for
             // the preceding WM_KEYDOWN, suppress this WM_CHAR to avoid

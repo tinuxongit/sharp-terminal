@@ -27,6 +27,10 @@ commands and conventions; this file covers what is specific to Sharp.
   you have not checked first.
 - `src/apprt/win32/brand.zig`: the name shown in titles, dialogs and the
   tray, and the prefix of the Win32 window classes.
+- `src/apprt/win32/tab_strip.zig`: the strip at the top of a window (tabs,
+  new-tab and settings buttons, minimize/maximize/close), with its layout,
+  hit-testing, colors and painting. `Window.zig` only feeds it state and turns its
+  hit-test results into window messages (`WM_NCCALCSIZE`, `WM_NCHITTEST`).
 - `src/font/directwrite.zig`: finds system fonts on Windows.
 - `dist/windows/`: icon, resource file and packaging scripts.
 - Everything else in `src/` is the shared Ghostty core. Keep changes there
@@ -56,6 +60,27 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   that handles terminal output.
 - **Win32 + OpenGL (WGL), not WinUI or DirectX.** It reuses Ghostty's OpenGL
   renderer, so there is no second renderer to maintain.
+- **Tabs live in the title bar, as in Windows Terminal.** The Windows caption
+  is removed and the tab strip draws its own caption buttons. Its colors are
+  derived from the terminal's background and foreground, so every theme
+  matches. Rounded corners are anti-aliased by hand rather than pulling in
+  GDI+. Not yet tried on Windows 10.
+- **Tabs behave like Chrome's.** Equal widths up to 240 px that shrink as
+  tabs open, titles that fade instead of an ellipsis, a close button on
+  inactive tabs only when there is room (Chromium's 68 px content rule),
+  middle-click to close, and closing with the mouse keeps the other tabs'
+  width until the pointer leaves them. Numbers come from Chromium's
+  `tab_style.cc` and `tab.cc`.
+- **Closing asks only when a command is running.** Shells with prompt
+  marks (PowerShell with Sharp's integration) answer through the prompt
+  test. `cmd.exe` sends none, so on Windows a command counts as running
+  when the shell has a child process (`Subprocess.commandRunning`).
+- **The settings button opens the config file.** Ghostty is configured
+  by text file; it falls back to Notepad when nothing opens `.ghostty`.
+- **Images use the kitty graphics protocol.** The bundled ConPTY passes it
+  through (checked 2026-10-28 with OpenConsole 1.25; the inbox Windows
+  ConPTY strips it). `chafa` picks it automatically via `TERM_PROGRAM`.
+  Ghostty has no Sixel support.
 - **Sharp to people, Ghostty to programs.** The exe, window text, dialogs and
   version info say Sharp. `TERM_PROGRAM`, terminfo, `GHOSTTY_*` variables,
   `share\ghostty` resources and the `%LOCALAPPDATA%\ghostty` config folder
@@ -93,5 +118,10 @@ the scrollback.
   2,600 to 3,400 lines and mix several jobs. Upstream's GTK files are just as
   large, so splitting them makes merges from `winfork` harder.
 - The frame-time benchmark for the budget above does not exist yet.
+- Replies to programs that probe for image support travel back through
+  ConPTY's input side, which reportedly drops APC replies. Tools that
+  insist on a reply may not detect image support. Unverified.
+- `commandRunning` matches children by parent PID, which Windows reuses, so
+  an unrelated process could rarely look like a running command.
 - The fork removed upstream's CI workflows and contributor docs (`HACKING.md`,
   `CONTRIBUTING.md`).

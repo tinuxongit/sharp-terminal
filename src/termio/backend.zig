@@ -110,6 +110,13 @@ pub const Backend = union(Kind) {
             .exec => |*exec| exec.getProcessInfo(info),
         };
     }
+
+    /// Whether the shell is running a command, or null when unknown.
+    pub fn commandRunning(self: *Backend) ?bool {
+        return switch (self.*) {
+            .exec => |*exec| exec.commandRunning(),
+        };
+    }
 };
 
 /// Termio thread data. See termio.ThreadData for docs.

@@ -1625,3 +1625,47 @@ pub const ITaskbarList3 = extern struct {
         _ = self.vtable.SetProgressValue(self, hwnd, completed, total);
     }
 };
+
+// -----------------------------------------------------------------------
+// Integrated title bar: the tab strip replaces the Windows caption, so the
+// window computes its own client area and hit-test regions.
+// -----------------------------------------------------------------------
+
+pub const WM_NCCALCSIZE: u32 = 0x0083;
+pub const WM_NCHITTEST: u32 = 0x0084;
+pub const WM_NCMOUSEMOVE: u32 = 0x00A0;
+pub const WM_NCLBUTTONDOWN: u32 = 0x00A1;
+pub const WM_NCLBUTTONUP: u32 = 0x00A2;
+pub const WM_NCLBUTTONDBLCLK: u32 = 0x00A3;
+pub const WM_NCMOUSELEAVE: u32 = 0x02A2;
+pub const TME_NONCLIENT: u32 = 0x00000010;
+
+pub const NCCALCSIZE_PARAMS = extern struct {
+    rgrc: [3]RECT,
+    lppos: ?*anyopaque,
+};
+
+pub const HTNOWHERE: isize = 0;
+pub const HTCAPTION: isize = 2;
+pub const HTMINBUTTON: isize = 8;
+pub const HTMAXBUTTON: isize = 9;
+pub const HTTOP: isize = 12;
+pub const HTTOPLEFT: isize = 13;
+pub const HTTOPRIGHT: isize = 14;
+pub const HTCLOSE: isize = 20;
+
+pub const SM_CXFRAME: i32 = 32;
+pub const SM_CYFRAME: i32 = 33;
+pub const SM_CXPADDEDBORDER: i32 = 92;
+pub const SW_MINIMIZE: i32 = 6;
+
+pub extern "user32" fn GetSystemMetricsForDpi(nIndex: i32, dpi: u32) callconv(.winapi) i32;
+pub extern "gdi32" fn GetPixel(hdc: HDC, x: i32, y: i32) callconv(.winapi) u32;
+pub extern "gdi32" fn SetPixelV(hdc: HDC, x: i32, y: i32, color: u32) callconv(.winapi) i32;
+pub extern "gdi32" fn GetTextFaceW(hdc: HDC, c: i32, lpName: [*]u16) callconv(.winapi) i32;
+
+pub const DT_CENTER: u32 = 0x1;
+pub const CLEARTYPE_QUALITY: u32 = 5;
+pub const FW_SEMIBOLD: i32 = 600;
+pub extern "gdi32" fn GdiFlush() callconv(.winapi) i32;
+pub extern "gdi32" fn GetTextExtentPoint32W(hdc: HDC, lpString: [*]const u16, c: i32, psizl: *SIZE) callconv(.winapi) i32;

@@ -882,3 +882,8 @@ pub const ThreadData = struct {
 pub fn getProcessInfo(self: *Termio, comptime info: ProcessInfo) ?ProcessInfo.Type(info) {
     return self.backend.getProcessInfo(info);
 }
+
+/// Whether the shell is running a command, or null when unknown.
+pub fn commandRunning(self: *Termio) ?bool {
+    return self.backend.commandRunning();
+}

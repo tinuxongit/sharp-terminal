@@ -1388,6 +1388,31 @@ const Subprocess = struct {
         const pty = &(self.pty orelse return null);
         return pty.getProcessInfo(info);
     }
+
+    /// Whether the shell is running a command, or null when that can't be
+    /// told. Only answered on Windows: it has no foreground process group,
+    /// and a ConPTY can't say who reads from it, but a command the shell
+    /// runs is a child process of the shell.
+    pub fn commandRunning(self: *Subprocess) ?bool {
+        if (comptime builtin.target.os.tag != .windows) return null;
+        const handle = switch (self.process orelse return null) {
+            .fork_exec => |cmd| cmd.pid orelse return null,
+            .flatpak => return null,
+        };
+        const shell = windows.exp.kernel32.GetProcessId(handle);
+        if (shell == 0) return null;
+
+        const snapshot = windows.exp.kernel32.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0);
+        if (snapshot == windows.INVALID_HANDLE_VALUE) return null;
+        defer _ = windows.exp.kernel32.CloseHandle(snapshot);
+
+        var entry: windows.PROCESSENTRY32W = .{};
+        var more = windows.exp.kernel32.Process32FirstW(snapshot, &entry) != windows.FALSE;
+        while (more) : (more = windows.exp.kernel32.Process32NextW(snapshot, &entry) != windows.FALSE) {
+            if (entry.th32ParentProcessID == shell) return true;
+        }
+        return false;
+    }
 };
 
 /// The read thread works with a companion gather thread to form a two-stage
@@ -2211,6 +2236,11 @@ fn appendEnvAlways(
 /// not available on a particular platform.
 pub fn getProcessInfo(self: *Exec, comptime info: ProcessInfo) ?ProcessInfo.Type(info) {
     return self.subprocess.getProcessInfo(info);
+}
+
+/// See Subprocess.commandRunning.
+pub fn commandRunning(self: *Exec) ?bool {
+    return self.subprocess.commandRunning();
 }
 
 test "execCommand darwin: shell command" {

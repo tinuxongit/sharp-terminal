@@ -14,6 +14,7 @@ const SplitTree = @import("../../datastruct/split_tree.zig").SplitTree;
 const w32 = @import("win32.zig");
 const brand = @import("brand.zig");
 const wide_string = @import("wide_string.zig");
+const tab_strip = @import("tab_strip.zig");
 
 const log = std.log.scoped(.win32);
 
@@ -40,29 +41,22 @@ tab_active_surface: [64]*Surface = undefined,
 /// Index of the currently active (visible) tab.
 active_tab: usize = 0,
 
-/// Whether the tab bar is visible (shown when >1 tab).
+/// Whether the strip shows tabs (see updateTabBarVisibility).
 tab_bar_visible: bool = false,
 
 /// DPI scale factor (DPI / 96.0).
 scale: f32 = 1.0,
 
-/// Hit-test rectangles for each tab in the tab bar. Zero-initialized
-/// so input handlers that read it before the first paint (e.g., a
-/// synthetic WM_LBUTTONDOWN during startup) get a no-match instead of
-/// stack garbage.
-tab_rects: [64]w32.RECT = std.mem.zeroes([64]w32.RECT),
+/// What the pointer is over in the tab strip, and which caption button is
+/// held down. Caption buttons act on release, like the Windows ones.
+strip_hover: tab_strip.Part = .none,
+strip_pressed: tab_strip.Part = .none,
 
-/// Hit-test rectangle for the "+" (new tab) button.
-new_tab_rect: w32.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
+/// Whether this window has focus. Inactive windows dim the strip.
+window_active: bool = true,
 
-/// Index of the tab currently being hovered (-1 = none).
-hover_tab: isize = -1,
-
-/// Whether the close button on the hovered tab is being hovered.
-hover_close: bool = false,
-
-/// Whether the "+" (new tab) button is being hovered.
-hover_new_tab: bool = false,
+/// Tab width held while tabs are being closed with the mouse.
+frozen_tab_width: ?i32 = null,
 
 /// Tab drag state: which tab is being dragged (-1 = none).
 drag_tab: isize = -1,
@@ -96,11 +90,13 @@ saved_style: u32 = 0,
 /// Saved window rect for restoring from fullscreen.
 saved_rect: w32.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
 
-/// Font used for painting the tab bar (Segoe UI).
-tab_font: ?*anyopaque = null,
+/// Fonts for the tab strip's titles and icons, sized for `scale`.
+strip_fonts: tab_strip.Fonts = .{},
 
-/// Whether WM_MOUSELEAVE tracking is active for the tab bar.
+/// Whether WM_MOUSELEAVE tracking is active for the tab bar, and
+/// WM_NCMOUSELEAVE tracking for the caption buttons.
 tracking_mouse: bool = false,
+tracking_nc_mouse: bool = false,
 
 /// Whether this window is a quick terminal (borderless popup, no tabs).
 is_quick_terminal: bool = false,
@@ -345,24 +341,12 @@ pub fn init(self: *Window, app: *App, options: InitOptions) !void {
         self.scale = @as(f32, @floatFromInt(dpi)) / 96.0;
     }
 
-    // Create the tab bar font (Segoe UI, 12px at 96 DPI, scaled).
-    const font_height: i32 = -@as(i32, @intFromFloat(16.0 * self.scale));
-    self.tab_font = w32.CreateFontW(
-        font_height, // cHeight (negative = character height)
-        0, // cWidth
-        0, // cEscapement
-        0, // cOrientation
-        w32.FW_NORMAL, // cWeight
-        0, // bItalic
-        0, // bUnderline
-        0, // bStrikeOut
-        w32.DEFAULT_CHARSET, // iCharSet
-        0, // iOutPrecision
-        0, // iClipPrecision
-        0, // iQuality
-        0, // iPitchAndFamily
-        std.unicode.utf8ToUtf16LeStringLiteral("Segoe UI"),
-    );
+    self.loadStripFonts();
+
+    // WM_NCCALCSIZE during CreateWindowExW ran before GWLP_USERDATA was
+    // set, so the default caption was laid out. Recompute the frame now
+    // that the tab strip can take its place.
+    _ = w32.SetWindowPos(hwnd, null, 0, 0, 0, 0, w32.SWP_FRAMECHANGED | w32.SWP_NOMOVE | w32.SWP_NOSIZE | w32.SWP_NOZORDER | w32.SWP_NOACTIVATE);
 
     // Don't show the window yet — addTab() will show the child
     // surface which triggers ShowWindow on the parent as needed.
@@ -376,11 +360,7 @@ pub fn deinit(self: *Window) void {
     // Close all tab surfaces.
     self.cleanupAllSurfaces();
 
-    // Delete the tab bar font.
-    if (self.tab_font) |font| {
-        _ = w32.DeleteObject(font);
-        self.tab_font = null;
-    }
+    self.strip_fonts.deinit();
 
     // Clear GWLP_USERDATA before destroying to prevent stale pointer access.
     if (self.hwnd) |hwnd| {
@@ -390,11 +370,132 @@ pub fn deinit(self: *Window) void {
     }
 }
 
-/// Returns the tab bar height in pixels, accounting for DPI scale.
-/// Returns 0 if the tab bar is not visible.
+/// Returns the tab strip height in pixels, accounting for DPI scale.
+/// Returns 0 if the strip is not shown.
 pub fn tabBarHeight(self: *const Window) i32 {
-    if (!self.tab_bar_visible) return 0;
-    return @intFromFloat(@round(32.0 * self.scale));
+    return self.stripLayout().height();
+}
+
+/// Whether the tab strip replaces the Windows title bar. Only normal
+/// decorated windows do this: the quick terminal, fullscreen and windows
+/// without decorations keep the default frame handling.
+fn integratedTitleBar(self: *const Window) bool {
+    if (self.is_quick_terminal or self.is_fullscreen) return false;
+    const hwnd = self.hwnd orelse return false;
+    return (w32.GetWindowLongW(hwnd, w32.GWL_STYLE) & w32.WS_CAPTION) == w32.WS_CAPTION;
+}
+
+fn stripLayout(self: *const Window) tab_strip.Layout {
+    var client: w32.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+    if (self.hwnd) |hwnd| _ = w32.GetClientRect(hwnd, &client);
+    return .{
+        .scale = self.scale,
+        .width = client.right - client.left,
+        .tab_count = self.tab_count,
+        .active = self.active_tab,
+        .show_tabs = self.tab_bar_visible,
+        .caption_buttons = self.integratedTitleBar(),
+        .frozen_tab_width = self.frozen_tab_width,
+    };
+}
+
+fn loadStripFonts(self: *Window) void {
+    const hwnd = self.hwnd orelse return;
+    const hdc = w32.GetDC(hwnd) orelse return;
+    defer _ = w32.ReleaseDC(hwnd, hdc);
+    self.strip_fonts.deinit();
+    self.strip_fonts = .init(hdc, self.scale);
+}
+
+fn setStripHover(self: *Window, part: tab_strip.Part) void {
+    if (part.eql(self.strip_hover)) return;
+    self.strip_hover = part;
+    self.invalidateTabBar();
+}
+
+/// Window border thickness at this DPI. With the caption removed it is
+/// both the top resize band and how far a maximized window hangs past
+/// the screen edge.
+fn frameThickness(self: *const Window) i32 {
+    const dpi: u32 = @intFromFloat(@round(self.scale * 96.0));
+    return w32.GetSystemMetricsForDpi(w32.SM_CYFRAME, dpi) +
+        w32.GetSystemMetricsForDpi(w32.SM_CXPADDEDBORDER, dpi);
+}
+
+/// WM_NCCALCSIZE for the integrated title bar: keep the default side and
+/// bottom borders, which carry the resize handles and shadow, but hand the
+/// caption area to the client so the tab strip can draw there.
+fn calcClientArea(self: *Window, hwnd: w32.HWND, wparam: usize, lparam: isize) isize {
+    const params: *w32.NCCALCSIZE_PARAMS = @ptrFromInt(@as(usize, @bitCast(lparam)));
+    const top = params.rgrc[0].top;
+    const result = w32.DefWindowProcW(hwnd, w32.WM_NCCALCSIZE, wparam, lparam);
+    params.rgrc[0].top = top;
+    if (w32.IsZoomed(hwnd) != 0) params.rgrc[0].top += self.frameThickness();
+    return result;
+}
+
+/// WM_NCHITTEST for the integrated title bar. Reporting the caption
+/// buttons as HTMINBUTTON/HTMAXBUTTON/HTCLOSE keeps Windows 11's snap
+/// layouts flyout on the maximize button.
+fn hitTestFrame(self: *Window, hwnd: w32.HWND, lparam: isize) isize {
+    const hit = w32.DefWindowProcW(hwnd, w32.WM_NCHITTEST, 0, lparam);
+    if (hit != w32.HTCLIENT) return hit;
+
+    var pt: w32.POINT = .{
+        .x = @as(i16, @truncate(lparam & 0xFFFF)),
+        .y = @as(i16, @truncate((lparam >> 16) & 0xFFFF)),
+    };
+    _ = w32.ScreenToClient(hwnd, &pt);
+    const layout = self.stripLayout();
+
+    // The top border now belongs to the client, so top-edge resizing has
+    // to be reported here.
+    const band = self.frameThickness();
+    if (w32.IsZoomed(hwnd) == 0 and pt.y >= 0 and pt.y < band) {
+        if (pt.x < 2 * band) return w32.HTTOPLEFT;
+        if (pt.x >= layout.width - 2 * band) return w32.HTTOPRIGHT;
+        return w32.HTTOP;
+    }
+
+    return switch (layout.hitTest(pt.x, pt.y)) {
+        .minimize => w32.HTMINBUTTON,
+        .maximize => w32.HTMAXBUTTON,
+        .close => w32.HTCLOSE,
+        .caption => w32.HTCAPTION,
+        else => w32.HTCLIENT,
+    };
+}
+
+/// The caption button a WM_NC* message's hit-test code refers to.
+fn captionButtonAt(wparam: usize) ?tab_strip.Part {
+    return switch (@as(isize, @bitCast(wparam))) {
+        w32.HTMINBUTTON => .minimize,
+        w32.HTMAXBUTTON => .maximize,
+        w32.HTCLOSE => .close,
+        else => null,
+    };
+}
+
+fn pressCaptionButton(self: *Window, button: tab_strip.Part) void {
+    const hwnd = self.hwnd orelse return;
+    switch (button) {
+        .minimize => _ = w32.ShowWindow(hwnd, w32.SW_MINIMIZE),
+        .maximize => _ = w32.ShowWindow(hwnd, if (w32.IsZoomed(hwnd) != 0) w32.SW_RESTORE else w32.SW_MAXIMIZE),
+        .close => _ = w32.PostMessageW(hwnd, w32.WM_CLOSE, 0, 0),
+        else => {},
+    }
+}
+
+fn trackNonClientMouse(self: *Window) void {
+    if (self.tracking_nc_mouse) return;
+    var tme = w32.TRACKMOUSEEVENT{
+        .cbSize = @sizeOf(w32.TRACKMOUSEEVENT),
+        .dwFlags = w32.TME_LEAVE | w32.TME_NONCLIENT,
+        .hwndTrack = self.hwnd orelse return,
+        .dwHoverTime = 0,
+    };
+    _ = w32.TrackMouseEvent(&tme);
+    self.tracking_nc_mouse = true;
 }
 
 /// Returns the client rect available for the active surface, which is
@@ -452,6 +553,7 @@ pub fn addTabWithOptions(self: *Window, options: AddTabOptions) !*Surface {
     if (self.closing) return error.WindowClosing;
     if (self.tab_count >= MAX_TABS) return error.TooManyTabs;
     self.cancelTabRename();
+    self.frozen_tab_width = null;
 
     const alloc = self.app.core_app.alloc;
     const surface = try alloc.create(Surface);
@@ -520,35 +622,60 @@ pub fn requestToggleTabOverview(self: *Window) bool {
 
 /// Close every split in the selected tab, confirming once if any needs it.
 pub fn requestCloseOverviewTab(self: *Window, id: u64) void {
-    const index = TabOverview.findTab(self, id) orelse return;
-    var it = self.tab_trees[index].iterator();
-    var needs_confirmation = false;
-    while (it.next()) |entry| {
-        if (entry.view.core_surface_ready and entry.view.core_surface.needsConfirmQuit()) {
-            needs_confirmation = true;
-            break;
-        }
-    }
-    if (!needs_confirmation) {
-        self.closeTabByIndex(index);
-        return;
-    }
+    self.requestCloseTabs(&.{id});
+}
 
-    const core_app = self.app.core_app;
-    const owner_hwnd = self.hwnd;
-    const result = w32.MessageBoxW(
-        owner_hwnd,
-        std.unicode.utf8ToUtf16LeStringLiteral("Processes are still running in this tab.\nClose the tab and all its splits?"),
+/// Whether closing the tab at `index` would kill a running command.
+fn tabNeedsConfirm(self: *Window, index: usize) bool {
+    var it = self.tab_trees[index].iterator();
+    while (it.next()) |entry| {
+        if (entry.view.core_surface_ready and entry.view.core_surface.needsConfirmQuit()) return true;
+    }
+    return false;
+}
+
+/// The id that names the tab at `index` across modal loops, where tab
+/// indexes can shift.
+fn tabId(self: *Window, index: usize) u64 {
+    return self.tab_active_surface[index].core_surface.id;
+}
+
+fn confirmDialog(owner: ?w32.HWND, message: [*:0]const u16) bool {
+    return w32.MessageBoxW(
+        owner,
+        message,
         std.unicode.utf8ToUtf16LeStringLiteral(brand.name),
         w32.MB_OKCANCEL | w32.MB_ICONWARNING | w32.MB_DEFBUTTON2,
-    );
-    if (result != w32.IDOK) return;
-    // The modal loop may have processed child exits or destroyed this
-    // window. Resolve identity again; never dereference the old self.
-    const surface = core_app.findSurfaceByID(id) orelse return;
-    const owner = surface.rt_surface.parent_window;
-    if (owner.closing or owner.hwnd != owner_hwnd) return;
-    owner.closeTabByIndex(TabOverview.findTab(owner, id) orelse return);
+    ) == w32.IDOK;
+}
+
+/// Close tabs, asking once if any of them is running a command. Tabs are
+/// named by surface id because the dialog runs a message loop in which
+/// tabs can exit, move, or the window can close.
+fn requestCloseTabs(self: *Window, ids: []const u64) void {
+    const core_app = self.app.core_app;
+    const owner_hwnd = self.hwnd;
+
+    const needs_confirmation = for (ids) |id| {
+        const index = TabOverview.findTab(self, id) orelse continue;
+        if (self.tabNeedsConfirm(index)) break true;
+    } else false;
+    if (needs_confirmation) {
+        const message: [*:0]const u16 = if (ids.len == 1)
+            std.unicode.utf8ToUtf16LeStringLiteral("A command is still running in this tab.\nClose the tab and all its splits?")
+        else
+            std.unicode.utf8ToUtf16LeStringLiteral("Commands are still running in some of these tabs.\nClose them anyway?");
+        if (!confirmDialog(owner_hwnd, message)) return;
+    }
+
+    // Never dereference the old self after the dialog: resolve each tab
+    // through its surface again.
+    for (ids) |id| {
+        const surface = core_app.findSurfaceByID(id) orelse continue;
+        const owner = surface.rt_surface.parent_window;
+        if (owner.closing or owner.hwnd != owner_hwnd) return;
+        owner.closeTabByIndex(TabOverview.findTab(owner, id) orelse continue);
+    }
 }
 
 /// Close a tab by surface pointer. Removes from the tab list,
@@ -1277,7 +1404,8 @@ fn updateTabBarVisibility(self: *Window) void {
     const show_config = self.app.config.@"window-show-tab-bar";
     const should_show = switch (show_config) {
         .always => true,
-        .auto => self.tab_count > 1,
+        // When the strip is the title bar, hiding a lone tab saves no space.
+        .auto => self.tab_count > 1 or self.integratedTitleBar(),
         .never => false,
     };
     if (should_show != self.tab_bar_visible) {
@@ -1301,48 +1429,8 @@ pub fn invalidateTabBar(self: *Window) void {
     _ = w32.InvalidateRect(hwnd, &rect, 0);
 }
 
-/// Populate equal-width tab rectangles and return their rightmost edge.
-fn layoutTabRects(
-    rects: []w32.RECT,
-    available_w: i32,
-    bar_h: i32,
-    min_tab_w: i32,
-    max_tab_w: i32,
-) i32 {
-    const tab_count: i32 = @intCast(rects.len);
-    if (tab_count == 0) return 0;
-
-    var tab_w = @divTrunc(available_w, tab_count);
-    tab_w = @max(tab_w, min_tab_w);
-    tab_w = @min(tab_w, max_tab_w);
-
-    var x: i32 = 0;
-    for (rects) |*rect| {
-        rect.* = .{
-            .left = x,
-            .top = 0,
-            .right = x + tab_w,
-            .bottom = bar_h,
-        };
-        x += tab_w;
-    }
-
-    return x;
-}
-
-test "tab bar keeps tab widths equal" {
-    var rects: [2]w32.RECT = undefined;
-
-    const tabs_right = layoutTabRects(&rects, 964, 30, 60, 200);
-
-    try std.testing.expectEqual(@as(i32, 400), tabs_right);
-    try std.testing.expectEqual(@as(i32, 200), rects[0].right - rects[0].left);
-    try std.testing.expectEqual(@as(i32, 200), rects[1].right - rects[1].left);
-    try std.testing.expectEqual(rects[0].right, rects[1].left);
-}
-
-/// Paint the tab bar using double-buffered GDI painting.
-/// Draws tab backgrounds, text labels, close buttons (x), and the new-tab (+) button.
+/// Paint the tab strip into an offscreen 32-bit DIB, so hover changes
+/// don't flicker and the strip can blend its anti-aliased shapes directly.
 fn paintTabBar(self: *Window) void {
     const hwnd = self.hwnd orelse return;
 
@@ -1350,215 +1438,41 @@ fn paintTabBar(self: *Window) void {
     const hdc_screen = w32.BeginPaint(hwnd, &ps) orelse return;
     defer _ = w32.EndPaint(hwnd, &ps);
 
-    // If the tab bar is not visible, just validate the region and return.
-    if (!self.tab_bar_visible) return;
+    const layout = self.stripLayout();
+    const height = layout.height();
+    if (height <= 0 or layout.width <= 0) return;
 
-    const bar_h = self.tabBarHeight();
-    if (bar_h <= 0) return;
-
-    // Get client rect width.
-    var client_rect: w32.RECT = undefined;
-    if (w32.GetClientRect(hwnd, &client_rect) == 0) return;
-    const client_w = client_rect.right - client_rect.left;
-    if (client_w <= 0) return;
-
-    // Double-buffer: create offscreen DC and bitmap.
     const mem_dc = w32.CreateCompatibleDC(hdc_screen) orelse return;
     defer _ = w32.DeleteDC(mem_dc);
-
-    const mem_bmp = w32.CreateCompatibleBitmap(hdc_screen, client_w, bar_h) orelse return;
+    // A negative height makes the DIB top-down, so row 0 is the top.
+    const info: w32.BITMAPINFO = .{ .bmiHeader = .{ .biWidth = layout.width, .biHeight = -height } };
+    var bits: ?*anyopaque = null;
+    const mem_bmp = w32.CreateDIBSection(mem_dc, &info, w32.DIB_RGB_COLORS, &bits, null, 0) orelse return;
     const old_bmp = w32.SelectObject(mem_dc, mem_bmp);
     defer {
         _ = w32.SelectObject(mem_dc, old_bmp);
         _ = w32.DeleteObject(mem_bmp);
     }
 
-    // --- Colors ---
     const bg = self.app.config.background;
-    // Bar background: terminal bg + 20 brightness per channel (slightly lighter).
-    const bar_r: u8 = @min(@as(u16, bg.r) + 20, 255);
-    const bar_g: u8 = @min(@as(u16, bg.g) + 20, 255);
-    const bar_b: u8 = @min(@as(u16, bg.b) + 20, 255);
-    const bar_color = w32.RGB(bar_r, bar_g, bar_b);
-
-    // Hover background: bar bg + 15 more (total +35 from terminal bg).
-    const hover_r: u8 = @min(@as(u16, bar_r) + 15, 255);
-    const hover_g: u8 = @min(@as(u16, bar_g) + 15, 255);
-    const hover_b: u8 = @min(@as(u16, bar_b) + 15, 255);
-    const hover_color = w32.RGB(hover_r, hover_g, hover_b);
-
-    // Active tab background: terminal bg (darker than bar).
-    const active_bg_color = w32.RGB(bg.r, bg.g, bg.b);
-
-    // Accent line color (blue).
-    const accent_color = w32.RGB(0x3D, 0x8E, 0xF8);
-
-    // Text colors.
-    const active_text_color = w32.RGB(230, 230, 230);
-    const inactive_text_color = w32.RGB(150, 150, 150);
-
-    // Close button colors.
-    const close_normal_color = w32.RGB(150, 150, 150);
-    const close_hover_color = w32.RGB(232, 65, 65);
-
-    // --- Fill bar background ---
-    var bar_rect = w32.RECT{ .left = 0, .top = 0, .right = client_w, .bottom = bar_h };
-    const bar_brush = w32.CreateSolidBrush(bar_color) orelse return;
-    _ = w32.FillRect(mem_dc, &bar_rect, bar_brush);
-    _ = w32.DeleteObject(@ptrCast(bar_brush));
-
-    // --- Select font and set text mode ---
-    var old_font: ?*anyopaque = null;
-    if (self.tab_font) |font| {
-        old_font = w32.SelectObject(mem_dc, font);
-    }
-    defer {
-        if (old_font) |f| _ = w32.SelectObject(mem_dc, f);
-    }
-    _ = w32.SetBkMode(mem_dc, w32.TRANSPARENT);
-
-    // --- Calculate tab geometry ---
-    const new_tab_btn_w: i32 = @intFromFloat(@round(36.0 * self.scale));
-    const close_btn_w: i32 = @intFromFloat(@round(20.0 * self.scale));
-    const text_pad: i32 = @intFromFloat(@round(10.0 * self.scale));
-    const accent_h: i32 = @intFromFloat(@round(2.0 * self.scale));
-
-    const available_w = client_w - new_tab_btn_w;
-
-    // Calculate equal tab widths within the configured bounds. Any width left
-    // after the maximum is reached remains empty instead of stretching the
-    // final tab.
-    const min_tab_w: i32 = @intFromFloat(@round(60.0 * self.scale));
-    const max_tab_w: i32 = @intFromFloat(@round(200.0 * self.scale));
-    const tabs_right = layoutTabRects(
-        self.tab_rects[0..self.tab_count],
-        available_w,
-        bar_h,
-        min_tab_w,
-        max_tab_w,
+    const fg = self.app.config.foreground;
+    tab_strip.paint(
+        .{ .hdc = mem_dc, .pixels = @ptrCast(@alignCast(bits orelse return)), .width = layout.width, .height = height },
+        layout,
+        .fromTerminal(.{ .r = bg.r, .g = bg.g, .b = bg.b }, .{ .r = fg.r, .g = fg.g, .b = fg.b }),
+        self.strip_fonts,
+        .{
+            .text = self.tab_titles[0..self.tab_count],
+            .lens = self.tab_title_lens[0..self.tab_count],
+        },
+        .{
+            .hover = self.strip_hover,
+            .pressed = self.strip_pressed,
+            .window_active = self.window_active,
+            .maximized = w32.IsZoomed(hwnd) != 0,
+        },
     );
-
-    // --- Draw each tab ---
-    for (0..self.tab_count) |i| {
-        const is_active = (i == self.active_tab);
-        const is_hovered = (@as(isize, @intCast(i)) == self.hover_tab);
-        const x = self.tab_rects[i].left;
-        const this_tab_w = self.tab_rects[i].right - x;
-
-        // Draw tab background. CreateSolidBrush failures are rare (GDI
-        // handle exhaustion), but should not skip the rest of the tab.
-        if (is_active) {
-            var tab_rect = w32.RECT{ .left = x, .top = 0, .right = x + this_tab_w, .bottom = bar_h };
-            if (w32.CreateSolidBrush(active_bg_color)) |brush| {
-                _ = w32.FillRect(mem_dc, &tab_rect, brush);
-                _ = w32.DeleteObject(@ptrCast(brush));
-            }
-
-            // Draw accent line at bottom.
-            var accent_rect = w32.RECT{
-                .left = x,
-                .top = bar_h - accent_h,
-                .right = x + this_tab_w,
-                .bottom = bar_h,
-            };
-            if (w32.CreateSolidBrush(accent_color)) |brush| {
-                _ = w32.FillRect(mem_dc, &accent_rect, brush);
-                _ = w32.DeleteObject(@ptrCast(brush));
-            }
-        } else if (is_hovered) {
-            var hover_rect = w32.RECT{ .left = x, .top = 0, .right = x + this_tab_w, .bottom = bar_h };
-            if (w32.CreateSolidBrush(hover_color)) |brush| {
-                _ = w32.FillRect(mem_dc, &hover_rect, brush);
-                _ = w32.DeleteObject(@ptrCast(brush));
-            }
-        }
-
-        // Draw tab title text.
-        const title_len = self.tab_title_lens[i];
-        if (title_len > 0) {
-            _ = w32.SetTextColor(mem_dc, if (is_active) active_text_color else inactive_text_color);
-            var text_rect = w32.RECT{
-                .left = x + text_pad,
-                .top = 0,
-                .right = x + this_tab_w - close_btn_w - text_pad,
-                .bottom = bar_h,
-            };
-            _ = w32.DrawTextW(
-                mem_dc,
-                @ptrCast(&self.tab_titles[i]),
-                @intCast(title_len),
-                &text_rect,
-                w32.DT_LEFT | w32.DT_VCENTER | w32.DT_SINGLELINE | w32.DT_END_ELLIPSIS | w32.DT_NOPREFIX,
-            );
-        }
-
-        // Draw close button (x) — visible on active or hovered tabs.
-        if (is_active or is_hovered) {
-            const close_x = x + this_tab_w - close_btn_w - @divTrunc(text_pad, 2);
-            const close_y_center = @divTrunc(bar_h, 2);
-            const close_text_color = if (is_hovered and self.hover_close and @as(isize, @intCast(i)) == self.hover_tab)
-                close_hover_color
-            else
-                close_normal_color;
-
-            _ = w32.SetTextColor(mem_dc, close_text_color);
-            const x_char = std.unicode.utf8ToUtf16LeStringLiteral("\u{00D7}"); // multiplication sign as close
-            var close_rect = w32.RECT{
-                .left = close_x,
-                .top = close_y_center - @divTrunc(close_btn_w, 2),
-                .right = close_x + close_btn_w,
-                .bottom = close_y_center + @divTrunc(close_btn_w, 2),
-            };
-            _ = w32.DrawTextW(
-                mem_dc,
-                x_char,
-                1,
-                &close_rect,
-                w32.DT_LEFT | w32.DT_VCENTER | w32.DT_SINGLELINE | w32.DT_NOPREFIX,
-            );
-        }
-    }
-
-    // --- Draw new-tab (+) button ---
-    {
-        const btn_left = tabs_right;
-        const btn_right = btn_left + new_tab_btn_w;
-        self.new_tab_rect = w32.RECT{
-            .left = btn_left,
-            .top = 0,
-            .right = btn_right,
-            .bottom = bar_h,
-        };
-
-        // Hover highlight for new-tab button.
-        if (self.hover_new_tab) {
-            var btn_rect = w32.RECT{ .left = btn_left, .top = 0, .right = btn_right, .bottom = bar_h };
-            const nt_brush = w32.CreateSolidBrush(hover_color);
-            if (nt_brush) |brush| {
-                _ = w32.FillRect(mem_dc, &btn_rect, brush);
-                _ = w32.DeleteObject(@ptrCast(brush));
-            }
-        }
-
-        _ = w32.SetTextColor(mem_dc, inactive_text_color);
-        const plus_char = std.unicode.utf8ToUtf16LeStringLiteral("+");
-        var plus_rect = w32.RECT{
-            .left = btn_left,
-            .top = 0,
-            .right = btn_right,
-            .bottom = bar_h,
-        };
-        _ = w32.DrawTextW(
-            mem_dc,
-            plus_char,
-            1,
-            &plus_rect,
-            w32.DT_LEFT | w32.DT_VCENTER | w32.DT_SINGLELINE | w32.DT_NOPREFIX,
-        );
-    }
-
-    // --- BitBlt to screen ---
-    _ = w32.BitBlt(hdc_screen, 0, 0, client_w, bar_h, mem_dc, 0, 0, w32.SRCCOPY);
+    _ = w32.BitBlt(hdc_screen, 0, 0, layout.width, height, mem_dc, 0, 0, w32.SRCCOPY);
 }
 
 /// Honor a program's CSI 8 t resize only when it owns the whole window.
@@ -1655,7 +1569,10 @@ test "program resize native window guards and zero dimensions" {
 /// Saves/restores window style and placement.
 pub fn toggleFullscreen(self: *Window) void {
     const hwnd = self.hwnd orelse return;
-    if (!self.is_fullscreen) {
+    // Flip the flag first: the SWP_FRAMECHANGED below runs WM_NCCALCSIZE,
+    // which must already see the new state to pick the right frame.
+    self.is_fullscreen = !self.is_fullscreen;
+    if (self.is_fullscreen) {
         self.saved_style = w32.GetWindowLongW(hwnd, w32.GWL_STYLE);
         _ = w32.GetWindowRect(hwnd, &self.saved_rect);
         _ = w32.SetWindowLongW(hwnd, w32.GWL_STYLE, w32.WS_POPUP | w32.WS_VISIBLE_STYLE);
@@ -1669,7 +1586,8 @@ pub fn toggleFullscreen(self: *Window) void {
         _ = w32.SetWindowLongW(hwnd, w32.GWL_STYLE, self.saved_style);
         _ = w32.SetWindowPos(hwnd, null, self.saved_rect.left, self.saved_rect.top, self.saved_rect.right - self.saved_rect.left, self.saved_rect.bottom - self.saved_rect.top, w32.SWP_NOZORDER | w32.SWP_FRAMECHANGED);
     }
-    self.is_fullscreen = !self.is_fullscreen;
+    self.updateTabBarVisibility();
+    self.handleResize();
 }
 
 /// Toggle window decorations (title bar + borders) on/off.
@@ -1689,6 +1607,9 @@ pub fn toggleWindowDecorations(self: *Window) void {
     }
     // Force frame recalculation.
     _ = w32.SetWindowPos(hwnd, null, 0, 0, 0, 0, w32.SWP_NOZORDER | w32.SWP_FRAMECHANGED | w32.SWP_NOMOVE | w32.SWP_NOSIZE);
+    // With or without a caption the strip changes role, and possibly height.
+    self.updateTabBarVisibility();
+    self.handleResize();
 }
 
 /// Handle WM_SIZE: re-layout the active tab's split panes and repaint tab bar.
@@ -1747,7 +1668,7 @@ fn showResizeOverlay(self: *Window) void {
             null,
         );
         if (self.resize_overlay_hwnd) |h| {
-            if (self.tab_font) |f| {
+            if (self.strip_fonts.title) |f| {
                 _ = w32.SendMessageW(h, w32.WM_SETFONT, @intFromPtr(f), 1);
             }
         }
@@ -1788,40 +1709,40 @@ fn showResizeOverlay(self: *Window) void {
 /// Handle a left-button click in the tab bar region.
 /// Dispatches to addTab, closeTab, or selectTabIndex depending on hit position.
 fn handleTabBarClick(self: *Window, x: i16, y: i16) void {
-    if (!self.tab_bar_visible) return;
-    if (y >= self.tabBarHeight()) return;
-
-    // Check new-tab button.
-    if (x >= self.new_tab_rect.left and x < self.new_tab_rect.right) {
-        _ = self.addTab() catch |err| {
+    switch (self.stripLayout().hitTest(x, y)) {
+        .new_tab => _ = self.addTab() catch |err| {
             log.err("failed to create new tab: {}", .{err});
-            return;
-        };
-        return;
+        },
+        .tab_close => |i| self.closeTabFromStrip(i),
+        // Settings live in Ghostty's config file; this opens it.
+        .settings => _ = self.app.performAction(.app, .open_config, .os_open) catch |err| {
+            log.err("failed to open the config file: {}", .{err});
+        },
+        .tab => |i| {
+            self.selectTabIndex(i);
+            // Start tracking potential tab drag
+            self.drag_tab = @intCast(i);
+            self.drag_start_x = x;
+            self.drag_active = false;
+            if (self.hwnd) |h| _ = w32.SetCapture(h);
+            self.invalidateTabBar();
+        },
+        else => {},
     }
+}
 
-    // Check each tab.
-    const close_btn_w: i32 = @intFromFloat(@round(20.0 * self.scale));
-    const text_pad: i32 = @intFromFloat(@round(10.0 * self.scale));
-    for (0..self.tab_count) |i| {
-        const rect = self.tab_rects[i];
-        if (x >= rect.left and x < rect.right) {
-            // Check close button area (right side of tab).
-            const close_left = rect.right - close_btn_w - @divTrunc(text_pad, 2);
-            if (x >= close_left) {
-                self.closeTabByIndex(i);
-            } else {
-                self.selectTabIndex(i);
-                // Start tracking potential tab drag
-                self.drag_tab = @intCast(i);
-                self.drag_start_x = x;
-                self.drag_active = false;
-                if (self.hwnd) |h| _ = w32.SetCapture(h);
-                self.invalidateTabBar();
-            }
-            return;
-        }
-    }
+/// Closing with the mouse keeps the other tabs at their width, as Chrome
+/// does, so the next close button lands under the pointer. The width is
+/// released once the pointer leaves the tabs.
+fn closeTabFromStrip(self: *Window, index: usize) void {
+    self.frozen_tab_width = self.stripLayout().tabWidth();
+    self.requestCloseTabs(&.{self.tabId(index)});
+}
+
+fn releaseFrozenTabWidth(self: *Window) void {
+    if (self.frozen_tab_width == null) return;
+    self.frozen_tab_width = null;
+    self.invalidateTabBar();
 }
 
 /// Move a tab from one index to another, shifting intermediate tabs.
@@ -1872,8 +1793,6 @@ fn moveTabTo(self: *Window, from: usize, to: usize) void {
 /// Handle mouse movement over the tab bar for hover effects.
 /// Registers TrackMouseEvent on first move so we get WM_MOUSELEAVE.
 fn handleTabBarMouseMove(self: *Window, x: i16, y: i16) void {
-    if (!self.tab_bar_visible) return;
-
     // Register for WM_MOUSELEAVE if not already tracking.
     if (!self.tracking_mouse) {
         var tme = w32.TRACKMOUSEEVENT{
@@ -1886,35 +1805,11 @@ fn handleTabBarMouseMove(self: *Window, x: i16, y: i16) void {
         self.tracking_mouse = true;
     }
 
-    var new_hover: isize = -1;
-    var new_close = false;
-    var new_new_tab = false;
-
-    if (y < self.tabBarHeight()) {
-        // Check new-tab button.
-        if (x >= self.new_tab_rect.left and x < self.new_tab_rect.right) {
-            new_new_tab = true;
-        } else {
-            // Check tabs.
-            const close_btn_w: i32 = @intFromFloat(@round(20.0 * self.scale));
-            const text_pad: i32 = @intFromFloat(@round(10.0 * self.scale));
-            for (0..self.tab_count) |i| {
-                const rect = self.tab_rects[i];
-                if (x >= rect.left and x < rect.right) {
-                    new_hover = @intCast(i);
-                    const close_left = rect.right - close_btn_w - @divTrunc(text_pad, 2);
-                    new_close = x >= close_left;
-                    break;
-                }
-            }
-        }
-    }
-
-    if (new_hover != self.hover_tab or new_close != self.hover_close or new_new_tab != self.hover_new_tab) {
-        self.hover_tab = new_hover;
-        self.hover_close = new_close;
-        self.hover_new_tab = new_new_tab;
-        self.invalidateTabBar();
+    const part = self.stripLayout().hitTest(x, y);
+    self.setStripHover(part);
+    switch (part) {
+        .tab, .tab_close => {},
+        else => self.releaseFrozenTabWidth(),
     }
 }
 
@@ -1930,15 +1825,10 @@ fn handleTabBarRightClick(self: *Window, x: i16, y: i16) void {
     if (!self.tab_bar_visible) return;
     if (y >= self.tabBarHeight()) return;
 
-    // Hit-test to find which tab was right-clicked.
-    var clicked_tab: ?usize = null;
-    for (0..self.tab_count) |i| {
-        const rect = self.tab_rects[i];
-        if (x >= rect.left and x < rect.right) {
-            clicked_tab = i;
-            break;
-        }
-    }
+    const clicked_tab: ?usize = switch (self.stripLayout().hitTest(x, y)) {
+        .tab, .tab_close => |i| i,
+        else => null,
+    };
 
     // If clicked on empty area (not a tab), only show "New Tab".
     const menu = w32.CreatePopupMenu() orelse return;
@@ -1967,29 +1857,19 @@ fn handleTabBarRightClick(self: *Window, x: i16, y: i16) void {
 
     switch (@as(usize, @intCast(cmd))) {
         TAB_CTX_CLOSE => {
-            if (clicked_tab) |tab| self.closeTabByIndex(tab);
+            if (clicked_tab) |tab| self.requestCloseTabs(&.{self.tabId(tab)});
         },
-        TAB_CTX_CLOSE_OTHERS => {
-            if (clicked_tab) |tab| {
-                var current = tab;
-                var i: usize = self.tab_count;
-                while (i > 0) {
-                    i -= 1;
-                    if (i != current) {
-                        self.closeTabByIndex(i);
-                        if (i < current) current -= 1;
-                    }
-                }
+        TAB_CTX_CLOSE_OTHERS, TAB_CTX_CLOSE_RIGHT => {
+            const tab = clicked_tab orelse return;
+            const first = if (cmd == TAB_CTX_CLOSE_RIGHT) tab + 1 else 0;
+            var ids: [MAX_TABS]u64 = undefined;
+            var count: usize = 0;
+            for (first..self.tab_count) |i| {
+                if (i == tab) continue;
+                ids[count] = self.tabId(i);
+                count += 1;
             }
-        },
-        TAB_CTX_CLOSE_RIGHT => {
-            if (clicked_tab) |tab| {
-                var i: usize = self.tab_count;
-                while (i > tab + 1) {
-                    i -= 1;
-                    self.closeTabByIndex(i);
-                }
-            }
+            self.requestCloseTabs(ids[0..count]);
         },
         TAB_CTX_NEW_TAB => {
             _ = self.addTab() catch |err| {
@@ -2003,12 +1883,9 @@ fn handleTabBarRightClick(self: *Window, x: i16, y: i16) void {
 /// Handle WM_MOUSELEAVE: reset all hover state and repaint.
 fn handleTabBarMouseLeave(self: *Window) void {
     self.tracking_mouse = false;
-    if (self.hover_tab != -1 or self.hover_new_tab) {
-        self.hover_tab = -1;
-        self.hover_close = false;
-        self.hover_new_tab = false;
-        self.invalidateTabBar();
-    }
+    self.releaseFrozenTabWidth();
+    // Caption buttons are tracked by WM_NCMOUSELEAVE instead.
+    if (!self.strip_hover.isCaptionButton()) self.setStripHover(.none);
 }
 
 /// Rename edit control child ID.
@@ -2023,7 +1900,7 @@ pub fn startTabRename(self: *Window, tab_idx: usize) void {
 
     const hwnd = self.hwnd orelse return;
     const rect = rect: {
-        if (self.tab_bar_visible) break :rect self.tab_rects[tab_idx];
+        if (self.tab_bar_visible) break :rect self.stripLayout().tabRect(tab_idx);
 
         // A single-tab window has no tab bar. Use a compact editor at the
         // top of the client area so prompt_*_title remains usable.
@@ -2191,30 +2068,13 @@ pub fn cancelTabRename(self: *Window) void {
 /// When the last tab has already been closed (tab_count == 0) there is
 /// nothing to confirm, so this returns true silently.
 pub fn confirmCloseIfNeeded(self: *Window) bool {
-    var needs = false;
-    outer: for (0..self.tab_count) |i| {
-        var it = self.tab_trees[i].iterator();
-        while (it.next()) |entry| {
-            const surface = entry.view;
-            if (surface.core_surface_ready and
-                surface.core_surface.needsConfirmQuit())
-            {
-                needs = true;
-                break :outer;
-            }
-        }
-    }
+    const needs = for (0..self.tab_count) |i| {
+        if (self.tabNeedsConfirm(i)) break true;
+    } else false;
     if (!needs) return true;
-
-    const result = w32.MessageBoxW(
-        self.hwnd,
-        std.unicode.utf8ToUtf16LeStringLiteral(
-            "Processes are still running in this window.\nClose anyway?",
-        ),
-        std.unicode.utf8ToUtf16LeStringLiteral(brand.name),
-        w32.MB_OKCANCEL | w32.MB_ICONWARNING | w32.MB_DEFBUTTON2,
-    );
-    return result == w32.IDOK;
+    return confirmDialog(self.hwnd, std.unicode.utf8ToUtf16LeStringLiteral(
+        "Commands are still running in this window.\nClose anyway?",
+    ));
 }
 
 /// Handle WM_CLOSE: clean up all tabs, then destroy the window.
@@ -2254,10 +2114,7 @@ fn onDestroy(self: *Window) void {
 
     // Quick terminal windows are managed by QuickTerminal, not the windows list.
     if (self.is_quick_terminal) {
-        if (self.tab_font) |font| {
-            _ = w32.DeleteObject(font);
-            self.tab_font = null;
-        }
+        self.strip_fonts.deinit();
         self.hwnd = null;
         // QuickTerminal handles the rest of cleanup (freeing self, quit timer).
         if (app.quick_terminal) |qt| {
@@ -2275,10 +2132,7 @@ fn onDestroy(self: *Window) void {
     }
 
     // Clean up Window-level resources.
-    if (self.tab_font) |font| {
-        _ = w32.DeleteObject(font);
-        self.tab_font = null;
-    }
+    self.strip_fonts.deinit();
     self.hwnd = null;
 
     // Free the Window allocation.
@@ -2315,6 +2169,7 @@ pub fn windowWndProc(
         w32.WM_LBUTTONDBLCLK,
         w32.WM_RBUTTONUP,
         w32.WM_MBUTTONDOWN,
+        w32.WM_MBUTTONUP,
         w32.WM_MOUSEMOVE,
         w32.WM_MOUSELEAVE,
         w32.WM_MOUSEWHEEL,
@@ -2473,6 +2328,71 @@ pub fn windowWndProc(
             window.paintTabBar();
             return 0;
         },
+        w32.WM_NCCALCSIZE => {
+            if (wparam != 0 and window.integratedTitleBar()) {
+                return window.calcClientArea(hwnd, wparam, lparam);
+            }
+            return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
+        },
+        w32.WM_NCHITTEST => {
+            if (window.integratedTitleBar()) return window.hitTestFrame(hwnd, lparam);
+            return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
+        },
+        // Caption buttons are drawn by the tab strip. DefWindowProc would
+        // paint the classic buttons over them, so it never sees their
+        // mouse messages.
+        w32.WM_NCMOUSEMOVE => {
+            const button = captionButtonAt(wparam);
+            window.trackNonClientMouse();
+            window.setStripHover(button orelse .none);
+            if (button != null) return 0;
+            return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
+        },
+        w32.WM_NCMOUSELEAVE => {
+            window.tracking_nc_mouse = false;
+            window.strip_pressed = .none;
+            if (window.strip_hover.isCaptionButton()) window.setStripHover(.none);
+            return 0;
+        },
+        w32.WM_NCLBUTTONDOWN => {
+            if (captionButtonAt(wparam)) |button| {
+                window.strip_pressed = button;
+                window.invalidateTabBar();
+                return 0;
+            }
+            return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
+        },
+        w32.WM_NCLBUTTONUP => {
+            const pressed = window.strip_pressed;
+            window.strip_pressed = .none;
+            if (captionButtonAt(wparam)) |button| {
+                window.invalidateTabBar();
+                if (pressed.eql(button)) window.pressCaptionButton(button);
+                return 0;
+            }
+            return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
+        },
+        w32.WM_NCLBUTTONDBLCLK => {
+            if (captionButtonAt(wparam) != null) return 0;
+            return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
+        },
+        w32.WM_DPICHANGED => {
+            // Per-monitor DPI: rescale the strip and take the size Windows
+            // suggests for the new monitor.
+            window.scale = @as(f32, @floatFromInt((wparam >> 16) & 0xFFFF)) / 96.0;
+            window.loadStripFonts();
+            const suggested: *const w32.RECT = @ptrFromInt(@as(usize, @bitCast(lparam)));
+            _ = w32.SetWindowPos(
+                hwnd,
+                null,
+                suggested.left,
+                suggested.top,
+                suggested.right - suggested.left,
+                suggested.bottom - suggested.top,
+                w32.SWP_NOZORDER | w32.SWP_NOACTIVATE,
+            );
+            return 0;
+        },
         w32.WM_COMMAND => {
             const notification: u16 = @intCast((wparam >> 16) & 0xFFFF);
             const control_id: u16 = @intCast(wparam & 0xFFFF);
@@ -2526,12 +2446,9 @@ pub fn windowWndProc(
             const y: i32 = @as(i16, @truncate((lparam >> 16) & 0xFFFF));
             // Double-click on tab bar starts inline rename
             if (y < window.tabBarHeight()) {
-                for (0..window.tab_count) |i| {
-                    const rect = window.tab_rects[i];
-                    if (x >= rect.left and x < rect.right) {
-                        window.startTabRename(i);
-                        return 0;
-                    }
+                switch (window.stripLayout().hitTest(x, y)) {
+                    .tab => |i| window.startTabRename(i),
+                    else => {},
                 }
                 return 0;
             }
@@ -2551,6 +2468,16 @@ pub fn windowWndProc(
             }
             return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
         },
+        w32.WM_MBUTTONUP => {
+            // Middle-click closes a tab, as in browsers.
+            const x: i16 = @truncate(lparam & 0xFFFF);
+            const y: i16 = @truncate((lparam >> 16) & 0xFFFF);
+            switch (window.stripLayout().hitTest(x, y)) {
+                .tab, .tab_close => |i| window.closeTabFromStrip(i),
+                else => {},
+            }
+            return 0;
+        },
         w32.WM_MOUSEMOVE => {
             const x: i32 = @as(i16, @truncate(lparam & 0xFFFF));
             const y: i32 = @as(i16, @truncate((lparam >> 16) & 0xFFFF));
@@ -2566,20 +2493,8 @@ pub fn windowWndProc(
                     window.drag_active = true;
                 }
                 if (window.drag_active and window.tab_count > 1) {
-                    // Use the uniform painted width for drag target
-                    // calculation.
                     const from: usize = @intCast(window.drag_tab);
-                    const first_w = window.tab_rects[0].right - window.tab_rects[0].left;
-                    var target: usize = 0;
-                    for (0..window.tab_count) |i| {
-                        const slot_left: i32 = @intCast(@as(i32, @intCast(i)) * first_w);
-                        const slot_mid = slot_left + @divTrunc(first_w, 2);
-                        if (x >= slot_mid) {
-                            target = i;
-                        }
-                    }
-                    // Clamp to valid range
-                    if (target >= window.tab_count) target = window.tab_count - 1;
+                    const target = window.stripLayout().dropIndex(x);
                     if (target != from) {
                         window.moveTabTo(from, target);
                         window.drag_tab = @intCast(target);
@@ -2590,6 +2505,8 @@ pub fn windowWndProc(
             }
             if (y < window.tabBarHeight()) {
                 window.handleTabBarMouseMove(@truncate(x), @truncate(y));
+            } else {
+                window.releaseFrozenTabWidth();
             }
             return 0;
         },
@@ -2613,6 +2530,8 @@ pub fn windowWndProc(
         },
         w32.WM_ACTIVATE => {
             const activated = @as(u16, @truncate(wparam & 0xFFFF));
+            window.window_active = activated != w32.WA_INACTIVE;
+            window.invalidateTabBar();
             if (activated == w32.WA_INACTIVE and window.is_quick_terminal) {
                 if (window.app.quick_terminal) |qt| {
                     qt.onFocusLost();

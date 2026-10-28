@@ -134,6 +134,21 @@ pub const IO_STATUS_BLOCK = windows.IO_STATUS_BLOCK;
 pub const NTSTATUS = windows.NTSTATUS;
 pub const OBJECT_ATTRIBUTES = windows.OBJECT.ATTRIBUTES;
 
+// Toolhelp process snapshots
+pub const TH32CS_SNAPPROCESS: DWORD = 0x00000002;
+pub const PROCESSENTRY32W = extern struct {
+    dwSize: DWORD = @sizeOf(PROCESSENTRY32W),
+    cntUsage: DWORD = 0,
+    th32ProcessID: DWORD = 0,
+    th32DefaultHeapID: ULONG_PTR = 0,
+    th32ModuleID: DWORD = 0,
+    cntThreads: DWORD = 0,
+    th32ParentProcessID: DWORD = 0,
+    pcPriClassBase: i32 = 0,
+    dwFlags: DWORD = 0,
+    szExeFile: [260]u16 = @splat(0),
+};
+
 // Exported functions by library
 pub const exp = struct {
     pub const kernel32 = struct {
@@ -254,6 +269,19 @@ pub const exp = struct {
             hHandle: HANDLE,
             dwMilliseconds: DWORD,
         ) callconv(.winapi) DWORD;
+        pub extern "kernel32" fn GetProcessId(Process: HANDLE) callconv(.winapi) DWORD;
+        pub extern "kernel32" fn CreateToolhelp32Snapshot(
+            dwFlags: DWORD,
+            th32ProcessID: DWORD,
+        ) callconv(.winapi) HANDLE;
+        pub extern "kernel32" fn Process32FirstW(
+            hSnapshot: HANDLE,
+            lppe: *PROCESSENTRY32W,
+        ) callconv(.winapi) BOOL;
+        pub extern "kernel32" fn Process32NextW(
+            hSnapshot: HANDLE,
+            lppe: *PROCESSENTRY32W,
+        ) callconv(.winapi) BOOL;
         pub extern "kernel32" fn GetExitCodeProcess(
             hProcess: HANDLE,
             lpExitCode: *DWORD,
