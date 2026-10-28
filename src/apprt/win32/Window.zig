@@ -283,13 +283,15 @@ pub fn init(self: *Window, app: *App, options: InitOptions) !void {
         .is_quick_terminal = options.is_quick_terminal,
     };
 
-    const style: u32 = if (options.is_quick_terminal)
+    // WS_CLIPCHILDREN keeps the window's own painting (the strip, the
+    // sidebar, newly exposed edges) off the terminal panes.
+    const style: u32 = w32.WS_CLIPCHILDREN | @as(u32, if (options.is_quick_terminal)
         w32.WS_POPUP
     else if (app.config.@"window-decoration" == .none)
         // Borderless but still resizable: thin sizing frame, no title bar.
         w32.WS_POPUP | w32.WS_THICKFRAME
     else
-        w32.WS_OVERLAPPEDWINDOW;
+        w32.WS_OVERLAPPEDWINDOW);
     const ex_style: u32 = if (options.is_quick_terminal) w32.WS_EX_TOOLWINDOW else 0;
 
     // Cascade non-quick-terminal windows: stack each new window 30px
@@ -1173,9 +1175,10 @@ fn terminalCorner(self: *const Window) i32 {
 fn placePane(self: *Window, hwnd: w32.HWND, rect: w32.RECT) void {
     const w = @max(rect.right - rect.left, 1);
     const h = @max(rect.bottom - rect.top, 1);
-    // Copying the old pixels along would leave copies of the terminal in
-    // the area it moved out of until the parent repaints there.
-    _ = w32.SetWindowPos(hwnd, null, rect.left, rect.top, w, h, w32.SWP_NOZORDER | w32.SWP_NOACTIVATE | w32.SWP_NOCOPYBITS);
+    // Windows copies the pane's last frame along, so only the newly
+    // exposed edge waits for the next one (painted in the terminal's
+    // color by its WM_ERASEBKGND) instead of the whole pane going blank.
+    _ = w32.SetWindowPos(hwnd, null, rect.left, rect.top, w, h, w32.SWP_NOZORDER | w32.SWP_NOACTIVATE);
     _ = w32.ShowWindow(hwnd, w32.SW_SHOW);
 
     const area = self.surfaceRect();
@@ -3071,20 +3074,6 @@ pub fn windowWndProc(
             // No limits → fall through to DefWindowProc.
             return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
         },
-        w32.WM_ENTERSIZEMOVE => {
-            if (window.tab_count > 0) {
-                var it = window.tab_trees[window.active_tab].iterator();
-                while (it.next()) |entry| entry.view.in_live_resize = true;
-            }
-            return 0;
-        },
-        w32.WM_EXITSIZEMOVE => {
-            if (window.tab_count > 0) {
-                var it = window.tab_trees[window.active_tab].iterator();
-                while (it.next()) |entry| entry.view.in_live_resize = false;
-            }
-            return 0;
-        },
         w32.WM_CLOSE => {
             // Title-bar X / Alt+F4 / close_all_windows land here. Confirm
             // once for the whole window if any tab has a running process.
@@ -3229,7 +3218,17 @@ pub fn windowWndProc(
             }
             return 0;
         },
-        w32.WM_ERASEBKGND => return 1,
+        w32.WM_ERASEBKGND => {
+            // A growing window exposes area its panes haven't reached yet,
+            // and splits leave gaps: give them the terminal's color rather
+            // than whatever was on screen. The strip and sidebar paint
+            // themselves in WM_PAINT, double-buffered, so they're left out.
+            if (window.app.bg_brush) |brush| {
+                const area = window.surfaceRect();
+                _ = w32.FillRect(@ptrFromInt(wparam), &area, brush);
+            }
+            return 1;
+        },
         w32.WM_LBUTTONDOWN => {
             const x: i32 = @as(i16, @truncate(lparam & 0xFFFF));
             const y: i32 = @as(i16, @truncate((lparam >> 16) & 0xFFFF));

@@ -86,6 +86,7 @@ pub const CS_DBLCLKS: u32 = 0x0008;
 
 // Window styles
 pub const WS_OVERLAPPEDWINDOW: u32 = 0x00CF0000;
+pub const WS_CLIPCHILDREN: u32 = 0x02000000;
 pub const WS_POPUP: u32 = 0x80000000;
 pub const WS_CAPTION: u32 = 0x00C00000;
 pub const WS_THICKFRAME: u32 = 0x00040000;
@@ -1358,7 +1359,6 @@ pub const HWND_TOPMOST: ?HWND = @ptrFromInt(@as(usize, @bitCast(@as(isize, -1)))
 pub const HWND_NOTOPMOST: ?HWND = @ptrFromInt(@as(usize, @bitCast(@as(isize, -2))));
 pub const SWP_NOACTIVATE: u32 = 0x0010;
 pub const SWP_SHOWWINDOW: u32 = 0x0040;
-pub const SWP_NOCOPYBITS: u32 = 0x0100;
 pub const WS_EX_TOPMOST: u32 = 0x00000008;
 pub const SW_SHOWNOACTIVATE: i32 = 4;
 

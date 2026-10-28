@@ -2320,16 +2320,6 @@ fn surfaceWndProc(
         return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
 
     switch (msg) {
-        w32.WM_ENTERSIZEMOVE => {
-            surface.in_live_resize = true;
-            return 0;
-        },
-
-        w32.WM_EXITSIZEMOVE => {
-            surface.in_live_resize = false;
-            return 0;
-        },
-
         w32.WM_SIZE => {
             const width: u32 = @intCast(lparam & 0xFFFF);
             const height: u32 = @intCast((lparam >> 16) & 0xFFFF);
