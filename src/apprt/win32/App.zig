@@ -41,6 +41,8 @@ const build_config = @import("../../build_config.zig");
 const input = @import("../../input.zig");
 const find_bar = @import("find_bar.zig");
 const command_palette = @import("command_palette.zig");
+const ime = @import("ime.zig");
+const win32_input = @import("win32_input.zig");
 
 comptime {
     // Exports the exe's load configuration; nothing references it.
@@ -2235,8 +2237,8 @@ fn surfaceWndProc(
             // them. A WM_CHAR here is text without a key (VK_PACKET or a
             // posted message) and must be sent as a key-less event, or
             // it is lost: ConPTY always enables this mode.
-            if (surface.isWin32InputMode()) {
-                surface.sendWin32CharEvent(@intCast(wparam & 0xFFFF));
+            if (win32_input.isWin32InputMode(surface)) {
+                win32_input.sendWin32CharEvent(surface, @intCast(wparam & 0xFFFF));
                 return 0;
             }
 
@@ -2287,7 +2289,7 @@ fn surfaceWndProc(
         },
 
         w32.WM_IME_STARTCOMPOSITION => {
-            surface.handleImeStartComposition();
+            ime.handleImeStartComposition(surface);
             // Consume: we draw the composition inline; no default window.
             return 0;
         },
@@ -2297,12 +2299,12 @@ fn surfaceWndProc(
             // inline) and the final result string (GCS_RESULTSTR, committed
             // to the terminal). Always consume so DefWindowProc doesn't
             // generate WM_IME_CHAR or draw a default composition window.
-            _ = surface.handleImeComposition(lparam);
+            _ = ime.handleImeComposition(surface, lparam);
             return 0;
         },
 
         w32.WM_IME_ENDCOMPOSITION => {
-            surface.handleImeEndComposition();
+            ime.handleImeEndComposition(surface);
             return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
         },
 

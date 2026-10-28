@@ -24,6 +24,9 @@ const FramePacer = @import("frame_pacer.zig");
 const Scrollbar = @import("Scrollbar.zig").Scrollbar;
 const find_bar = @import("find_bar.zig");
 const command_palette = @import("command_palette.zig");
+const ime = @import("ime.zig");
+const win32_input = @import("win32_input.zig");
+const key_map = @import("key_map.zig");
 
 const log = std.log.scoped(.win32);
 
@@ -1416,10 +1419,10 @@ pub fn handleKeyEvent(self: *Surface, wparam: usize, lparam: isize, action: inpu
     // (bit 24 of lparam) and specific left/right VK codes.
     const extended = (lparam & (1 << 24)) != 0;
 
-    const key = mapVirtualKey(vk, extended);
+    const key = key_map.mapVirtualKey(vk, extended);
 
     // Build modifier state
-    const mods = getModifiers();
+    const mods = key_map.getModifiers();
 
     // Win32 Input Mode (mode 9001): encode key events as
     // \x1b[Vk;Sc;Uc;Kd;Cs;Rc_ sequences that ConPTY reconstructs
@@ -1429,7 +1432,7 @@ pub fn handleKeyEvent(self: *Surface, wparam: usize, lparam: isize, action: inpu
     // We still need to check keybindings first (e.g., Ctrl+Shift+C
     // for copy) so they work in this mode. Only fall through to
     // Win32 input encoding if no binding matched.
-    if (self.isWin32InputMode()) {
+    if (win32_input.isWin32InputMode(self)) {
         if (key.modifier()) {
             // Modifier keys bypass keyCallback in this mode, but link hover
             // still needs updating when Ctrl/Shift change under a stationary
@@ -1465,7 +1468,7 @@ pub fn handleKeyEvent(self: *Surface, wparam: usize, lparam: isize, action: inpu
         }
 
         // No binding matched — send as Win32 input sequence.
-        self.sendWin32InputEvent(vk, lparam, action);
+        win32_input.sendWin32InputEvent(self, vk, lparam, action);
         return;
     }
 
@@ -1492,7 +1495,7 @@ pub fn handleKeyEvent(self: *Surface, wparam: usize, lparam: isize, action: inpu
     // ToUnicode produces text below.
     self.key_event_produced_text = false;
 
-    if ((actual_action == .press or actual_action == .repeat) and !isModifierVk(vk)) {
+    if ((actual_action == .press or actual_action == .repeat) and !key_map.isModifierVk(vk)) {
         // App.run skips TranslateMessage for surface keyboard messages, so
         // this ToUnicode call owns the per-queue dead-key state. result>0
         // means composed text (including composition with a previously
@@ -1631,7 +1634,7 @@ pub fn handleMouseButton(
     const x: f32 = @floatFromInt(@as(i16, @truncate(@as(isize, lparam & 0xFFFF))));
     const y: f32 = @floatFromInt(@as(i16, @truncate(@as(isize, (lparam >> 16) & 0xFFFF))));
 
-    const mods = getModifiers();
+    const mods = key_map.getModifiers();
 
     // Capture mouse on the first pressed button; release only when all
     // buttons are up. Otherwise a right-click in the middle of a left-
@@ -1695,7 +1698,7 @@ fn showContextMenu(self: *Surface, lparam: isize) void {
     // WM_RBUTTONUP, so the core would never see the right-button release and
     // would leave click_state[right] stuck at .press (corrupting later mouse
     // motion). Synthesize the release now.
-    _ = self.core_surface.mouseButtonCallback(.release, .right, getModifiers()) catch |err| {
+    _ = self.core_surface.mouseButtonCallback(.release, .right, key_map.getModifiers()) catch |err| {
         log.err("mouse button callback error: {}", .{err});
     };
 
@@ -1758,7 +1761,7 @@ pub fn handleMouseMove(self: *Surface, lparam: isize) void {
     const y: f32 = @floatFromInt(@as(i16, @truncate(@as(isize, (lparam >> 16) & 0xFFFF))));
 
     // Pass modifiers so the core can detect Ctrl+hover for link highlighting.
-    const mods = getModifiers();
+    const mods = key_map.getModifiers();
 
     self.core_surface.cursorPosCallback(.{ .x = x, .y = y }, mods) catch |err| {
         log.err("cursor pos callback error: {}", .{err});
@@ -1883,314 +1886,6 @@ pub fn handleMouseWheel(self: *Surface, wparam: usize, axis: enum { vertical, ho
     };
 }
 
-/// Handle WM_IME_STARTCOMPOSITION — an IME composition session has begun.
-/// Position the candidate window near the terminal cursor and let Windows
-/// show its default composition UI.
-pub fn handleImeStartComposition(self: *Surface) void {
-    self.ime_composing = true;
-    // Drop any buffered high surrogate so it can't pair with IME output.
-    self.high_surrogate = 0;
-    self.positionImeWindow();
-}
-
-/// Handle WM_IME_ENDCOMPOSITION — the IME composition session has ended.
-pub fn handleImeEndComposition(self: *Surface) void {
-    self.ime_composing = false;
-    // Clear any leftover inline preedit (e.g. composition cancelled with Esc).
-    if (self.core_surface_ready) {
-        self.core_surface.preeditCallback(null) catch {};
-    }
-}
-
-/// Handle WM_IME_COMPOSITION — intermediate or final text from the IME.
-/// When the result string is available (GCS_RESULTSTR), extract it and
-/// send it to the terminal. Returns true if we handled the result string.
-pub fn handleImeComposition(self: *Surface, lparam: isize) bool {
-    if (!self.core_surface_ready) return false;
-
-    const flags: u32 = @intCast(lparam & 0xFFFFFFFF);
-
-    // Intermediate composition text: mirror it inline at the cursor via the
-    // core's preedit (underlined, like macOS/GTK) instead of the default
-    // floating composition window (suppressed via WM_IME_SETCONTEXT).
-    if (flags & w32.GCS_RESULTSTR == 0) {
-        if (flags & w32.GCS_COMPSTR != 0) {
-            self.updateImePreedit();
-            return true;
-        }
-        return false;
-    }
-
-    // Result string: clear the inline preedit, then commit the text below.
-    self.core_surface.preeditCallback(null) catch {};
-
-    const hwnd = self.hwnd orelse return false;
-    const himc = w32.ImmGetContext(hwnd) orelse return false;
-    defer _ = w32.ImmReleaseContext(hwnd, himc);
-
-    // Query the length of the result string (in bytes).
-    const byte_len = w32.ImmGetCompositionStringW(himc, w32.GCS_RESULTSTR, null, 0);
-    if (byte_len <= 0) return false;
-    // The W variant always returns an even byte count, but reject odd
-    // values defensively rather than panicking via @divExact.
-    if (byte_len & 1 != 0) return false;
-
-    const u16_len: usize = @intCast(@divTrunc(byte_len, 2));
-
-    // Stack buffer for typical IME results (up to 64 UTF-16 code units).
-    var stack_buf: [64]u16 = undefined;
-
-    if (u16_len <= stack_buf.len) {
-        const got = w32.ImmGetCompositionStringW(himc, w32.GCS_RESULTSTR, &stack_buf, @intCast(byte_len));
-        if (got <= 0) return false;
-        if (got & 1 != 0) return false;
-        const actual_len: usize = @intCast(@divTrunc(got, 2));
-        self.sendImeText(stack_buf[0..actual_len]);
-    } else {
-        // Unusual: very long composition. Allocate on the heap.
-        const alloc = self.app.core_app.alloc;
-        const buf = alloc.alloc(u16, u16_len) catch return false;
-        defer alloc.free(buf);
-        const got = w32.ImmGetCompositionStringW(himc, w32.GCS_RESULTSTR, buf.ptr, @intCast(byte_len));
-        if (got <= 0) return false;
-        if (got & 1 != 0) return false;
-        const actual_len: usize = @intCast(@divTrunc(got, 2));
-        self.sendImeText(buf[0..actual_len]);
-    }
-
-    // GCS_RESULTSTR and GCS_COMPSTR can arrive together (e.g. an IME commits
-    // a syllable while starting the next). We cleared the preedit above for
-    // the result; re-mirror the new composition so it isn't invisible until
-    // the next keystroke.
-    if (flags & w32.GCS_COMPSTR != 0) self.updateImePreedit();
-
-    // Reposition the IME window for the next composition
-    self.positionImeWindow();
-    return true;
-}
-
-/// Convert a UTF-16 IME result to UTF-8 and send it to the terminal.
-/// Read the current GCS_COMPSTR composition string and mirror it into the
-/// core's preedit so it renders inline at the cursor. An empty composition
-/// clears the preedit.
-fn updateImePreedit(self: *Surface) void {
-    const hwnd = self.hwnd orelse return;
-    const himc = w32.ImmGetContext(hwnd) orelse return;
-    defer _ = w32.ImmReleaseContext(hwnd, himc);
-
-    var buf16: [128]u16 = undefined;
-    const byte_len = w32.ImmGetCompositionStringW(himc, w32.GCS_COMPSTR, null, 0);
-    if (byte_len <= 0 or byte_len & 1 != 0) {
-        self.core_surface.preeditCallback(null) catch {};
-        return;
-    }
-    const u16_len: usize = @intCast(@divTrunc(byte_len, 2));
-    if (u16_len > buf16.len) {
-        // Absurdly long composition; clear rather than truncate mid-pair.
-        self.core_surface.preeditCallback(null) catch {};
-        return;
-    }
-    const got = w32.ImmGetCompositionStringW(himc, w32.GCS_COMPSTR, &buf16, @intCast(byte_len));
-    if (got <= 0 or got & 1 != 0) return;
-    const n: usize = @intCast(@divTrunc(got, 2));
-
-    // Worst case 3 bytes of UTF-8 per UTF-16 code unit.
-    var buf8: [buf16.len * 3]u8 = undefined;
-    const len8 = std.unicode.utf16LeToUtf8(&buf8, buf16[0..n]) catch return;
-    self.core_surface.preeditCallback(if (len8 == 0) null else buf8[0..len8]) catch |err| {
-        log.warn("preeditCallback failed err={}", .{err});
-    };
-}
-
-fn sendImeText(self: *Surface, utf16: []const u16) void {
-    // In Win32 Input Mode, send each character as a Win32 input event
-    // so ConPTY can reconstruct the full Unicode codepoints.
-    if (self.isWin32InputMode()) {
-        for (utf16) |code_unit| {
-            self.sendWin32CharEvent(code_unit);
-        }
-        return;
-    }
-
-    // A UTF-16 unit becomes at most 3 bytes of UTF-8, and the conversion
-    // doesn't bounds-check. Long results (the heap path in
-    // handleImeComposition) get a buffer of their own.
-    var stack_buf: [256]u8 = undefined;
-    const alloc = self.app.core_app.alloc;
-    const utf8_buf = if (utf16.len * 3 <= stack_buf.len)
-        stack_buf[0..]
-    else
-        alloc.alloc(u8, utf16.len * 3) catch return;
-    defer if (utf8_buf.ptr != &stack_buf) alloc.free(utf8_buf);
-    const len = std.unicode.utf16LeToUtf8(utf8_buf, utf16) catch |err| {
-        log.warn("IME utf16→utf8 error: {}", .{err});
-        return;
-    };
-    if (len == 0) return;
-
-    // Send through keyCallback with .unidentified key — this is the
-    // standard path for IME/text input (same as GTK's imCommit).
-    _ = self.core_surface.keyCallback(.{
-        .action = .press,
-        .key = .unidentified,
-        .mods = .{},
-        .consumed_mods = .{},
-        .composing = false,
-        .utf8 = utf8_buf[0..len],
-    }) catch |err| {
-        log.err("IME text callback error: {}", .{err});
-    };
-}
-
-/// Position the IME candidate/composition window near the terminal cursor.
-fn positionImeWindow(self: *Surface) void {
-    const hwnd = self.hwnd orelse return;
-    const himc = w32.ImmGetContext(hwnd) orelse return;
-    defer _ = w32.ImmReleaseContext(hwnd, himc);
-
-    // Use the core surface's imePoint() which calculates the cursor
-    // position in pixels from the terminal grid, accounting for padding
-    // and content scale.
-    var pos = w32.POINT{ .x = 0, .y = 0 };
-    if (self.core_surface_ready) {
-        const ime_pos = self.core_surface.imePoint();
-        pos.x = @intFromFloat(ime_pos.x);
-        pos.y = @intFromFloat(ime_pos.y);
-    }
-
-    const cf = w32.COMPOSITIONFORM{
-        .dwStyle = w32.CFS_POINT,
-        .ptCurrentPos = pos,
-        .rcArea = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
-    };
-    _ = w32.ImmSetCompositionWindow(himc, &cf);
-}
-
-// -----------------------------------------------------------------------
-// Win32 Input Mode (mode 9001)
-// -----------------------------------------------------------------------
-
-/// Check if Win32 Input Mode is active. This mode is requested by ConPTY
-/// via \x1b[?9001h and causes key events to be sent as
-/// \x1b[Vk;Sc;Uc;Kd;Cs;Rc_ sequences.
-pub fn isWin32InputMode(self: *Surface) bool {
-    self.core_surface.renderer_state.mutex.lockUncancelable(global.io());
-    defer self.core_surface.renderer_state.mutex.unlock(global.io());
-    return self.core_surface.io.terminal.modes.get(.win32_input);
-}
-
-/// Encode and send a key event in Win32 Input Mode format.
-/// Format: \x1b[Vk;Sc;Uc;Kd;Cs;Rc_
-fn sendWin32InputEvent(self: *Surface, vk: u16, lparam: isize, action: input.Action) void {
-    const scancode: u16 = @intCast((lparam >> 16) & 0xFF);
-    const extended = (lparam & (1 << 24)) != 0;
-    const repeat_count: u16 = @intCast(lparam & 0xFFFF);
-    const key_down: u1 = if (action == .press or action == .repeat) 1 else 0;
-
-    // Get the Unicode character for this key via ToUnicode. Skip
-    // modifier-only keys: they never produce a character and calling
-    // ToUnicode for them is one of the ways the per-thread kernel
-    // keyboard state can drift over time.
-    var unicode_char: u16 = 0;
-    if (key_down == 1 and !isModifierVk(vk)) {
-        var keyboard_state: [256]u8 = undefined;
-        if (w32.GetKeyboardState(&keyboard_state) != 0) {
-            var utf16_buf: [4]u16 = undefined;
-            const result = w32.ToUnicode(
-                @intCast(vk),
-                @intCast(scancode),
-                &keyboard_state,
-                &utf16_buf,
-                utf16_buf.len,
-                0,
-            );
-            if (result > 0) {
-                // Composed (or literal) char — possibly produced by
-                // combining with a previously-pending dead key. Only the
-                // first UTF-16 code unit is captured; supplementary-plane
-                // compositions (result == 2, surrogate pair) are truncated
-                // to the high surrogate. This is a Win32 Input Mode protocol
-                // limitation: the Uc field is 16-bit.
-                unicode_char = utf16_buf[0];
-            } else if (result < 0) {
-                // VK is a dead key. ToUnicode stored it in the queue's
-                // dead-key state; the next press's ToUnicode call will
-                // compose with it. Send Uc=0 so applications reading the
-                // sequence don't see a stray dead char. The state is safe
-                // to keep because App.run skips TranslateMessage for
-                // surface windows — we are the only consumer.
-                unicode_char = 0;
-            }
-        }
-    }
-
-    // Build the Win32 dwControlKeyState bitmask.
-    var ctrl_state: u32 = 0;
-    if (w32.GetKeyState(@as(i32, w32.VK_RSHIFT)) < 0 or
-        w32.GetKeyState(@as(i32, w32.VK_LSHIFT)) < 0 or
-        w32.GetKeyState(@as(i32, w32.VK_SHIFT)) < 0)
-        ctrl_state |= 0x0010; // SHIFT_PRESSED
-    if (w32.GetKeyState(@as(i32, w32.VK_LCONTROL)) < 0)
-        ctrl_state |= 0x0008; // LEFT_CTRL_PRESSED
-    if (w32.GetKeyState(@as(i32, w32.VK_RCONTROL)) < 0)
-        ctrl_state |= 0x0004; // RIGHT_CTRL_PRESSED
-    if (w32.GetKeyState(@as(i32, w32.VK_LMENU)) < 0)
-        ctrl_state |= 0x0002; // LEFT_ALT_PRESSED
-    if (w32.GetKeyState(@as(i32, w32.VK_RMENU)) < 0)
-        ctrl_state |= 0x0001; // RIGHT_ALT_PRESSED
-    if (w32.GetKeyState(@as(i32, w32.VK_CAPITAL)) & 1 != 0)
-        ctrl_state |= 0x0080; // CAPSLOCK_ON
-    if (w32.GetKeyState(@as(i32, w32.VK_NUMLOCK)) & 1 != 0)
-        ctrl_state |= 0x0020; // NUMLOCK_ON
-    if (w32.GetKeyState(@as(i32, w32.VK_SCROLL)) & 1 != 0)
-        ctrl_state |= 0x0040; // SCROLLLOCK_ON
-    if (extended)
-        ctrl_state |= 0x0100; // ENHANCED_KEY
-
-    self.writeWin32InputSequence(vk, scancode, unicode_char, key_down, ctrl_state, repeat_count);
-}
-
-/// Send a Win32 Input Mode event for a WM_CHAR character (IME, PostMessage, etc.)
-/// These are characters without a corresponding WM_KEYDOWN, so we send a
-/// synthetic key event with vk=0, sc=0.
-pub fn sendWin32CharEvent(self: *Surface, char_code: u16) void {
-    // Key-down event with the Unicode character
-    self.writeWin32InputSequence(0, 0, char_code, 1, 0, 1);
-    // Key-up event
-    self.writeWin32InputSequence(0, 0, char_code, 0, 0, 1);
-}
-
-/// Format and write a Win32 input sequence directly to the PTY,
-/// bypassing keyCallback to avoid side effects (selection clearing,
-/// modifier tracking, cursor hiding, etc.).
-/// Format: \x1b[Vk;Sc;Uc;Kd;Cs;Rc_
-fn writeWin32InputSequence(
-    self: *Surface,
-    vk: u16,
-    sc: u16,
-    uc: u16,
-    kd: u1,
-    cs: u32,
-    rc: u16,
-) void {
-    // Keyboard, standalone WM_CHAR, and IME input all share this emitter.
-    // These writes bypass the core's queueIo filter, so apply its read-only
-    // policy here while allowing keybindings to run before emission.
-    if (self.core_surface.readonly) return;
-
-    var buf: [64]u8 = undefined;
-    const seq = std.mem.print(&buf, "\x1b[{};{};{};{};{};{}_", .{
-        vk, sc, uc, kd, cs, rc,
-    }) catch return;
-
-    // Write directly to the PTY via the IO queue.
-    const msg = termio.Message.writeReq(
-        self.app.core_app.alloc,
-        seq,
-    ) catch return;
-    self.core_surface.io.queueMessage(msg, .unlocked);
-}
-
 /// Called by the renderer thread after each frame it updates and draws:
 /// logs it for the performance benchmark (frame_log.zig) and paces the
 /// next one to the display (frame_pacer.zig).
@@ -2240,222 +1935,6 @@ pub fn handleFocus(self: *Surface, focused: bool) void {
     }
     self.core_surface.focusCallback(focused) catch |err| {
         log.err("focus callback error: {}", .{err});
-    };
-}
-
-/// Get the current keyboard modifier state from Win32.
-fn getModifiers() input.Mods {
-    var mods: input.Mods = .{};
-
-    // GetKeyState returns a value where the high bit indicates the key
-    // is currently down.
-    if (w32.GetKeyState(@as(i32, w32.VK_SHIFT)) < 0) {
-        mods.shift = true;
-        // Determine which shift key is pressed
-        if (w32.GetKeyState(@as(i32, w32.VK_RSHIFT)) < 0) {
-            mods.sides.shift = .right;
-        }
-    }
-    if (w32.GetKeyState(@as(i32, w32.VK_CONTROL)) < 0) {
-        mods.ctrl = true;
-        if (w32.GetKeyState(@as(i32, w32.VK_RCONTROL)) < 0) {
-            mods.sides.ctrl = .right;
-        }
-    }
-    if (w32.GetKeyState(@as(i32, w32.VK_MENU)) < 0) {
-        mods.alt = true;
-        if (w32.GetKeyState(@as(i32, w32.VK_RMENU)) < 0) {
-            mods.sides.alt = .right;
-        }
-    }
-
-    // Check super (Windows key)
-    if (w32.GetKeyState(@as(i32, w32.VK_LWIN)) < 0 or
-        w32.GetKeyState(@as(i32, w32.VK_RWIN)) < 0)
-    {
-        mods.super = true;
-        if (w32.GetKeyState(@as(i32, w32.VK_RWIN)) < 0) {
-            mods.sides.super = .right;
-        }
-    }
-
-    // Lock keys (low bit indicates toggle state)
-    if (w32.GetKeyState(@as(i32, w32.VK_CAPITAL)) & 1 != 0) {
-        mods.caps_lock = true;
-    }
-    if (w32.GetKeyState(@as(i32, w32.VK_NUMLOCK)) & 1 != 0) {
-        mods.num_lock = true;
-    }
-
-    return mods;
-}
-
-/// True for VKs that on their own never produce a character (Shift, Ctrl,
-/// Alt, Win, lock keys). Calling ToUnicode for these is wasted at best and
-/// can perturb the kernel's per-thread keyboard state at worst (in
-/// particular, ToUnicode buffers any pending dead key into kernel state
-/// even when the result is unused).
-fn isModifierVk(vk: u16) bool {
-    return switch (vk) {
-        w32.VK_SHIFT,
-        w32.VK_LSHIFT,
-        w32.VK_RSHIFT,
-        w32.VK_CONTROL,
-        w32.VK_LCONTROL,
-        w32.VK_RCONTROL,
-        w32.VK_MENU,
-        w32.VK_LMENU,
-        w32.VK_RMENU,
-        w32.VK_LWIN,
-        w32.VK_RWIN,
-        w32.VK_CAPITAL,
-        w32.VK_NUMLOCK,
-        w32.VK_SCROLL,
-        => true,
-        else => false,
-    };
-}
-
-/// Map a Win32 virtual key code to a Ghostty input.Key.
-fn mapVirtualKey(vk: u16, extended: bool) input.Key {
-    return switch (vk) {
-        // Letter keys (A-Z: 0x41-0x5A)
-        0x41 => .key_a,
-        0x42 => .key_b,
-        0x43 => .key_c,
-        0x44 => .key_d,
-        0x45 => .key_e,
-        0x46 => .key_f,
-        0x47 => .key_g,
-        0x48 => .key_h,
-        0x49 => .key_i,
-        0x4A => .key_j,
-        0x4B => .key_k,
-        0x4C => .key_l,
-        0x4D => .key_m,
-        0x4E => .key_n,
-        0x4F => .key_o,
-        0x50 => .key_p,
-        0x51 => .key_q,
-        0x52 => .key_r,
-        0x53 => .key_s,
-        0x54 => .key_t,
-        0x55 => .key_u,
-        0x56 => .key_v,
-        0x57 => .key_w,
-        0x58 => .key_x,
-        0x59 => .key_y,
-        0x5A => .key_z,
-
-        // Number keys (0-9: 0x30-0x39)
-        0x30 => .digit_0,
-        0x31 => .digit_1,
-        0x32 => .digit_2,
-        0x33 => .digit_3,
-        0x34 => .digit_4,
-        0x35 => .digit_5,
-        0x36 => .digit_6,
-        0x37 => .digit_7,
-        0x38 => .digit_8,
-        0x39 => .digit_9,
-
-        // Function keys
-        w32.VK_F1 => .f1,
-        w32.VK_F2 => .f2,
-        w32.VK_F3 => .f3,
-        w32.VK_F4 => .f4,
-        w32.VK_F5 => .f5,
-        w32.VK_F6 => .f6,
-        w32.VK_F7 => .f7,
-        w32.VK_F8 => .f8,
-        w32.VK_F9 => .f9,
-        w32.VK_F10 => .f10,
-        w32.VK_F11 => .f11,
-        w32.VK_F12 => .f12,
-        w32.VK_F13 => .f13,
-        w32.VK_F14 => .f14,
-        w32.VK_F15 => .f15,
-        w32.VK_F16 => .f16,
-        w32.VK_F17 => .f17,
-        w32.VK_F18 => .f18,
-        w32.VK_F19 => .f19,
-        w32.VK_F20 => .f20,
-        w32.VK_F21 => .f21,
-        w32.VK_F22 => .f22,
-        w32.VK_F23 => .f23,
-        w32.VK_F24 => .f24,
-
-        // Navigation / editing keys
-        w32.VK_RETURN => if (extended) .numpad_enter else .enter,
-        w32.VK_BACK => .backspace,
-        w32.VK_TAB => .tab,
-        w32.VK_ESCAPE => .escape,
-        w32.VK_SPACE => .space,
-        w32.VK_PRIOR => .page_up,
-        w32.VK_NEXT => .page_down,
-        w32.VK_END => .end,
-        w32.VK_HOME => .home,
-        w32.VK_LEFT => .arrow_left,
-        w32.VK_UP => .arrow_up,
-        w32.VK_RIGHT => .arrow_right,
-        w32.VK_DOWN => .arrow_down,
-        w32.VK_INSERT => .insert,
-        w32.VK_DELETE => .delete,
-
-        // Modifier keys
-        w32.VK_LSHIFT => .shift_left,
-        w32.VK_RSHIFT => .shift_right,
-        w32.VK_LCONTROL => .control_left,
-        w32.VK_RCONTROL => .control_right,
-        w32.VK_LMENU => .alt_left,
-        w32.VK_RMENU => .alt_right,
-        w32.VK_LWIN => .meta_left,
-        w32.VK_RWIN => .meta_right,
-        w32.VK_SHIFT => if (extended) .shift_right else .shift_left,
-        w32.VK_CONTROL => if (extended) .control_right else .control_left,
-        w32.VK_MENU => if (extended) .alt_right else .alt_left,
-
-        // Lock keys
-        w32.VK_CAPITAL => .caps_lock,
-        w32.VK_NUMLOCK => .num_lock,
-        w32.VK_SCROLL => .scroll_lock,
-
-        // OEM keys (US keyboard layout)
-        w32.VK_OEM_1 => .semicolon,
-        w32.VK_OEM_PLUS => .equal,
-        w32.VK_OEM_COMMA => .comma,
-        w32.VK_OEM_MINUS => .minus,
-        w32.VK_OEM_PERIOD => .period,
-        w32.VK_OEM_2 => .slash,
-        w32.VK_OEM_3 => .backquote,
-        w32.VK_OEM_4 => .bracket_left,
-        w32.VK_OEM_5 => .backslash,
-        w32.VK_OEM_6 => .bracket_right,
-        w32.VK_OEM_7 => .quote,
-
-        // Numpad keys
-        w32.VK_NUMPAD0 => .numpad_0,
-        w32.VK_NUMPAD1 => .numpad_1,
-        w32.VK_NUMPAD2 => .numpad_2,
-        w32.VK_NUMPAD3 => .numpad_3,
-        w32.VK_NUMPAD4 => .numpad_4,
-        w32.VK_NUMPAD5 => .numpad_5,
-        w32.VK_NUMPAD6 => .numpad_6,
-        w32.VK_NUMPAD7 => .numpad_7,
-        w32.VK_NUMPAD8 => .numpad_8,
-        w32.VK_NUMPAD9 => .numpad_9,
-        w32.VK_MULTIPLY => .numpad_multiply,
-        w32.VK_ADD => .numpad_add,
-        w32.VK_SEPARATOR => .numpad_separator,
-        w32.VK_SUBTRACT => .numpad_subtract,
-        w32.VK_DECIMAL => .numpad_decimal,
-        w32.VK_DIVIDE => .numpad_divide,
-
-        // Misc
-        w32.VK_APPS => .context_menu,
-        w32.VK_PAUSE => .pause,
-
-        else => .unidentified,
     };
 }
 
@@ -2616,12 +2095,12 @@ test "read-only blocks native keyboard character and IME input" {
     // run without an HWND, renderer, child process, or global input.
     for ([_]bool{ true, false }) |readonly| {
         core_surface.readonly = readonly;
-        surface.sendWin32InputEvent(w32.VK_RETURN, (28 << 16) | 1, .press);
-        surface.sendWin32InputEvent(w32.VK_RETURN, (28 << 16) | 1, .release);
+        win32_input.sendWin32InputEvent(surface, w32.VK_RETURN, (28 << 16) | 1, .press);
+        win32_input.sendWin32InputEvent(surface, w32.VK_RETURN, (28 << 16) | 1, .release);
         surface.handleKeyEvent(w32.VK_CONTROL, (29 << 16) | 1, .press);
         surface.handleKeyEvent(w32.VK_CONTROL, (29 << 16) | 1, .release);
-        surface.sendWin32CharEvent('x');
-        surface.sendImeText(&.{ 0x4E2D, 0xD83D, 0xDE00 });
+        win32_input.sendWin32CharEvent(surface, 'x');
+        ime.sendImeText(surface, &.{ 0x4E2D, 0xD83D, 0xDE00 });
 
         const expected = [_][]const u8{
             "\x1b[13;28;13;1;0;1_",  "\x1b[13;28;0;0;0;1_",
