@@ -46,11 +46,16 @@ function prompt {
         [Console]::Write("$Script:__ghostty_escape[5 q")
     }
 
-    # OSC 7 — report current working directory.
-    $cwd = (Get-Location).Path -replace '\\', '/'
-    # File URI: file://hostname/path
-    $hostname = [System.Net.Dns]::GetHostName()
-    [Console]::Write("$Script:__ghostty_escape]7;file://$hostname/$cwd`a")
+    # OSC 7 — report current working directory, as a file URI:
+    # file://hostname/path. Each segment is percent-encoded, or a folder
+    # named "50%" or "#1" would be misread. Only file system folders are
+    # reported; HKLM:\ and the like are no working directory.
+    $location = Get-Location
+    if ($location.Provider.Name -eq 'FileSystem') {
+        $cwd = ($location.ProviderPath -split '\\' | ForEach-Object { [Uri]::EscapeDataString($_) }) -join '/'
+        $hostname = [System.Net.Dns]::GetHostName()
+        [Console]::Write("$Script:__ghostty_escape]7;file://$hostname/$cwd`a")
+    }
 
     # OSC 2 — window title (current directory).
     if ($GhosttyFeatures -contains 'title') {

@@ -611,7 +611,6 @@ pub fn init(
         });
     };
     errdefer renderer_impl.deinit();
-    log.debug("renderer created", .{});
 
     // The mutex used to protect our renderer state.
     const mutex = try alloc.create(std.Io.Mutex);
@@ -632,7 +631,6 @@ pub fn init(
     var io_thread = try termio.Thread.init(alloc);
     errdefer io_thread.deinit();
 
-    log.debug("threads created, storing state...", .{});
     self.* = .{
         .id = id: {
             while (true) {
@@ -673,7 +671,6 @@ pub fn init(
         .config_conditional_state = app.config_conditional_state,
     };
 
-    log.debug("state stored, initializing IO...", .{});
 
     // The command we're going to execute
     const command: ?configpkg.Command = command: {
@@ -712,7 +709,6 @@ pub fn init(
         };
 
         // Initialize our IO backend
-        log.debug("creating IO exec...", .{});
         var io_exec = try termio.Exec.init(alloc, .{
             .command = command,
             .env = env,
@@ -756,7 +752,6 @@ pub fn init(
     // so we can just defer this and not the subcomponents.
     errdefer self.io.deinit();
 
-    log.debug("IO initialized, reporting cell size...", .{});
 
     // Report initial cell size on surface creation
     _ = try rt_app.performAction(
@@ -792,7 +787,6 @@ pub fn init(
     );
     self.renderer_thr.setName(global.io(), "renderer") catch {};
 
-    log.debug("spawning IO thread...", .{});
 
     // Start our IO thread
     self.io_thr = try std.Thread.spawn(

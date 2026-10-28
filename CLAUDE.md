@@ -217,11 +217,8 @@ Baseline, 2026-10-28, two runs each:
   after 1 second, to survive a renderer that hangs in `SwapBuffers` after
   sleep. That hides the hang instead of fixing it, and a dropped config change
   leaves the renderer and terminal with different settings.
-- The PowerShell integration script reports the working directory in OSC 7
-  without percent-encoding, so folders containing `%` or `#` are misread.
 - The fork deleted upstream's `test.yml` CI, so upstream's core tests no
   longer run on its changes to shared files.
-- Leftover debug log lines in `Surface.init` (`"renderer created"` and so on).
 - The version info still says 1.3.0.0, inherited from the fork.
 - `App.zig`, `Surface.zig` and `Window.zig` in the Win32 runtime are each
   2,600 to 3,400 lines and mix several jobs. Upstream's GTK files are just as
