@@ -94,16 +94,6 @@
                             .default_on = true,
                         },
                         .{
-                            .label = "Channel",
-                            .description = "Stable releases, or nightly builds with the newest changes.",
-                            .key = "auto-update-channel",
-                            .choices = .{
-                                .{ .label = "This copy's", .value = "" },
-                                .{ .label = "Stable", .value = "stable" },
-                                .{ .label = "Nightly", .value = "tip" },
-                            },
-                        },
-                        .{
                             .label = "Check for updates",
                             .description = "Ask now instead of waiting for the next check.",
                             .action = .check_updates,

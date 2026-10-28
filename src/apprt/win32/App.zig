@@ -619,16 +619,11 @@ pub fn openConfigFile(self: *App, how: apprt.action.OpenConfig) bool {
 }
 
 /// Save the open tabs for the sidebar layout to reopen at startup.
-/// Follow the auto-update settings: `auto-update = off` stops the
-/// automatic checks (check and download both download on Windows), and
-/// `auto-update-channel = tip` follows nightlies.
+/// Follow the auto-update setting: `auto-update = off` stops the
+/// automatic checks (check and download both download on Windows).
 pub fn configureUpdater(self: *App) void {
     const hwnd = self.msg_hwnd orelse return;
-    const channel: updater.Channel = if (self.config.@"auto-update-channel") |c| switch (c) {
-        .stable => .stable,
-        .tip => .nightly,
-    } else updater.buildChannel();
-    updater.configure(hwnd, WM_APP_UPDATE, self.config.@"auto-update" != .off, channel);
+    updater.configure(hwnd, WM_APP_UPDATE, self.config.@"auto-update" != .off);
 }
 
 /// Restart into a downloaded update, after asking: running programs end.

@@ -77,17 +77,12 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
     };
 }
 
-/// The version resource's defines for `version` ("0.1.1" or
-/// "0.1.1-nightly.20261028.3"): the text, and four numbers whose last is a
-/// nightly's run number.
+/// The version resource's defines for `version` ("0.1.1"): the text, and
+/// the four numbers Windows wants, the last always 0.
 fn sharpVersionDefines(b: *std.Build, version: []const u8) ![]const []const u8 {
     var numbers: [4]u16 = .{ 0, 0, 0, 0 };
-    const core_end = std.mem.indexOfScalar(u8, version, '-') orelse version.len;
-    var parts = std.mem.splitScalar(u8, version[0..core_end], '.');
+    var parts = std.mem.splitScalar(u8, version, '.');
     for (numbers[0..3]) |*n| n.* = std.fmt.parseInt(u16, parts.next() orelse "0", 10) catch 0;
-    if (std.mem.lastIndexOfScalar(u8, version, '.')) |dot| {
-        if (core_end < version.len) numbers[3] = std.fmt.parseInt(u16, version[dot + 1 ..], 10) catch 0;
-    }
     return b.allocator.dupe([]const u8, &.{
         b.fmt("/DSHARP_FILEVERSION={d},{d},{d},{d}", .{ numbers[0], numbers[1], numbers[2], numbers[3] }),
         b.fmt("/DSHARP_VERSION_STR=\"{s}\"", .{version}),

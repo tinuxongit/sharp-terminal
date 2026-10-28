@@ -1,11 +1,11 @@
 //! Keeps Sharp up to date, as T3 Code does. A background thread asks
-//! GitHub for the newest release on the user's channel (stable, or nightly
-//! prereleases) shortly after startup and then every few minutes, downloads
-//! its installer, and checks it against the release's SHA256SUMS. The tab
-//! strip then shows an update button: clicking it restarts into the new
-//! version, and otherwise it installs when Sharp quits. Installing runs the
-//! NSIS installer silently (dist/windows/installer.nsi). Builds made
-//! locally (channel dev) never update. Settings and text: updates.zon.
+//! GitHub for the newest release shortly after startup and then every few
+//! minutes, downloads its installer, and checks it against the release's
+//! SHA256SUMS. The tab strip then shows an update button: clicking it
+//! restarts into the new version, and otherwise it installs when Sharp
+//! quits. Installing runs the NSIS installer silently
+//! (dist/windows/installer.nsi). Builds made locally never update.
+//! Settings and text: updates.zon.
 const std = @import("std");
 const build_options = @import("build_options");
 const w32 = @import("win32.zig");
@@ -18,7 +18,6 @@ const https = @import("https.zig");
 const release_version = @import("release_version.zig");
 
 const Version = release_version.Version;
-pub const Channel = release_version.Channel;
 const windows = internal_os.windows;
 const kernel32 = windows.exp.kernel32;
 const log = std.log.scoped(.updater);
@@ -48,13 +47,8 @@ comptime {
 
 /// The running build's version, or null for a local build.
 pub fn current() ?Version {
-    if (build_options.sharp_channel == .dev) return null;
+    if (!build_options.sharp_release) return null;
     return Version.parse(build_options.sharp_version);
-}
-
-/// The channel this build came from, which the setting defaults to.
-pub fn buildChannel() Channel {
-    return if (build_options.sharp_channel == .nightly) .nightly else .stable;
 }
 
 pub const Status = enum { idle, checking, downloading, ready, up_to_date, failed };
@@ -79,7 +73,6 @@ var manual = std.atomic.Value(bool).init(false);
 var report_due = std.atomic.Value(bool).init(false);
 var installing = std.atomic.Value(bool).init(false);
 var auto = std.atomic.Value(bool).init(true);
-var wanted = std.atomic.Value(u8).init(0);
 var wake: ?w32.HANDLE = null;
 var notify: ?w32.HWND = null;
 var notify_message: u32 = 0;
@@ -108,10 +101,9 @@ fn set(status: Status, version: ?[]const u8, failure: []const u8) void {
 /// Follow Settings > General > Updates. Starts the thread the first time,
 /// once the app's message window exists; `message` is posted to it after
 /// every change.
-pub fn configure(hwnd: w32.HWND, message: u32, automatic: bool, channel: Channel) void {
+pub fn configure(hwnd: w32.HWND, message: u32, automatic: bool) void {
     if (current() == null) return;
-    const changed = wanted.swap(@intFromEnum(channel), .acq_rel) != @intFromEnum(channel) or
-        (auto.swap(automatic, .acq_rel) != automatic and automatic);
+    const changed = auto.swap(automatic, .acq_rel) != automatic and automatic;
     if (wake == null) {
         notify = hwnd;
         notify_message = message;
@@ -142,7 +134,7 @@ pub fn takeReport(out: []u8) ?[]const u8 {
     if (!report_due.swap(false, .acq_rel)) return null;
     if (current() == null) return data.dev_build;
     const s = snapshot();
-    const own = if (current()) |v| versionText(v, out[out.len / 2 ..]) else "";
+    const own = build_options.sharp_version;
     const text, const version = switch (s.status) {
         .ready => .{ data.ready, s.version() },
         .downloading => .{ data.downloading, s.version() },
@@ -156,11 +148,6 @@ fn fill(out: []u8, template: []const u8, value: []const u8) []const u8 {
     const placeholder = if (std.mem.indexOf(u8, template, "{version}") != null) "{version}" else "{error}";
     const at = std.mem.indexOf(u8, template, placeholder) orelse return template;
     return std.fmt.bufPrint(out, "{s}{s}{s}", .{ template[0..at], value, template[at + placeholder.len ..] }) catch template;
-}
-
-fn versionText(v: Version, out: []u8) []const u8 {
-    if (v.nightly) |n| return std.fmt.bufPrint(out, "{d}.{d}.{d}-nightly.{d}.{d}", .{ v.major, v.minor, v.patch, n.date, n.build }) catch "";
-    return std.fmt.bufPrint(out, "{d}.{d}.{d}", .{ v.major, v.minor, v.patch }) catch "";
 }
 
 /// The prompt before restarting into the ready update.
@@ -191,14 +178,9 @@ fn check() void {
     defer arena.deinit();
     const a = arena.allocator();
 
-    const channel: Channel = @enumFromInt(wanted.load(.acquire));
-    const found = newest(a, channel) catch |err| return set(.failed, null, @errorName(err));
+    const found = newest(a) catch |err| return set(.failed, null, @errorName(err));
     const release = found orelse return set(.up_to_date, null, "");
-    // Newer versions only; switching channel may also go back, as T3 Code
-    // allows, so a nightly user can return to stable.
-    const switching = own.channel() != channel;
-    const better = release.version.order(own) == .gt or (switching and !release.version.eql(own));
-    if (!better) return set(.up_to_date, null, "");
+    if (release.version.order(own) != .gt) return set(.up_to_date, null, "");
 
     set(.downloading, release.tag[1..], "");
     download(a, release) catch |err| {
@@ -216,8 +198,8 @@ const Release = struct {
     checksums_url: []const u8,
 };
 
-/// The newest published release of `channel` that has an installer.
-fn newest(a: std.mem.Allocator, channel: Channel) !?Release {
+/// The newest published release that has an installer.
+fn newest(a: std.mem.Allocator) !?Release {
     const url = try std.fmt.allocPrint(a, "https://api.github.com/repos/{s}/releases?per_page=30", .{data.repository});
     const body = try https.get(a, url, "application/vnd.github+json", 8 * 1024 * 1024);
     const parsed = try std.json.parseFromSliceLeaky(std.json.Value, a, body, .{});
@@ -228,9 +210,8 @@ fn newest(a: std.mem.Allocator, channel: Channel) !?Release {
         const tag = json_read.string(item, "tag_name") orelse continue;
         if (tag.len < 2 or tag[0] != 'v') continue;
         const version = Version.parse(tag[1..]) orelse continue;
-        if (version.channel() != channel) continue;
-        // A stable version published as a prerelease is a test, not a release.
-        if ((json_read.boolean(item, "prerelease") orelse false) != (channel == .nightly)) continue;
+        // A prerelease is a test, not a release.
+        if (json_read.boolean(item, "prerelease") orelse true) continue;
         if (best) |b| if (version.order(b.version) != .gt) continue;
         const installer_name = try std.mem.replaceOwned(u8, a, data.installer, "{version}", tag[1..]);
         var installer_url: ?[]const u8 = null;

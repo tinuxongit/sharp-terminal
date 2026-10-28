@@ -26,6 +26,17 @@
 - **Splits, search, a quick terminal on a global hotkey**, and links that
   open only when they are safe to.
 
+## Installing
+
+In PowerShell:
+
+```powershell
+irm https://github.com/tinuxongit/sharp-terminal/releases/latest/download/install.ps1 | iex
+```
+
+Sharp installs for your user alone, with no admin rights, and updates
+itself from then on. Remove it from Settings > Apps > Installed apps.
+
 ## Building
 
 Install [Zig](https://ziglang.org/download/) 0.17.0, then:

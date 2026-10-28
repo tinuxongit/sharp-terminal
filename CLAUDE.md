@@ -147,8 +147,10 @@ commands and conventions; this file covers what is specific to Sharp.
 - `dist/windows/payload.txt`: the files a Sharp install holds, read by
   `stage.sh` (for `package.sh` and `release.sh`) and `install-dev.ps1`.
 - `dist/windows/installer.nsi`: the NSIS installer and uninstaller.
-- `dist/windows/release.sh`: builds, packages and publishes a stable or
-  nightly release on GitHub (`--dry-run` stops before publishing).
+- `dist/windows/release.sh`: builds, packages and publishes a release on
+  GitHub (`--dry-run` stops before publishing).
+- `dist/windows/install.ps1`: the install command's script; `release.sh`
+  fills in the version and checksum and publishes it with each release.
 - `src/font/directwrite.zig`: finds system fonts on Windows.
 - `dist/windows/`: icon, resource file and packaging scripts. `sharp.ico`
   is drawn by `make_logo.py` (Pillow): `python make_logo.py sharp.ico
@@ -417,22 +419,28 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   NSIS, one-click and per user: no wizard, no admin rights,
   `%LOCALAPPDATA%\Programs\Sharp`, a Start Menu shortcut, a desktop one
   on the first interactive install, and an entry in Installed apps.
-  Releases live on GitHub in two channels: stable `vX.Y.Z` (latest) and
-  nightly `vX.Y.Z-nightly.YYYYMMDD.N` (prerelease), each with its
-  installer and `SHA256SUMS`. Sharp asks GitHub's API 20 s after starting
-  and then every 4 minutes, downloads a newer installer of its channel in
+  Releases are `vX.Y.Z` on GitHub, cut from main, each with its
+  installer, `SHA256SUMS` and `install.ps1`; there is no nightly channel
+  for now, and prereleases are ignored. Sharp asks GitHub's API 20 s
+  after starting and then every 4 minutes, downloads a newer installer in
   the background, and installs it only if the hash matches. A green button
   beside the gear restarts into it; otherwise it installs silently when
-  Sharp quits. Ghostty's own keys drive it: `auto-update` (`off` stops
-  it) and `auto-update-channel` (`stable`, or `tip` for nightly; unset
-  means the channel the copy was built for), offered under Settings >
-  General > Updates. A local build (`-Dsharp-channel=dev`, the default)
-  never updates. The installer waits for a running Sharp to let go of its
-  files before replacing them. Checked 2026-10-28 with a nightly
-  installer: silent install, waiting on a locked `sharp.exe`, and a clean
-  uninstall; an update from a real release is not checked yet. There is
-  no code signing, so SmartScreen warns on the first manual install
-  (T3 Code signs with Azure Trusted Signing).
+  Sharp quits. Ghostty's `auto-update` key (`off` stops it) drives it,
+  offered under Settings > General > Updates. A local build (without
+  `-Dsharp-release`) never updates. The installer waits for a running
+  Sharp to let go of its files before replacing them. Checked 2026-10-28:
+  silent install, waiting on a locked `sharp.exe`, and a clean uninstall;
+  an update from a real release is not checked yet.
+- **Sharp is installed by a PowerShell command, not a downloaded file.**
+  There is no code signing (T3 Code pays for Azure Trusted Signing), and
+  SmartScreen stops unsigned programs only when they carry the mark of
+  the web, which browsers add and PowerShell doesn't (checked 2026-10-28).
+  So the README offers only `irm .../releases/latest/download/install.ps1
+  | iex`, which downloads the installer, checks it against the hash
+  written into the script, and runs it. Updates download through WinHTTP
+  and carry no mark either. The installer stays a release asset, since
+  the updater needs it. Smart App Control, on only on some fresh Windows
+  11 installs, still blocks unsigned programs.
 - **Sharp to people, Ghostty to programs.** The exe, window text, dialogs and
   version info say Sharp. `TERM_PROGRAM`, terminfo, `GHOSTTY_*` variables,
   `share\ghostty` resources and the `%LOCALAPPDATA%\ghostty` config folder
