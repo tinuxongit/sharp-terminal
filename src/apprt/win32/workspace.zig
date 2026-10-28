@@ -78,7 +78,13 @@ pub fn paintSidebar(self: *Window, hdc_screen: w32.HDC, palette: tab_strip.Palet
             const config = &self.app.config;
             ai_usage.setEnabled(.{
                 .claude = config.@"ai-usage-claude",
+                .claude_session = config.@"ai-usage-claude-session",
+                .claude_weekly = config.@"ai-usage-claude-weekly",
+                .claude_models = config.@"ai-usage-claude-models",
                 .codex = config.@"ai-usage-codex",
+                .codex_session = config.@"ai-usage-codex-session",
+                .codex_weekly = config.@"ai-usage-codex-weekly",
+                .codex_models = config.@"ai-usage-codex-models",
                 .opencode = config.@"ai-usage-opencode",
             });
             break :usage ai_usage.snapshot();

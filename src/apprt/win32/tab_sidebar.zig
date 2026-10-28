@@ -237,7 +237,7 @@ pub fn paint(c: Canvas, scale: f32, palette: tab_strip.Palette, fonts: Fonts, st
 
 const usage_row_height = 22.0;
 const usage_bar_height = 4.0;
-const max_usage_rows = 8;
+const max_usage_rows = 2 * ai_usage.max_windows + 2;
 const icon_chevron_right = 0xE76C;
 
 /// A row's label: the tool, then what it counts, as in "Claude · 5 h".
@@ -250,21 +250,24 @@ const UsageRow = union(enum) {
 };
 
 /// The rows the AI section shows, in order; none when it is folded.
-fn usageRows(state: State, out: *[max_usage_rows]UsageRow) []const UsageRow {
+/// Labels point into `state`, so it must outlive the rows.
+fn usageRows(state: *const State, out: *[max_usage_rows]UsageRow) []const UsageRow {
     const text = profiles.data.sidebar.ai;
-    const u = state.usage;
+    const u = &state.usage;
     var n: usize = 0;
-    for ([_]struct { []const u8, ai_usage.Plan }{ .{ text.claude, u.claude }, .{ text.codex, u.codex } }) |tool| {
+    for ([_]struct { []const u8, *const ai_usage.Plan }{ .{ text.claude, &u.claude }, .{ text.codex, &u.codex } }) |tool| {
         const name, const plan = tool;
         if (!plan.found) continue;
         var shown = false;
-        for (plan.windows) |maybe| {
-            const w = maybe orelse continue;
-            out[n] = .{ .window = .{ .label = .{ .tool = name, .what = windowName(w.minutes) }, .window = w } };
+        for (&plan.windows) |*slot| {
+            const w = if (slot.*) |*w| w else continue;
+            const what = if (w.kind == .model) w.model() else windowName(w.minutes);
+            out[n] = .{ .window = .{ .label = .{ .tool = name, .what = what }, .window = w.* } };
             n += 1;
             shown = true;
         }
-        if (!shown) {
+        // Windows the user switched off leave nothing, not a note.
+        if (!shown and !plan.hid_some) {
             out[n] = .{ .note = .{ .tool = name, .what = if (plan.answered) text.no_plan_limits else text.checking } };
             n += 1;
         }
@@ -295,7 +298,7 @@ fn windowName(minutes: u32) []const u8 {
 
 fn usageHeight(state: State, scale: f32) i32 {
     var rows: [max_usage_rows]UsageRow = undefined;
-    const shown = usageRows(state, &rows);
+    const shown = usageRows(&state, &rows);
     if (shown.len == 0) return 0;
     var h: f32 = section_height + pad;
     if (!state.usage_folded) {
@@ -308,7 +311,7 @@ fn usageHeight(state: State, scale: f32) i32 {
 /// spending as figures. Clicking its title folds it to just the title.
 fn paintUsage(p: *Painter) void {
     var rows: [max_usage_rows]UsageRow = undefined;
-    const shown = usageRows(p.state, &rows);
+    const shown = usageRows(&p.state, &rows);
     if (shown.len == 0) return;
     const c = p.c;
     c.fill(.{ .left = 0, .top = p.list_bottom, .right = c.width, .bottom = c.height }, p.palette.strip);

@@ -227,7 +227,11 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   (percent used, time to reset; named 5 h, week or month by their length)
   and OpenCode's spending today and this week, for whichever is installed
   and switched on in Settings > AI (`ai-usage-claude`, `ai-usage-codex`,
-  `ai-usage-opencode`), refreshed every 5 minutes. Clicking its title folds
+  `ai-usage-opencode`), refreshed every 5 minutes. Each plan's windows
+  switch on and off by kind (`-session`, `-weekly`, `-models` after the
+  tool's key): the short window, the weekly one, and the per-model ones
+  (Claude's `model_scoped`, such as Fable; Codex's other
+  `rateLimitsByLimitId` entries), so a new model needs no new setting. Clicking its title folds
   it, remembered in the session like a folded group. Claude Code
   is asked as T3 Code asks it: started in stream-json mode with hooks and
   MCP off, never given a prompt, and sent the `get_usage` control request

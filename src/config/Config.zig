@@ -2383,11 +2383,31 @@ else
 /// Currently only supported on Windows.
 @"ai-usage-claude": bool = true,
 
+/// With `ai-usage-claude`, whether Claude's 5-hour limit shows.
+@"ai-usage-claude-session": bool = true,
+
+/// With `ai-usage-claude`, whether Claude's weekly limit shows.
+@"ai-usage-claude-weekly": bool = true,
+
+/// With `ai-usage-claude`, whether the weekly limits of single models
+/// (such as Fable) show.
+@"ai-usage-claude-models": bool = true,
+
 /// Whether the tab sidebar's AI section shows Codex's ChatGPT plan limits,
 /// read through the Codex CLI when it is installed.
 ///
 /// Currently only supported on Windows.
 @"ai-usage-codex": bool = true,
+
+/// With `ai-usage-codex`, whether Codex's short limit shows: 5 hours, or a
+/// month on ChatGPT's Free plan.
+@"ai-usage-codex-session": bool = true,
+
+/// With `ai-usage-codex`, whether Codex's weekly limit shows.
+@"ai-usage-codex-weekly": bool = true,
+
+/// With `ai-usage-codex`, whether the limits of single models show.
+@"ai-usage-codex-models": bool = true,
 
 /// Whether the tab sidebar's AI section shows OpenCode's spending today
 /// and this week, read through the OpenCode CLI when it is installed.
