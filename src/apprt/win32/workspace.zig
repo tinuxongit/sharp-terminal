@@ -74,7 +74,16 @@ pub fn paintSidebar(self: *Window, hdc_screen: w32.HDC, palette: tab_strip.Palet
         .pressed = self.sidebar_pressed,
         .has_wsl = self.has_wsl,
         .server_field = if (self.server_field.focused) &self.server_field else null,
-        .usage = ai_usage.snapshot(),
+        .usage = usage: {
+            const config = &self.app.config;
+            ai_usage.setEnabled(.{
+                .claude = config.@"ai-usage-claude",
+                .codex = config.@"ai-usage-codex",
+                .opencode = config.@"ai-usage-opencode",
+            });
+            break :usage ai_usage.snapshot();
+        },
+        .usage_folded = isCollapsed(self, usage_fold_key),
         .now_s = std.Io.Clock.now(.real, global.io()).toSeconds(),
     }, &self.sidebar_spots);
     // Usage is read only once a sidebar is shown, so Tabs mode never runs
@@ -177,6 +186,7 @@ pub fn sidebarClick(self: *Window, x: i32, y: i32) void {
             self.openProfileIn(&list, index, self.tab_active_surface[i].folderPath(), false);
         },
         .section, .server_field => {},
+        .usage_title => toggleCollapsed(self, usage_fold_key),
         .section_new => |section| switch (section) {
             .servers => focusServerField(self, true),
             else => pickFolderAndOpen(self, section, null),
@@ -277,6 +287,17 @@ pub fn groupLabel(self: *Window, tab: usize, buf: []u8) []const u8 {
 pub fn collapsedGroups(self: *const Window, buf: *[Window.max_collapsed][]const u8) []const []const u8 {
     for (0..self.collapsed_count) |i| buf[i] = self.collapsed[i][0..self.collapsed_lens[i]];
     return buf[0..self.collapsed_count];
+}
+
+/// The AI section folds like a group, remembered in the same list (and so
+/// in the session); no folder key looks like it.
+const usage_fold_key = "ai";
+
+fn isCollapsed(self: *const Window, key: []const u8) bool {
+    for (0..self.collapsed_count) |i| {
+        if (tab_sidebar.sameGroup(self.collapsed[i][0..self.collapsed_lens[i]], key)) return true;
+    }
+    return false;
 }
 
 pub fn toggleCollapsed(self: *Window, key: []const u8) void {

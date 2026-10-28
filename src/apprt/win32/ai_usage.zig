@@ -1,17 +1,21 @@
-//! How much of Claude's and OpenCode's usage is spent, for the Workspace
-//! sidebar's AI section. Each tool is asked through its own CLI, as T3
-//! Code does, so Sharp holds no keys and whether a subscription or an API
-//! key pays is the CLI's business:
+//! How much of Claude's, Codex's and OpenCode's usage is spent, for the
+//! Workspace sidebar's AI section. Each tool is asked through its own CLI,
+//! as T3 Code does, so Sharp holds no keys and whether a subscription or
+//! an API key pays is the CLI's business:
 //!
 //! - Claude Code, started in stream-json mode, answers the control request
 //!   `get_usage` (what its /usage shows) with the plan's 5-hour and weekly
 //!   windows. No prompt is ever sent, and hooks and MCP servers stay off.
 //!   Anthropic's Agent SDK marks the request experimental, so the reply
 //!   is read loosely and a failed read keeps the last good one.
+//! - Codex's `app-server` answers the JSON-RPC request
+//!   `account/rateLimits/read` with the ChatGPT plan's windows: 5-hour and
+//!   weekly on paid plans, monthly on Free.
 //! - OpenCode's `stats --json --cost` gives cost and tokens over N days.
 //!
 //! A background thread asks every few minutes and posts a message to the
-//! app, which repaints the sidebars.
+//! app, which repaints the sidebars. Each tool can be switched off in
+//! Settings > AI (the `ai-usage-*` config keys).
 const std = @import("std");
 const w32 = @import("win32.zig");
 const global = @import("../../global.zig");
@@ -28,6 +32,17 @@ pub const Window = struct {
     percent: f32,
     /// Unix seconds, or 0 when unknown.
     resets_at: i64,
+    /// How long the window lasts, which names it (5 h, week, month).
+    minutes: u32,
+};
+
+/// A subscription's windows, as Claude or Codex report them.
+pub const Plan = struct {
+    found: bool = false,
+    /// Whether the CLI answered at all, so "no plan limits" (an API key)
+    /// can be told apart from no answer yet.
+    answered: bool = false,
+    windows: [2]?Window = .{ null, null },
 };
 
 pub const Spend = struct {
@@ -36,31 +51,41 @@ pub const Spend = struct {
 };
 
 pub const Snapshot = struct {
-    claude_found: bool = false,
-    /// Plan windows; null with an API key, which has no plan limits.
-    five_hour: ?Window = null,
-    seven_day: ?Window = null,
-    /// Whether Claude answered at all, so an API key can be told apart
-    /// from no answer yet.
-    claude_answered: bool = false,
+    claude: Plan = .{},
+    codex: Plan = .{},
     opencode_found: bool = false,
     opencode_today: ?Spend = null,
     opencode_week: ?Spend = null,
+};
 
-    pub fn any(self: Snapshot) bool {
-        return self.claude_found or self.opencode_found;
-    }
+/// Which tools to ask, from the `ai-usage-*` config keys.
+pub const Enabled = packed struct(u8) {
+    claude: bool = true,
+    codex: bool = true,
+    opencode: bool = true,
+    _: u5 = 0,
 };
 
 var lock: std.Io.Mutex = .init;
 var latest: Snapshot = .{};
+var enabled: std.atomic.Value(u8) = .init(@bitCast(Enabled{}));
 var started = false;
 
-/// The latest usage, for painting.
+/// The latest usage, for painting, without the tools switched off.
 pub fn snapshot() Snapshot {
     lock.lockUncancelable(global.io());
     defer lock.unlock(global.io());
-    return latest;
+    var s = latest;
+    const on: Enabled = @bitCast(enabled.load(.acquire));
+    if (!on.claude) s.claude = .{};
+    if (!on.codex) s.codex = .{};
+    if (!on.opencode) s.opencode_found = false;
+    return s;
+}
+
+/// Follow the config; a tool switched back on shows again at the next read.
+pub fn setEnabled(on: Enabled) void {
+    enabled.store(@bitCast(on), .release);
 }
 
 /// Start asking, once; `notify` gets `message` after every answer.
@@ -78,10 +103,17 @@ pub fn ensureStarted(notify: w32.HWND, message: u32) void {
 fn poll(notify: w32.HWND, message: u32) void {
     const alloc = std.heap.page_allocator;
     while (true) {
-        var next = snapshot();
-        next.claude_found = findProgram("claude.exe");
-        if (next.claude_found) readClaude(alloc, &next);
-        next.opencode_found = findProgram("opencode.cmd") or findProgram("opencode.exe");
+        const on: Enabled = @bitCast(enabled.load(.acquire));
+        var next = blk: {
+            lock.lockUncancelable(global.io());
+            defer lock.unlock(global.io());
+            break :blk latest;
+        };
+        next.claude.found = on.claude and profiles.programExists("claude.exe");
+        if (next.claude.found) readClaude(alloc, &next.claude);
+        next.codex.found = on.codex and profiles.programExists("codex.exe");
+        if (next.codex.found) readCodex(alloc, &next.codex);
+        next.opencode_found = on.opencode and (profiles.programExists("opencode.cmd") or profiles.programExists("opencode.exe"));
         if (next.opencode_found) {
             next.opencode_today = readOpenCode(alloc, 0) orelse next.opencode_today;
             next.opencode_week = readOpenCode(alloc, 7) orelse next.opencode_week;
@@ -96,13 +128,9 @@ fn poll(notify: w32.HWND, message: u32) void {
     }
 }
 
-fn findProgram(name: []const u8) bool {
-    return profiles.programExists(name);
-}
-
 /// Claude Code's /usage through its control protocol. On any failure the
 /// previous windows stay.
-fn readClaude(alloc: std.mem.Allocator, into: *Snapshot) void {
+fn readClaude(alloc: std.mem.Allocator, into: *Plan) void {
     // The JSON's quotes are escaped: Windows strips bare ones from arguments.
     var cli = Cli.start("claude.exe --output-format stream-json --verbose --input-format stream-json " ++
         "--settings \"{\\\"disableAllHooks\\\":true}\" --strict-mcp-config") orelse return;
@@ -122,27 +150,69 @@ fn readClaude(alloc: std.mem.Allocator, into: *Snapshot) void {
         } else if (eqlString(id, "usage")) {
             if (!eqlString(field(response, "subtype"), "success")) return;
             const usage = field(response, "response") orelse return;
-            into.claude_answered = true;
+            into.answered = true;
             const limits = field(usage, "rate_limits");
-            into.five_hour = if (limits) |l| window(field(l, "five_hour")) else null;
-            into.seven_day = if (limits) |l| window(field(l, "seven_day")) else null;
+            into.windows = .{
+                if (limits) |l| claudeWindow(field(l, "five_hour"), 5 * 60) else null,
+                if (limits) |l| claudeWindow(field(l, "seven_day"), 7 * 24 * 60) else null,
+            };
             return;
         }
     }
 }
 
-fn window(value: ?std.json.Value) ?Window {
+fn claudeWindow(value: ?std.json.Value, minutes: u32) ?Window {
     const v = value orelse return null;
-    const percent: f32 = switch (field(v, "utilization") orelse return null) {
-        .integer => |i| @floatFromInt(i),
-        .float => |f| @floatCast(f),
-        else => return null,
-    };
+    const percent = percentOf(field(v, "utilization")) orelse return null;
     const resets_at = if (field(v, "resets_at")) |r| switch (r) {
         .string => |s| parseIso8601(s) orelse 0,
         else => 0,
     } else 0;
-    return .{ .percent = std.math.clamp(percent, 0, 100), .resets_at = resets_at };
+    return .{ .percent = percent, .resets_at = resets_at, .minutes = minutes };
+}
+
+/// Codex's ChatGPT plan limits through its app-server's JSON-RPC.
+fn readCodex(alloc: std.mem.Allocator, into: *Plan) void {
+    var cli = Cli.start("codex.exe app-server") orelse return;
+    defer cli.end();
+    cli.write("{\"id\":0,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"sharp\",\"title\":\"Sharp\",\"version\":\"0.1.0\"}}}\n");
+    var line_buf: std.ArrayList(u8) = .empty;
+    defer line_buf.deinit(alloc);
+    while (cli.readLine(alloc, &line_buf)) |line| {
+        defer alloc.free(line);
+        const parsed = std.json.parseFromSlice(std.json.Value, alloc, line, .{}) catch continue;
+        defer parsed.deinit();
+        const id = field(parsed.value, "id") orelse continue;
+        if (id != .integer) continue;
+        if (id.integer == 0) {
+            cli.write("{\"method\":\"initialized\"}\n{\"id\":1,\"method\":\"account/rateLimits/read\",\"params\":null}\n");
+        } else if (id.integer == 1) {
+            const result = field(parsed.value, "result") orelse return;
+            const limits = field(result, "rateLimits") orelse return;
+            into.answered = true;
+            into.windows = .{ codexWindow(field(limits, "primary")), codexWindow(field(limits, "secondary")) };
+            return;
+        }
+    }
+}
+
+fn codexWindow(value: ?std.json.Value) ?Window {
+    const v = value orelse return null;
+    const percent = percentOf(field(v, "usedPercent")) orelse return null;
+    return .{
+        .percent = percent,
+        .resets_at = number(i64, field(v, "resetsAt")),
+        .minutes = number(u32, field(v, "windowDurationMins")),
+    };
+}
+
+fn percentOf(value: ?std.json.Value) ?f32 {
+    const percent: f32 = switch (value orelse return null) {
+        .integer => |i| @floatFromInt(i),
+        .float => |f| @floatCast(f),
+        else => return null,
+    };
+    return std.math.clamp(percent, 0, 100);
 }
 
 /// OpenCode's spending over the last `days` (0 is today).
@@ -182,8 +252,9 @@ fn eqlString(value: ?std.json.Value, expected: []const u8) bool {
 fn number(comptime T: type, value: ?std.json.Value) T {
     const v = value orelse return 0;
     return switch (v) {
-        .integer => |i| if (T == f64) @floatFromInt(i) else @intCast(@max(i, 0)),
-        .float => |f| if (T == f64) f else @intFromFloat(@max(f, 0)),
+        // A value out of range is read as 0, never trusted into a cast.
+        .integer => |i| if (T == f64) @floatFromInt(i) else std.math.cast(T, @max(i, 0)) orelse 0,
+        .float => |f| if (T == f64) f else std.math.lossyCast(T, @max(f, 0)),
         else => 0,
     };
 }

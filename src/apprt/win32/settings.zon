@@ -192,6 +192,41 @@
             },
         },
         .{
+            .name = "AI",
+            .icon = 0xE9D9,
+            .sections = .{
+                .{
+                    .title = "Usage in the sidebar",
+                    .settings = .{
+                        .{
+                            .label = "Claude",
+                            .description = "The 5-hour and weekly limits of your Claude plan, from Claude Code.",
+                            .key = "ai-usage-claude",
+                            .on = "",
+                            .off = "false",
+                            .default_on = true,
+                        },
+                        .{
+                            .label = "Codex",
+                            .description = "The limits of your ChatGPT plan, from Codex.",
+                            .key = "ai-usage-codex",
+                            .on = "",
+                            .off = "false",
+                            .default_on = true,
+                        },
+                        .{
+                            .label = "OpenCode",
+                            .description = "What OpenCode spent today and this week.",
+                            .key = "ai-usage-opencode",
+                            .on = "",
+                            .off = "false",
+                            .default_on = true,
+                        },
+                    },
+                },
+            },
+        },
+        .{
             .name = "Advanced",
             .icon = 0xE90F,
             .sections = .{

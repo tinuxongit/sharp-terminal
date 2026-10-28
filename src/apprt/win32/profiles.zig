@@ -28,12 +28,15 @@ pub const AiUsage = struct {
     warn_percent: u8,
     warning_color: struct { r: u8, g: u8, b: u8 },
     title: []const u8,
-    claude_session: []const u8,
-    claude_week: []const u8,
-    claude_api: []const u8,
-    claude_waiting: []const u8,
-    opencode_today: []const u8,
-    opencode_week: []const u8,
+    claude: []const u8,
+    codex: []const u8,
+    opencode: []const u8,
+    five_hours: []const u8,
+    week: []const u8,
+    month: []const u8,
+    today: []const u8,
+    no_plan_limits: []const u8,
+    checking: []const u8,
 };
 
 pub const Sidebar = struct {

@@ -2376,6 +2376,25 @@ else
 /// Currently only supported on Windows.
 @"window-tab-bar-position": WindowTabBarPosition = .top,
 
+/// Whether the tab sidebar's AI section shows Claude's plan limits (the
+/// 5-hour and weekly windows), read through the Claude Code CLI when it
+/// is installed.
+///
+/// Currently only supported on Windows.
+@"ai-usage-claude": bool = true,
+
+/// Whether the tab sidebar's AI section shows Codex's ChatGPT plan limits,
+/// read through the Codex CLI when it is installed.
+///
+/// Currently only supported on Windows.
+@"ai-usage-codex": bool = true,
+
+/// Whether the tab sidebar's AI section shows OpenCode's spending today
+/// and this week, read through the OpenCode CLI when it is installed.
+///
+/// Currently only supported on Windows.
+@"ai-usage-opencode": bool = true,
+
 /// Background color for the window titlebar. This only takes effect if
 /// window-theme is set to ghostty. Currently only supported in the GTK app
 /// runtime.

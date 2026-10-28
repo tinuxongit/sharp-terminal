@@ -81,6 +81,8 @@ pub const Target = union(enum) {
     section_menu: Section,
     /// The box Servers' "+" opens, where an address is typed.
     server_field,
+    /// The AI section's title: folds or unfolds it.
+    usage_title,
 
     pub fn eql(a: Target, b: Target) bool {
         return std.meta.eql(a, b);
@@ -136,8 +138,10 @@ pub const State = struct {
     has_wsl: bool = false,
     /// The address box under Servers, while open.
     server_field: ?*const SearchField = null,
-    /// Claude's and OpenCode's usage, shown at the foot.
+    /// Claude's, Codex's and OpenCode's usage, shown at the foot.
     usage: ai_usage.Snapshot = .{},
+    /// Whether the AI section is folded to its title.
+    usage_folded: bool = false,
     /// Unix seconds, for "resets in".
     now_s: i64 = 0,
 };
@@ -233,73 +237,102 @@ pub fn paint(c: Canvas, scale: f32, palette: tab_strip.Palette, fonts: Fonts, st
 
 const usage_row_height = 22.0;
 const usage_bar_height = 4.0;
+const max_usage_rows = 8;
+const icon_chevron_right = 0xE76C;
+
+/// A row's label: the tool, then what it counts, as in "Claude · 5 h".
+const UsageLabel = struct { tool: []const u8, what: []const u8 };
 
 const UsageRow = union(enum) {
-    window: struct { label: []const u8, window: ai_usage.Window },
-    spend: struct { label: []const u8, spend: ai_usage.Spend },
-    note: []const u8,
+    window: struct { label: UsageLabel, window: ai_usage.Window },
+    spend: struct { label: UsageLabel, spend: ai_usage.Spend },
+    note: UsageLabel,
 };
 
-/// The rows the AI section shows, in order.
-fn usageRows(state: State, out: *[5]UsageRow) []const UsageRow {
+/// The rows the AI section shows, in order; none when it is folded.
+fn usageRows(state: State, out: *[max_usage_rows]UsageRow) []const UsageRow {
     const text = profiles.data.sidebar.ai;
     const u = state.usage;
     var n: usize = 0;
-    if (u.claude_found) {
-        if (u.five_hour) |w| {
-            out[n] = .{ .window = .{ .label = text.claude_session, .window = w } };
+    for ([_]struct { []const u8, ai_usage.Plan }{ .{ text.claude, u.claude }, .{ text.codex, u.codex } }) |tool| {
+        const name, const plan = tool;
+        if (!plan.found) continue;
+        var shown = false;
+        for (plan.windows) |maybe| {
+            const w = maybe orelse continue;
+            out[n] = .{ .window = .{ .label = .{ .tool = name, .what = windowName(w.minutes) }, .window = w } };
             n += 1;
+            shown = true;
         }
-        if (u.seven_day) |w| {
-            out[n] = .{ .window = .{ .label = text.claude_week, .window = w } };
-            n += 1;
-        }
-        if (u.five_hour == null and u.seven_day == null) {
-            out[n] = .{ .note = if (u.claude_answered) text.claude_api else text.claude_waiting };
+        if (!shown) {
+            out[n] = .{ .note = .{ .tool = name, .what = if (plan.answered) text.no_plan_limits else text.checking } };
             n += 1;
         }
     }
     if (u.opencode_found) {
         if (u.opencode_today) |s| {
-            out[n] = .{ .spend = .{ .label = text.opencode_today, .spend = s } };
+            out[n] = .{ .spend = .{ .label = .{ .tool = text.opencode, .what = text.today }, .spend = s } };
             n += 1;
         }
         if (u.opencode_week) |s| {
-            out[n] = .{ .spend = .{ .label = text.opencode_week, .spend = s } };
+            out[n] = .{ .spend = .{ .label = .{ .tool = text.opencode, .what = text.week }, .spend = s } };
             n += 1;
         }
     }
     return out[0..n];
 }
 
+/// "5 h", "week" or "month" for the windows plans use, else hours or days.
+fn windowName(minutes: u32) []const u8 {
+    const text = profiles.data.sidebar.ai;
+    return switch (minutes) {
+        5 * 60 => text.five_hours,
+        7 * 24 * 60 => text.week,
+        28 * 24 * 60...31 * 24 * 60 => text.month,
+        else => "",
+    };
+}
+
 fn usageHeight(state: State, scale: f32) i32 {
-    var rows: [5]UsageRow = undefined;
+    var rows: [max_usage_rows]UsageRow = undefined;
     const shown = usageRows(state, &rows);
     if (shown.len == 0) return 0;
     var h: f32 = section_height + pad;
-    for (shown) |row| h += usage_row_height + @as(f32, if (row == .window) usage_bar_height + 4 else 0);
+    if (!state.usage_folded) {
+        for (shown) |row| h += usage_row_height + @as(f32, if (row == .window) usage_bar_height + 4 else 0);
+    }
     return px(h, scale);
 }
 
-/// The AI section, pinned under the list: Claude's plan windows as bars,
-/// OpenCode's spending as figures.
+/// The AI section, pinned under the list: plan windows as bars, OpenCode's
+/// spending as figures. Clicking its title folds it to just the title.
 fn paintUsage(p: *Painter) void {
-    var rows: [5]UsageRow = undefined;
+    var rows: [max_usage_rows]UsageRow = undefined;
     const shown = usageRows(p.state, &rows);
     if (shown.len == 0) return;
     const c = p.c;
     c.fill(.{ .left = 0, .top = p.list_bottom, .right = c.width, .bottom = c.height }, p.palette.strip);
     var y = p.list_bottom;
-    // The section title, as the list's are drawn.
+
+    // The title, drawn as the list's are, with an arrow that tells folded
+    // from open.
     const title = profiles.data.sidebar.ai.title;
     const h = p.px(section_height);
     const left = p.px(pad + 6);
     const right = c.width - p.px(pad + 6);
-    c.text(.{ .left = left, .top = y, .right = right, .bottom = y + h }, title, p.fonts.small, p.palette.text_dim, .left);
+    const header: w32.RECT = .{ .left = p.px(pad), .top = y, .right = c.width - p.px(pad), .bottom = y + h };
+    const hovered = p.state.hover.eql(.usage_title);
+    if (hovered) c.fillRounded(header, p.px(corner), p.palette.hover);
+    c.text(.{ .left = left, .top = y, .right = right, .bottom = y + h }, title, p.fonts.small, if (hovered) p.palette.text else p.palette.text_dim, .left);
+    const arrow_w = p.px(icon_size);
+    c.glyph(.{ .left = right - arrow_w, .top = y, .right = right, .bottom = y + h }, if (p.state.usage_folded) icon_chevron_right else icon_chevron_down, p.fonts.icons_tiny, p.palette.text_dim);
     const rule_left = left + c.textWidth(title, p.fonts.small) + p.px(10);
+    const rule_right = right - arrow_w - p.px(6);
     const mid = y + @divTrunc(h, 2);
-    if (right > rule_left) c.fill(.{ .left = rule_left, .top = mid, .right = right, .bottom = mid + 1 }, p.palette.separator);
+    if (rule_right > rule_left) c.fill(.{ .left = rule_left, .top = mid, .right = rule_right, .bottom = mid + 1 }, p.palette.separator);
+    p.spots.add(header, .usage_title);
     y += h;
+    if (p.state.usage_folded) return;
 
     const row_h = p.px(usage_row_height);
     for (shown) |row| {
@@ -307,12 +340,17 @@ fn paintUsage(p: *Painter) void {
         const label, const value = switch (row) {
             .window => |w| .{ w.label, windowText(&value_buf, w.window, p.state.now_s) },
             .spend => |s| .{ s.label, spendText(&value_buf, s.spend) },
-            .note => |text| .{ text, "" },
+            .note => |l| .{ l, "" },
         };
+        var label_buf: [96]u8 = undefined;
+        const label_text = if (label.what.len == 0)
+            label.tool
+        else
+            std.fmt.bufPrint(&label_buf, "{s} \u{00B7} {s}", .{ label.tool, label.what }) catch label.tool;
         // The figure keeps its room; a narrow sidebar cuts the label.
         const line: w32.RECT = .{ .left = left, .top = y, .right = right, .bottom = y + row_h };
         const value_w = if (value.len > 0) c.textWidth(value, p.fonts.small) + p.px(8) else 0;
-        c.text(.{ .left = left, .top = y, .right = @max(left, right - value_w), .bottom = y + row_h }, label, p.fonts.small, p.palette.text_dim, .left);
+        c.text(.{ .left = left, .top = y, .right = @max(left, right - value_w), .bottom = y + row_h }, label_text, p.fonts.small, p.palette.text_dim, .left);
         if (value.len > 0) c.text(line, value, p.fonts.small, p.palette.text, .right);
         y += row_h;
         if (row == .window) {

@@ -410,7 +410,7 @@ pub fn windowWndProc(
                     strip_mouse.showTabMenu(window, i, x, y);
                     return 0;
                 },
-                .none, .search, .resize, .group, .group_new, .group_menu, .section, .section_new, .section_menu, .server_field => {},
+                .none, .search, .resize, .group, .group_new, .group_menu, .section, .section_new, .section_menu, .server_field, .usage_title => {},
             }
             return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
         },
@@ -424,7 +424,7 @@ pub fn windowWndProc(
             }
             switch (workspace.sidebarTarget(window, x, y)) {
                 .tab, .close => |i| window.requestCloseTabs(&.{window.tabId(i)}),
-                .none, .search, .resize, .group, .group_new, .group_menu, .section, .section_new, .section_menu, .server_field => {},
+                .none, .search, .resize, .group, .group_new, .group_menu, .section, .section_new, .section_menu, .server_field, .usage_title => {},
             }
             return 0;
         },
