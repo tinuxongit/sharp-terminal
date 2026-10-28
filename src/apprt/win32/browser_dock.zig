@@ -81,6 +81,11 @@ pub fn emptied(self: *Window) void {
 pub fn setWidth(self: *Window, pixels: i32) void {
     self.browser_width = @as(f32, @floatFromInt(pixels)) / self.scale;
     self.handleResize();
+    // Mouse moves keep coming during the drag and WM_PAINT waits for a
+    // quiet queue, so without this the toolbar and the terminal's edge
+    // trail behind the page, which WebView2 moves at once.
+    const hwnd = self.hwnd orelse return;
+    _ = w32.RedrawWindow(hwnd, null, null, w32.RDW_INVALIDATE | w32.RDW_UPDATENOW | w32.RDW_ALLCHILDREN);
 }
 
 /// Follow the window's size, scale, colors and search engine.

@@ -61,6 +61,8 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/load_config.zig`: the exe's PE load configuration.
 - `src/apprt/win32/frame_pacer.zig`: one frame per display refresh for each
   renderer thread.
+- `src/apprt/win32/clipboard_keys.zig`: Windows' copy and paste keys
+  (`clipboard-keys`), added to the config as it loads.
 - `src/apprt/win32/background_style.zig`: Sharp's background styles
   (`background-style`): makes the style's tile for its color (sizes in
   `backgrounds.zon`, written by `png.zig`) and hands it to Ghostty as the
@@ -307,7 +309,7 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
 - **Every page is 1920 × 1080, scaled to fit, as in Citropy.** Claude
   always sees the same desktop layout and coordinates however wide the
   panel is. `Emulation.setDeviceMetricsOverride` with its `scale` fits the
-  page into a 16:9 box below the toolbar, and the user's own clicks are
+  page into a 16:9 box centered below the toolbar, and the user's own clicks are
   mapped back into the page (checked 2026-10-28: the middle of the shown
   page lands at 960 × 540). The cost is small text in a narrow panel; the
   size is in `browser.zon`.
@@ -340,6 +342,16 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   dialogs, mobile emulation and connected accounts are left out. Checked
   2026-10-28 through the real protocol and against a throwaway Claude
   Code config (`claude mcp list`: connected).
+- **Copy and paste use Windows' keys.** `clipboard-keys = windows`, the
+  default, binds `performable:ctrl+c=copy_to_clipboard` and
+  `performable:ctrl+v=paste_from_clipboard` on the loaded config, unless
+  the file binds those chords. Ctrl+C copies only a selection and
+  otherwise interrupts, as in Windows Terminal; Ctrl+V pastes only text or
+  files, so with an image on the clipboard the key reaches the program
+  (Claude Code reads the image itself). Settings > General offers
+  Ghostty's Ctrl+Shift+C/V instead. Files dropped on a terminal are
+  pasted as quoted paths, a bracketed paste, so Claude Code takes an
+  image's path as an attachment.
 - **Background styles are tiles Ghostty already knows how to draw.**
   Settings > Appearance > Background offers Default (the plain theme
   color) and Pixel cascade, a grid of squares in any color

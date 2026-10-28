@@ -251,7 +251,7 @@ pub fn place(self: *BrowserPanel, rect: w32.RECT, scale: f32, palette: tab_strip
 }
 
 /// Where pages show: the fixed layout size scaled to fit below the
-/// toolbar, centered across and at the top.
+/// toolbar, centered both ways.
 fn pageRect(self: *const BrowserPanel) struct { w32.RECT, f64 } {
     var client: w32.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
     _ = w32.GetClientRect(self.hwnd, &client);
@@ -266,8 +266,9 @@ fn pageRect(self: *const BrowserPanel) struct { w32.RECT, f64 } {
     const w: i32 = @intFromFloat(@max(1, @round(vw * fit)));
     const h: i32 = @intFromFloat(@max(1, @round(vh * fit)));
     const x = left + @divTrunc(@as(i32, @intFromFloat(width)) - w, 2);
+    const y = top + @divTrunc(@as(i32, @intFromFloat(height)) - h, 2);
     // The page renders in device-independent pixels, scale times larger.
-    return .{ .{ .left = x, .top = top, .right = x + w, .bottom = top + h }, @as(f64, @floatFromInt(w)) / self.scale / vw };
+    return .{ .{ .left = x, .top = y, .right = x + w, .bottom = y + h }, @as(f64, @floatFromInt(w)) / self.scale / vw };
 }
 
 pub fn placeTab(self: *BrowserPanel, tab: *BrowserTab) void {

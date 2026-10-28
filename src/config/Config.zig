@@ -2443,6 +2443,15 @@ else
 /// Currently only supported on Windows.
 @"background-style-color": ?Color = null,
 
+/// Which keys copy and paste. `windows` (the default) adds Ctrl+C, which
+/// copies only when text is selected and otherwise interrupts the
+/// program, and Ctrl+V, which pastes only when the clipboard holds text or
+/// files. `terminal` keeps only Ghostty's Ctrl+Shift+C and Ctrl+Shift+V.
+/// Keybinds set for Ctrl+C or Ctrl+V win either way.
+///
+/// Currently only supported on Windows.
+@"clipboard-keys": ClipboardKeys = .windows,
+
 /// Background color for the window titlebar. This only takes effect if
 /// window-theme is set to ghostty. Currently only supported in the GTK app
 /// runtime.
@@ -10027,6 +10036,12 @@ pub const BackgroundImagePosition = enum {
 };
 
 /// See background-image-fit
+/// See clipboard-keys
+pub const ClipboardKeys = enum {
+    windows,
+    terminal,
+};
+
 /// See background-style
 pub const BackgroundStyle = enum {
     default,

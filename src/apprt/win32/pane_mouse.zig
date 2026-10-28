@@ -180,18 +180,11 @@ pub fn handleDropFiles(self: *Surface, wparam: usize) void {
     }) orelse return;
     defer alloc.free(text);
 
-    // Send through keyCallback as text so it goes through the same
-    // path as IME/clipboard input (PTY-bound, encoding-correct).
-    _ = self.core_surface.keyCallback(.{
-        .action = .press,
-        .key = .unidentified,
-        .mods = .{},
-        .consumed_mods = .{},
-        .composing = false,
-        .utf8 = text,
-        .unshifted_codepoint = 0,
-    }) catch |err| {
-        log.err("drop-files keyCallback: {}", .{err});
+    // As a paste, as Windows Terminal drops files: programs that take
+    // pasted paths as attachments (Claude Code turns an image's into
+    // "[Image #1]") see one bracketed paste rather than typing.
+    self.core_surface.textCallback(text) catch |err| {
+        log.err("drop-files paste: {}", .{err});
     };
 }
 

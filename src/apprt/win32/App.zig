@@ -8,10 +8,12 @@ const apprt = @import("../../apprt.zig");
 const configpkg = @import("../../config.zig");
 pub const Config = configpkg.Config;
 
-/// The config from its files, with Sharp's background style applied.
+/// The config from its files, with Sharp's background style and clipboard
+/// keys applied.
 pub fn loadConfig(alloc: std.mem.Allocator) !Config {
     var config = try Config.load(alloc);
     background_style.apply(&config);
+    clipboard_keys.apply(&config);
     return config;
 }
 const CoreApp = @import("../../App.zig");
@@ -52,6 +54,7 @@ const pane_messages = @import("pane_messages.zig");
 const window_messages = @import("window_messages.zig");
 const global_hotkey = @import("global_hotkey.zig");
 const background_style = @import("background_style.zig");
+const clipboard_keys = @import("clipboard_keys.zig");
 const browser_remote = @import("browser_remote.zig");
 const mcp_server = @import("mcp_server.zig");
 

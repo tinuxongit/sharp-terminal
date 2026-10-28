@@ -64,6 +64,15 @@
                             .default_on = true,
                         },
                         .{
+                            .label = "Copy and paste",
+                            .description = "Ctrl+C copies a selection or stops the program; Ctrl+V pastes.",
+                            .key = "clipboard-keys",
+                            .choices = .{
+                                .{ .label = "Ctrl+C / Ctrl+V", .value = "" },
+                                .{ .label = "Ctrl+Shift+C / V", .value = "terminal" },
+                            },
+                        },
+                        .{
                             .label = "Copy on select",
                             .description = "Copy selected text to the clipboard as soon as you select it.",
                             .key = "copy-on-select",
