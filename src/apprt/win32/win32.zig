@@ -1759,7 +1759,9 @@ pub const TPM_RIGHTALIGN: u32 = 0x0008;
 pub const INVALID_FILE_ATTRIBUTES: u32 = 0xFFFFFFFF;
 pub extern "kernel32" fn SearchPathW(lpPath: ?[*:0]const u16, lpFileName: [*:0]const u16, lpExtension: ?[*:0]const u16, nBufferLength: u32, lpBuffer: ?[*]u16, lpFilePart: ?*?[*]u16) callconv(.winapi) u32;
 pub extern "kernel32" fn GetFileAttributesW(lpFileName: [*:0]const u16) callconv(.winapi) u32;
-pub extern "kernel32" fn LoadLibraryW(lpLibFileName: [*:0]const u16) callconv(.winapi) ?HINSTANCE;
+pub extern "kernel32" fn LoadLibraryExW(lpLibFileName: [*:0]const u16, hFile: ?HANDLE, dwFlags: u32) callconv(.winapi) ?HINSTANCE;
+/// Search only System32, never the program's folder or the current one.
+pub const LOAD_LIBRARY_SEARCH_SYSTEM32: u32 = 0x00000800;
 pub extern "kernel32" fn GetProcAddress(hModule: HINSTANCE, lpProcName: [*:0]const u8) callconv(.winapi) ?*const anyopaque;
 pub const ANTIALIASED_QUALITY: u32 = 4;
 pub const DT_RIGHT: u32 = 0x2;

@@ -5,7 +5,9 @@ const std = @import("std");
 const w32 = @import("win32.zig");
 
 pub fn apply(dark: bool) void {
-    const uxtheme = w32.LoadLibraryW(std.unicode.utf8ToUtf16LeStringLiteral("uxtheme.dll")) orelse return;
+    // From System32 only: a uxtheme.dll planted beside sharp.exe (say, in
+    // the Downloads folder it was unzipped to) must not be loaded.
+    const uxtheme = w32.LoadLibraryExW(std.unicode.utf8ToUtf16LeStringLiteral("uxtheme.dll"), null, w32.LOAD_LIBRARY_SEARCH_SYSTEM32) orelse return;
     const SetPreferredAppMode = *const fn (c_int) callconv(.winapi) c_int;
     const FlushMenuThemes = *const fn () callconv(.winapi) void;
     const set_mode: SetPreferredAppMode = @ptrCast(w32.GetProcAddress(uxtheme, @ptrFromInt(135)) orelse return);
