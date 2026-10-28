@@ -2322,7 +2322,7 @@ keybind: Keybinds = .{},
 ///
 ///    Available since: 1.2.0
 ///
-///  - `auto` *(default)*
+///  - `auto` *(default on Linux)*
 ///
 ///    Automatically show and hide the tab bar. The tab bar is only
 ///    shown when there are two or more tabs present.
@@ -2332,8 +2332,10 @@ keybind: Keybinds = .{},
 ///    Never show the tab bar. Tabs are only accessible via the tab
 ///    overview or by keybind actions.
 ///
-/// Currently only supported on Linux (GTK).
-@"window-show-tab-bar": WindowShowTabBar = .auto,
+/// Currently only supported on Linux (GTK) and Windows. Windows defaults
+/// to `always`, because the new-tab "+" button lives in the tab bar and
+/// people expect it there, as in Windows Terminal.
+@"window-show-tab-bar": WindowShowTabBar = if (builtin.target.os.tag == .windows) .always else .auto,
 
 /// Background color for the window titlebar. This only takes effect if
 /// window-theme is set to ghostty. Currently only supported in the GTK app
