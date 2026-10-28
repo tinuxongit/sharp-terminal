@@ -26,6 +26,8 @@ pub const Sidebar = struct {
     local: []const u8,
     wsl: []const u8,
     servers: []const u8,
+    /// The title of the folder picker behind a section's "+".
+    pick_folder: []const u8,
 };
 
 pub const Data = struct {

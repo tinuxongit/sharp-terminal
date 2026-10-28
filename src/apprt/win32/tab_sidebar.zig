@@ -66,6 +66,10 @@ pub const Target = union(enum) {
     group: usize,
     /// The "+" on a group header: a new tab in that folder.
     group_new: usize,
+    /// A section title, which shows its "+" while hovered.
+    section: Section,
+    /// The "+" on a section title: a new tab in a folder the user picks.
+    section_new: Section,
 
     pub fn eql(a: Target, b: Target) bool {
         return std.meta.eql(a, b);
@@ -232,7 +236,8 @@ fn groupHoldsActive(state: State, group: Item) bool {
     return false;
 }
 
-/// A section title followed by a rule to the right edge.
+/// A section title followed by a rule to the right edge, and while
+/// hovered a "+" that opens a tab in a chosen folder.
 fn paintSection(p: *Painter, section: Section, y: i32) i32 {
     const title = switch (section) {
         .local => profiles.data.sidebar.local,
@@ -241,10 +246,26 @@ fn paintSection(p: *Painter, section: Section, y: i32) i32 {
     };
     const h = p.px(section_height);
     const left = p.px(pad + 6);
-    p.c.text(.{ .left = left, .top = y, .right = p.c.width - p.px(pad), .bottom = y + h }, title, p.fonts.small, p.palette.text_dim, .left);
+    const row: w32.RECT = .{ .left = p.px(pad), .top = y, .right = p.c.width - p.px(pad), .bottom = y + h };
+    p.c.text(.{ .left = left, .top = y, .right = row.right, .bottom = y + h }, title, p.fonts.small, p.palette.text_dim, .left);
+
+    // A server's tabs come from SSH itself, so it has no "+".
+    const can_add = section != .servers;
+    const hovered = can_add and (p.state.hover.eql(.{ .section = section }) or p.state.hover.eql(.{ .section_new = section }));
+    const button = p.px(button_size);
+    const add: w32.RECT = .{ .left = row.right - p.px(4) - button, .top = y + @divTrunc(h - button, 2), .right = row.right - p.px(4), .bottom = y + @divTrunc(h - button, 2) + button };
+
     const rule_left = left + p.c.textWidth(title, p.fonts.small) + p.px(10);
+    const rule_right = if (hovered) add.left - p.px(6) else row.right - p.px(6);
     const mid = y + @divTrunc(h, 2);
-    p.c.fill(.{ .left = rule_left, .top = mid, .right = p.c.width - p.px(pad + 6), .bottom = mid + 1 }, p.palette.separator);
+    if (rule_right > rule_left) p.c.fill(.{ .left = rule_left, .top = mid, .right = rule_right, .bottom = mid + 1 }, p.palette.separator);
+
+    if (can_add) p.spots.add(clip(row, p.list_top), .{ .section = section });
+    if (hovered) {
+        if (p.state.hover.eql(.{ .section_new = section })) p.c.fillRounded(add, p.px(corner), p.palette.hover);
+        p.c.glyph(add, icon_add, p.fonts.icons_small, p.palette.text);
+        p.spots.add(clip(add, p.list_top), .{ .section_new = section });
+    }
     return y + h;
 }
 

@@ -55,6 +55,7 @@
         .local = "Local",
         .wsl = "WSL",
         .servers = "Servers",
+        .pick_folder = "Open a tab in folder",
     },
     .menu = .{
         // Shown after a profile's name: the 3rd profile is Ctrl+Shift+3.

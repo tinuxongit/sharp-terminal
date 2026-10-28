@@ -20,6 +20,7 @@ const SettingsPanel = @import("SettingsPanel.zig");
 const profiles = @import("profiles.zig");
 const new_tab_menu = @import("new_tab_menu.zig");
 const tab_sidebar = @import("tab_sidebar.zig");
+const folder_picker = @import("folder_picker.zig");
 const canvas_mod = @import("canvas.zig");
 const SearchField = @import("SearchField.zig");
 const ssh = @import("ssh.zig");
@@ -671,11 +672,29 @@ fn refreshServers(self: *Window) void {
     if (changed) self.invalidateTabBar();
 }
 
-/// A new tab with the default shell in the folder of `tab`'s group.
+/// A new tab in the folder of `tab`'s group, with a shell of its section.
 fn openInFolder(self: *Window, tab: usize) void {
+    self.openInSection(self.tabSection(tab), self.tab_active_surface[tab].folderPath());
+}
+
+/// Ask for a folder, then open a tab of `section` in it, as the "+" on a
+/// section title does.
+fn pickFolderAndOpen(self: *Window, section: tab_sidebar.Section) void {
+    const hwnd = self.hwnd orelse return;
+    const start = if (self.getActiveSurface()) |s| s.folderPath() else "";
+    var buf: [1024]u8 = undefined;
+    const folder = folder_picker.pick(hwnd, profiles.data.sidebar.pick_folder, start, &buf) orelse return;
+    self.openInSection(section, folder);
+}
+
+/// WSL tabs open the first WSL distribution; others the default shell.
+fn openInSection(self: *Window, section: tab_sidebar.Section, folder: []const u8) void {
     const list = profiles.detect();
-    const index = list.selected(self.configuredCommand()) orelse return;
-    self.openProfileIn(&list, index, self.tab_active_surface[tab].folderPath(), false);
+    const wsl_index = for (0..list.len) |i| {
+        if (list.items[i].source == .wsl) break i;
+    } else null;
+    const index = (if (section == .wsl) wsl_index else null) orelse list.selected(self.configuredCommand()) orelse return;
+    self.openProfileIn(&list, index, folder, false);
 }
 
 /// The sidebar's rectangle in client coordinates.
@@ -1874,6 +1893,8 @@ fn sidebarClick(self: *Window, x: i32, y: i32) void {
             self.toggleCollapsed(tab_sidebar.collapseKey(&buf, self.tabSection(i), self.groupKey(i)));
         },
         .group_new => |i| self.openInFolder(i),
+        .section => {},
+        .section_new => |section| self.pickFolderAndOpen(section),
     }
 }
 
@@ -3139,7 +3160,7 @@ pub fn windowWndProc(
                     window.showTabMenu(i, x, y);
                     return 0;
                 },
-                .none, .search, .resize, .group, .group_new => {},
+                .none, .search, .resize, .group, .group_new, .section, .section_new => {},
             }
             return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
         },
@@ -3153,7 +3174,7 @@ pub fn windowWndProc(
             }
             switch (window.sidebarTarget(x, y)) {
                 .tab, .close => |i| window.requestCloseTabs(&.{window.tabId(i)}),
-                .none, .search, .resize, .group, .group_new => {},
+                .none, .search, .resize, .group, .group_new, .section, .section_new => {},
             }
             return 0;
         },

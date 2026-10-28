@@ -54,6 +54,8 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/session.zig`: saves and loads the sidebar layout's
   open tabs (`sharp-session`, beside the config file).
 - `src/apprt/win32/ssh.zig`: finds the server a tab's ssh is connected to.
+- `src/apprt/win32/folder_picker.zig`: Windows' folder picker, behind the
+  "+" on a sidebar section's title.
 - `src/termio/cmd_prompt.zig`: makes cmd.exe report its folder (OSC 7)
   through its PROMPT.
 - `src/apprt/win32/SearchField.zig`: the search box shared by the settings
@@ -142,7 +144,8 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   current; cmd.exe reports too, through a PROMPT prefix. The shell's type
   shows only in the icon. Groups fold per section and folder, tabs drag
   within their folder, a group's "+" opens a tab there, and the right edge
-  resizes the sidebar.
+  resizes the sidebar. The "+" on the Local or WSL title asks
+  for any folder with Windows' own picker and opens a tab of that kind there.
 - **The sidebar layout reopens what was open.** Tabs (profile and folder),
   the active tab, folded groups and the width are saved as they change.
   Closing a window keeps its tabs for next time; closing the last tab by

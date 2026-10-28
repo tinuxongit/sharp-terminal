@@ -1626,6 +1626,82 @@ pub const ITaskbarList3 = extern struct {
     }
 };
 
+// {DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7}
+pub const CLSID_FileOpenDialog: GUID = .{
+    .Data1 = 0xDC1C5A9C,
+    .Data2 = 0xE88A,
+    .Data3 = 0x4DDE,
+    .Data4 = .{ 0xA5, 0xA1, 0x60, 0xF8, 0x2A, 0x20, 0xAE, 0xF7 },
+};
+// {D57C7288-D4AD-4768-BE02-9D969532D960}
+pub const IID_IFileOpenDialog: GUID = .{
+    .Data1 = 0xD57C7288,
+    .Data2 = 0xD4AD,
+    .Data3 = 0x4768,
+    .Data4 = .{ 0xBE, 0x02, 0x9D, 0x96, 0x95, 0x32, 0xD9, 0x60 },
+};
+// {43826D1E-E718-42EE-BC55-A1E261C37BFE}
+pub const IID_IShellItem: GUID = .{
+    .Data1 = 0x43826D1E,
+    .Data2 = 0xE718,
+    .Data3 = 0x42EE,
+    .Data4 = .{ 0xBC, 0x55, 0xA1, 0xE2, 0x61, 0xC3, 0x7B, 0xFE },
+};
+
+pub const FOS_PICKFOLDERS: u32 = 0x20;
+pub const FOS_FORCEFILESYSTEM: u32 = 0x40;
+pub const SIGDN_FILESYSPATH: u32 = 0x80058000;
+
+/// Minimal IShellItem, declared through GetDisplayName. Methods we never
+/// call are opaque slots that keep the offsets right.
+pub const IShellItem = extern struct {
+    vtable: *const Vtbl,
+
+    pub const Vtbl = extern struct {
+        QueryInterface: *const anyopaque,
+        AddRef: *const anyopaque,
+        Release: *const fn (*IShellItem) callconv(.winapi) u32,
+        BindToHandler: *const anyopaque,
+        GetParent: *const anyopaque,
+        GetDisplayName: *const fn (*IShellItem, u32, *?[*:0]u16) callconv(.winapi) HRESULT,
+    };
+};
+
+/// Minimal IFileOpenDialog (IUnknown -> IModalWindow -> IFileDialog),
+/// declared through GetResult.
+pub const IFileOpenDialog = extern struct {
+    vtable: *const Vtbl,
+
+    pub const Vtbl = extern struct {
+        QueryInterface: *const anyopaque,
+        AddRef: *const anyopaque,
+        Release: *const fn (*IFileOpenDialog) callconv(.winapi) u32,
+        // IModalWindow
+        Show: *const fn (*IFileOpenDialog, ?HWND) callconv(.winapi) HRESULT,
+        // IFileDialog
+        SetFileTypes: *const anyopaque,
+        SetFileTypeIndex: *const anyopaque,
+        GetFileTypeIndex: *const anyopaque,
+        Advise: *const anyopaque,
+        Unadvise: *const anyopaque,
+        SetOptions: *const fn (*IFileOpenDialog, u32) callconv(.winapi) HRESULT,
+        GetOptions: *const fn (*IFileOpenDialog, *u32) callconv(.winapi) HRESULT,
+        SetDefaultFolder: *const anyopaque,
+        SetFolder: *const fn (*IFileOpenDialog, *IShellItem) callconv(.winapi) HRESULT,
+        GetFolder: *const anyopaque,
+        GetCurrentSelection: *const anyopaque,
+        SetFileName: *const anyopaque,
+        GetFileName: *const anyopaque,
+        SetTitle: *const fn (*IFileOpenDialog, [*:0]const u16) callconv(.winapi) HRESULT,
+        SetOkButtonLabel: *const anyopaque,
+        SetFileNameLabel: *const anyopaque,
+        GetResult: *const fn (*IFileOpenDialog, *?*IShellItem) callconv(.winapi) HRESULT,
+    };
+};
+
+pub extern "shell32" fn SHCreateItemFromParsingName(pszPath: [*:0]const u16, pbc: ?*anyopaque, riid: *const GUID, ppv: *?*anyopaque) callconv(.winapi) HRESULT;
+pub extern "ole32" fn CoTaskMemFree(pv: ?*anyopaque) callconv(.winapi) void;
+
 // -----------------------------------------------------------------------
 // Integrated title bar: the tab strip replaces the Windows caption, so the
 // window computes its own client area and hit-test regions.
