@@ -189,7 +189,7 @@ the scrollback.
 
 A frame is the renderer's work for it: updating and drawing, without the
 wait for the display inside SwapBuffers. `python dist/windows/frame_benchmark.py
-zig-outin\sharp.exe` runs the load on the second monitor without taking
+zig-out/bin/sharp.exe` runs the load on the second monitor without taking
 focus, using `SHARP_FRAME_LOG` (`src/apprt/win32/frame_log.zig`, fed by a
 small hook in the shared `src/renderer/Thread.zig` and `OpenGL.zig`).
 
