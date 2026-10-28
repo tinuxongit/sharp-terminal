@@ -10,6 +10,7 @@ const w32 = @import("win32.zig");
 const wide_string = @import("wide_string.zig");
 const log = std.log.scoped(.win32);
 const Surface = @import("Surface.zig");
+const command_palette = @import("command_palette.zig");
 
 /// Store the total match count from the search_total action and refresh
 /// the "selected/total" label in the search bar.
@@ -46,7 +47,7 @@ pub fn setSearchActive(self: *Surface, active: bool, needle: [:0]const u8) void 
     if (active) {
         // Close command palette if open (mutual exclusion)
         if (self.palette_active) {
-            self.setCommandPaletteActive(false);
+            command_palette.setCommandPaletteActive(self, false);
         }
         self.search_active = true;
         ensureSearchBar(self);

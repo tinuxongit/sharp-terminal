@@ -40,6 +40,7 @@ const OpenUrlRequest = struct {
 const build_config = @import("../../build_config.zig");
 const input = @import("../../input.zig");
 const find_bar = @import("find_bar.zig");
+const command_palette = @import("command_palette.zig");
 
 comptime {
     // Exports the exe's load configuration; nothing references it.
@@ -397,7 +398,7 @@ pub fn run(self: *App) !void {
                     if (find_bar.handleSearchKey(surface, vk)) continue;
                 }
                 if (surface.palette_active and surface.palette_edit == msg.hwnd) {
-                    if (surface.handlePaletteKey(vk)) continue;
+                    if (command_palette.handlePaletteKey(surface, vk)) continue;
                 }
             }
 
@@ -425,7 +426,7 @@ pub fn run(self: *App) !void {
                     // Palette/search edits are children of a surface HWND.
                     const surface = self.popupSurface(msg.hwnd.?) orelse break :blk null;
                     if (surface.palette_active and surface.palette_edit == msg.hwnd) {
-                        surface.setCommandPaletteActive(false);
+                        command_palette.setCommandPaletteActive(surface, false);
                         break :blk surface;
                     }
                     if (surface.search_active and surface.search_edit == msg.hwnd) {
@@ -1516,7 +1517,7 @@ pub fn performAction(
                 .app => {},
                 .surface => |core_surface| {
                     const active = core_surface.rt_surface.palette_active;
-                    core_surface.rt_surface.setCommandPaletteActive(!active);
+                    command_palette.setCommandPaletteActive(core_surface.rt_surface, !active);
                 },
             }
             return true;
@@ -2181,7 +2182,7 @@ fn surfaceWndProc(
 
         w32.WM_PAINT => {
             if (is_palette_popup) {
-                surface.paintPalette(hwnd);
+                command_palette.paintPalette(surface, hwnd);
                 return 0;
             }
             // Validate the paint region to stop Windows from
@@ -2309,13 +2310,13 @@ fn surfaceWndProc(
             if (is_palette_popup) {
                 const y: i32 = @intCast(@as(i16, @truncate((lparam >> 16) & 0xFFFF)));
                 const sc = surface.scale;
-                const list_top: i32 = @intFromFloat(@round(Surface.PALETTE_LIST_TOP * sc));
-                const item_height: i32 = @intFromFloat(@round(Surface.PALETTE_ITEM_HEIGHT * sc));
+                const list_top: i32 = @intFromFloat(@round(command_palette.PALETTE_LIST_TOP * sc));
+                const item_height: i32 = @intFromFloat(@round(command_palette.PALETTE_ITEM_HEIGHT * sc));
                 if (y >= list_top) {
                     const clicked = @divTrunc(y - list_top, item_height);
                     if (clicked >= 0 and clicked < surface.palette_count) {
                         surface.palette_selected = @intCast(clicked);
-                        surface.executePaletteSelection();
+                        command_palette.executePaletteSelection(surface);
                     }
                 }
                 return 0;
@@ -2403,8 +2404,8 @@ fn surfaceWndProc(
                 find_bar.handleSearchChange(surface);
                 return 0;
             }
-            if (control_id == Surface.PALETTE_EDIT_ID and notification == w32.EN_CHANGE) {
-                surface.handlePaletteChange();
+            if (control_id == command_palette.PALETTE_EDIT_ID and notification == w32.EN_CHANGE) {
+                command_palette.handlePaletteChange(surface);
                 return 0;
             }
             // Auto-dismiss popups when the Edit loses focus (click outside,
@@ -2413,8 +2414,8 @@ fn surfaceWndProc(
             // so any re-entrant EN_KILLFOCUS during ShowWindow(SW_HIDE) /
             // SetFocus falls through these guards as a no-op.
             if (notification == w32.EN_KILLFOCUS) {
-                if (control_id == Surface.PALETTE_EDIT_ID and surface.palette_active) {
-                    surface.setCommandPaletteActive(false);
+                if (control_id == command_palette.PALETTE_EDIT_ID and surface.palette_active) {
+                    command_palette.setCommandPaletteActive(surface, false);
                     return 0;
                 }
                 if (control_id == Surface.SEARCH_EDIT_ID and surface.search_active) {
@@ -2457,7 +2458,7 @@ fn surfaceWndProc(
             if (is_palette_popup) {
                 const activate = @as(u16, @intCast(wparam & 0xFFFF));
                 if (activate == 0) { // WA_INACTIVE
-                    surface.setCommandPaletteActive(false);
+                    command_palette.setCommandPaletteActive(surface, false);
                 }
                 return 0;
             }
