@@ -131,7 +131,20 @@ pub const PROC_THREAD_ATTRIBUTE_JOB_LIST = ProcThreadAttributeValue(
 // Job objects (see console_programs.zig)
 pub const PROCESS_TERMINATE: DWORD = 0x0001;
 pub const PROCESS_QUERY_LIMITED_INFORMATION: DWORD = 0x1000;
+pub const JobObjectBasicLimitInformation: c_int = 2;
 pub const JobObjectBasicProcessIdList: c_int = 3;
+pub const JOB_OBJECT_LIMIT_BREAKAWAY_OK: DWORD = 0x00000800;
+pub const JOBOBJECT_BASIC_LIMIT_INFORMATION = extern struct {
+    PerProcessUserTimeLimit: LARGE_INTEGER,
+    PerJobUserTimeLimit: LARGE_INTEGER,
+    LimitFlags: DWORD,
+    MinimumWorkingSetSize: SIZE_T,
+    MaximumWorkingSetSize: SIZE_T,
+    ActiveProcessLimit: DWORD,
+    Affinity: ULONG_PTR,
+    PriorityClass: DWORD,
+    SchedulingClass: DWORD,
+};
 pub fn JOBOBJECT_BASIC_PROCESS_ID_LIST(comptime capacity: usize) type {
     return extern struct {
         NumberOfAssignedProcesses: DWORD,
@@ -310,6 +323,12 @@ pub const exp = struct {
             lpJobAttributes: ?*SECURITY_ATTRIBUTES,
             lpName: ?LPCWSTR,
         ) callconv(.winapi) ?HANDLE;
+        pub extern "kernel32" fn SetInformationJobObject(
+            hJob: HANDLE,
+            JobObjectInformationClass: c_int,
+            lpJobObjectInformation: *anyopaque,
+            cbJobObjectInformationLength: DWORD,
+        ) callconv(.winapi) BOOL;
         pub extern "kernel32" fn QueryInformationJobObject(
             hJob: HANDLE,
             JobObjectInformationClass: c_int,

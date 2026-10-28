@@ -17,14 +17,23 @@ pub const max_programs = 256;
 /// A new job for one tab's shell, or null if Windows refused one (the tab
 /// then works as before, without ending its programs).
 pub fn createJob() ?windows.HANDLE {
-    return kernel32.CreateJobObjectW(null, null);
+    const job = kernel32.CreateJobObjectW(null, null) orelse return null;
+    // A program that asks to leave the job (CREATE_BREAKAWAY_FROM_JOB)
+    // wants to outlive its terminal; without this its launch would fail.
+    var limits: windows.JOBOBJECT_BASIC_LIMIT_INFORMATION = std.mem.zeroes(windows.JOBOBJECT_BASIC_LIMIT_INFORMATION);
+    limits.LimitFlags = windows.JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+    _ = kernel32.SetInformationJobObject(job, windows.JobObjectBasicLimitInformation, &limits, @sizeOf(@TypeOf(limits)));
+    return job;
 }
 
 /// The console programs in `job` that closing the tab would end: every
 /// process but the shell itself and those under a program with a window.
 pub fn list(job: windows.HANDLE, shell_pid: u32, out: *[max_programs]u32) []const u32 {
     var ids: windows.JOBOBJECT_BASIC_PROCESS_ID_LIST(max_programs) = undefined;
-    // With more processes than fit, Windows still fills what fits.
+    // On failure the list is left as it was: start it empty, or a failed
+    // query would hand back garbage PIDs to end.
+    ids.NumberOfProcessIdsInList = 0;
+    // With more processes than fit, Windows fails but still fills what fits.
     _ = kernel32.QueryInformationJobObject(job, windows.JobObjectBasicProcessIdList, &ids, @sizeOf(@TypeOf(ids)), null);
     const members = ids.ProcessIdList[0..@min(ids.NumberOfProcessIdsInList, max_programs)];
 

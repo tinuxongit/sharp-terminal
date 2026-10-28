@@ -1596,7 +1596,8 @@ fn restoreSession(self: *App, first: *Window) !bool {
 
     self.restoring_session = true;
     defer self.restoring_session = false;
-    for (saved.windows, 0..) |saved_window, i| {
+    // No more windows than saveSession can write back.
+    for (saved.windows[0..@min(saved.windows.len, 16)], 0..) |saved_window, i| {
         if (saved_window.tabs.len == 0) continue;
         const window = if (i == 0) first else window: {
             const w = try alloc.create(Window);
