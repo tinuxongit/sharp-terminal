@@ -42,6 +42,7 @@ const command_palette = @import("command_palette.zig");
 const ime = @import("ime.zig");
 const win32_input = @import("win32_input.zig");
 const clipboard = @import("clipboard.zig");
+const workspace = @import("workspace.zig");
 
 comptime {
     // Exports the exe's load configuration; nothing references it.
@@ -646,7 +647,7 @@ pub fn performAction(
             // A bell from a tab out of sight marks it in the tab sidebar.
             switch (target) {
                 .app => {},
-                .surface => |core_surface| core_surface.rt_surface.parent_window.noteBell(core_surface.rt_surface),
+                .surface => |core_surface| workspace.noteBell(core_surface.rt_surface.parent_window, core_surface.rt_surface),
             }
             // Audio bell.
             _ = w32.MessageBeep(0xFFFFFFFF);
@@ -1576,7 +1577,7 @@ pub fn saveSession(self: *App) void {
             continue;
         }
         if (window.tab_count == 0 or count == windows.len) continue;
-        windows[count] = window.sessionWindow(&tabs[count]);
+        windows[count] = workspace.sessionWindow(window, &tabs[count]);
         count += 1;
     }
     // Closing the last window quits: keep what it had open for next time.
@@ -1587,7 +1588,7 @@ pub fn saveSession(self: *App) void {
     session.save(self.core_app.alloc, .{
         .windows = windows[0..count],
         .width = first.sidebar_width,
-        .collapsed = first.collapsedGroups(&collapsed),
+        .collapsed = workspace.collapsedGroups(first, &collapsed),
         .servers = self.recent_servers.names(&recent),
     }) catch |err| log.warn("failed to save the session: {}", .{err});
 }
@@ -1626,8 +1627,8 @@ fn restoreSession(self: *App, first: *Window) !bool {
             };
             break :window w;
         };
-        window.restoreSidebar(saved.width, saved.collapsed);
-        for (saved_window.tabs) |tab| window.openSavedTab(tab);
+        workspace.restoreSidebar(window, saved.width, saved.collapsed);
+        for (saved_window.tabs) |tab| workspace.openSavedTab(window, tab);
         if (window.tab_count == 0) {
             _ = try window.addTab();
         } else {
