@@ -473,7 +473,10 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   paths (`.paths` in `profiles.zon`, Windows Terminal's
   `pathTranslationStyle`): WSL tabs get `/mnt/c/...` (and a distribution's
   own `\wsl.localhost` share its root), Git Bash `/c/...`, both in single
-  quotes, which expand nothing.
+  quotes, which expand nothing. PowerShell tabs get single quotes too,
+  since in double quotes a file named `$(calc).txt` would run once the
+  line is entered; cmd.exe gets double quotes. A path with a control
+  character is never pasted.
 - **Background styles are tiles Ghostty already knows how to draw.**
   Settings > Appearance > Background offers Default (the plain theme
   color) and Pixel cascade, a grid of squares in any color

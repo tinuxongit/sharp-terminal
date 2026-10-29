@@ -45,3 +45,4 @@ dist/windows/ghostty-windows-x64-*.zip
 dist/windows/_stage/
 dist/windows/_release/
 zig-out-arm64/
+zig-out-safe/

@@ -10,7 +10,7 @@ const global = @import("../../global.zig");
 pub const Source = enum { fixed, visual_studio, wsl };
 
 /// How a profile's shell writes a Windows path, for dropped files.
-pub const PathStyle = enum { windows, wsl, msys };
+pub const PathStyle = enum { windows, powershell, wsl, msys };
 
 pub const Template = struct {
     name: []const u8,

@@ -248,6 +248,13 @@ pub fn hdropPathsToUtf8(alloc: Allocator, hdrop: w32.HDROP, style: profiles.Path
 /// names may hold & | ( ) ; ^ < > and glob characters. False when the path
 /// can't be written safely and is left out.
 fn appendShellPath(alloc: Allocator, buf: *std.ArrayListUnmanaged(u8), path: []const u8, style: profiles.PathStyle) Allocator.Error!bool {
+    // A line break would submit the line in a shell without bracketed
+    // paste (cmd.exe). Win32 names can't hold control characters, but
+    // names on WSL or network volumes can.
+    for (path) |c| if (c < 0x20 or c == 0x7F) {
+        log.warn("refusing to paste a path containing a control character", .{});
+        return false;
+    };
     switch (style) {
         .windows => {
             // A double quote can't occur in a path created through the
@@ -255,10 +262,9 @@ fn appendShellPath(alloc: Allocator, buf: *std.ArrayListUnmanaged(u8), path: []c
             // paths can carry one. It would close the quotes and let the
             // rest be read as shell syntax, so such a path is refused.
             // Logged without the name: it can hold control characters.
-            // Residual, and not fixable without knowing the shell: $(...)
-            // and backticks still expand inside double quotes in
-            // PowerShell, as does %VAR% in cmd.exe; pasting never submits
-            // a line on its own.
+            // Residual: %VAR% still expands in cmd.exe, which has no
+            // quoting that stops it; pasting never submits a line on its
+            // own.
             if (std.mem.indexOfScalar(u8, path, '"') != null) {
                 log.warn("refusing to paste a path containing a double quote", .{});
                 return false;
@@ -266,6 +272,20 @@ fn appendShellPath(alloc: Allocator, buf: *std.ArrayListUnmanaged(u8), path: []c
             try buf.append(alloc, '"');
             try buf.appendSlice(alloc, path);
             try buf.append(alloc, '"');
+        },
+        // In double quotes PowerShell would expand $(...) and backticks.
+        // Single quotes expand nothing; a quote inside is doubled, and
+        // PowerShell takes the typographic ones as quotes too.
+        .powershell => {
+            try buf.append(alloc, '\'');
+            var it = std.unicode.Utf8View.initUnchecked(path).iterator();
+            while (it.nextCodepointSlice()) |cp| {
+                for ([_][]const u8{ "'", "\u{2018}", "\u{2019}", "\u{201A}", "\u{201B}" }) |quote| {
+                    if (std.mem.eql(u8, cp, quote)) try buf.appendSlice(alloc, cp);
+                }
+                try buf.appendSlice(alloc, cp);
+            }
+            try buf.append(alloc, '\'');
         },
         // POSIX shells: single quotes expand nothing, and a quote inside
         // is written '\''.

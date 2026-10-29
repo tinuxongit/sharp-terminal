@@ -9,7 +9,7 @@ const browser_tools = @import("browser_tools.zig");
 const log = std.log.scoped(.win32);
 
 /// Sharp's version, which Claude Code shows beside the server.
-const version = "0.1.0";
+const version = @import("build_options").sharp_version;
 /// Answered when the client asks for none.
 const default_protocol = "2025-06-18";
 

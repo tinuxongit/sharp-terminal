@@ -242,7 +242,9 @@ pub fn resizeSplit(self: *Window, rs: apprt.action.ResizeSplit) void {
         .left, .up => -1.0,
         .right, .down => 1.0,
     };
-    const delta: f16 = @floatCast(sign * @as(f32, @floatFromInt(rs.amount)) / dimension);
+    // In a window narrower than the step the ratio passes 1, which the
+    // tree asserts against.
+    const delta: f16 = @floatCast(std.math.clamp(sign * @as(f32, @floatFromInt(rs.amount)) / dimension, -1.0, 1.0));
 
     const new_tree = tree.resize(alloc, handle, layout, delta) catch return;
     var old_tree = self.tab_trees[tab];
@@ -287,12 +289,13 @@ pub fn toggleSplitZoom(self: *Window) void {
     self.layoutSplits();
 }
 
-/// Windows Terminal's pane actions on the focused split of the active tab
-/// (Ghostty's split_pane, which Sharp adds).
-pub fn arrange(self: *Window, action: apprt.action.SplitPane) void {
-    if (self.tab_count == 0) return;
-    const tab = self.active_tab;
-    const focused = self.tab_active_surface[tab];
+/// Windows Terminal's pane actions on the pane the action came from
+/// (Ghostty's split_pane, which Sharp adds). Not the active tab's focused
+/// pane: the action runs inside that pane's key handling, which must not
+/// see it freed (close_others would close it when the two differ).
+pub fn arrange(focused: *Surface, action: apprt.action.SplitPane) void {
+    const self = focused.parent_window;
+    const tab = self.findTabIndex(focused) orelse return;
     switch (action) {
         .swap_next => swap(self, tab, focused, .next),
         .swap_previous => swap(self, tab, focused, .previous),

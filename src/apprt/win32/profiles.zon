@@ -16,14 +16,15 @@
 //
 // .default marks the shell new tabs run when `command` is not set.
 // .paths is how the shell writes a path, for files dropped on it: .windows
-// (the default), .wsl (/mnt/c/...) or .msys (/c/..., Git Bash).
+// (the default, cmd.exe), .powershell, .wsl (/mnt/c/...) or .msys
+// (/c/..., Git Bash).
 .{
     // Distributions WSL uses internally, hidden as in Windows Terminal.
     .hidden_wsl_prefixes = .{"docker-desktop"},
     .profiles = .{
-        .{ .name = "Windows PowerShell", .command = "powershell.exe", .icon = "powershell.exe", .requires = "powershell.exe" },
+        .{ .name = "Windows PowerShell", .command = "powershell.exe", .icon = "powershell.exe", .requires = "powershell.exe", .paths = .powershell },
         .{ .name = "Command Prompt", .command = "cmd.exe", .icon = "cmd.exe", .default = true },
-        .{ .name = "PowerShell 7", .command = "pwsh.exe", .icon = "pwsh.exe", .requires = "pwsh.exe" },
+        .{ .name = "PowerShell 7", .command = "pwsh.exe", .icon = "pwsh.exe", .requires = "pwsh.exe", .paths = .powershell },
         .{
             .name = "Git Bash",
             .command = "\"C:\\Program Files\\Git\\bin\\bash.exe\" -i -l",
@@ -44,6 +45,7 @@
             .command = "powershell.exe -NoExit -Command \"&{Import-Module '{vs}\\Common7\\Tools\\Microsoft.VisualStudio.DevShell.dll'; Enter-VsDevShell -VsInstallPath '{vs}' -SkipAutomaticLocation}\"",
             .icon = "powershell.exe",
             .requires = "{vs}\\Common7\\Tools\\Microsoft.VisualStudio.DevShell.dll",
+            .paths = .powershell,
         },
         .{ .name = "{distro}", .source = .wsl, .command = "wsl.exe -d {distro}", .icon = "wsl.exe", .paths = .wsl },
     },
