@@ -1803,6 +1803,7 @@ pub const REG_SZ: u32 = 1;
 pub extern "advapi32" fn RegEnumKeyExW(hKey: HKEY, dwIndex: u32, lpName: [*]u16, lpcchName: *u32, lpReserved: ?*u32, lpClass: ?[*]u16, lpcchClass: ?*u32, lpftLastWriteTime: ?*anyopaque) callconv(.winapi) u32;
 pub extern "user32" fn PrivateExtractIconsW(szFileName: [*:0]const u16, nIconIndex: i32, cxIcon: i32, cyIcon: i32, phicon: *?HICON, piconid: ?*u32, nIcons: u32, flags: u32) callconv(.winapi) u32;
 pub extern "user32" fn DestroyIcon(hIcon: HICON) callconv(.winapi) i32;
+pub extern "user32" fn CreateIconFromResourceEx(presbits: [*]const u8, dwResSize: u32, fIcon: i32, dwVer: u32, cxDesired: c_int, cyDesired: c_int, Flags: u32) callconv(.winapi) ?HICON;
 pub const DI_NORMAL: u32 = 0x0003;
 pub extern "user32" fn DrawIconEx(hdc: HDC, xLeft: i32, yTop: i32, hIcon: HICON, cxWidth: i32, cyWidth: i32, istepIfAniCur: u32, hbrFlickerFreeDraw: ?HBRUSH, diFlags: u32) callconv(.winapi) i32;
 
@@ -1936,6 +1937,7 @@ pub const SYSTEMTIME = extern struct {
     wSecond: u16,
     wMilliseconds: u16,
 };
+pub extern "kernel32" fn GetSystemTimeAsFileTime(lpSystemTimeAsFileTime: *FILETIME) callconv(.winapi) void;
 pub extern "kernel32" fn FileTimeToSystemTime(lpFileTime: *const FILETIME, lpSystemTime: *SYSTEMTIME) callconv(.winapi) i32;
 pub extern "kernel32" fn SystemTimeToTzSpecificLocalTime(lpTimeZoneInformation: ?*const anyopaque, lpUniversalTime: *const SYSTEMTIME, lpLocalTime: *SYSTEMTIME) callconv(.winapi) i32;
 

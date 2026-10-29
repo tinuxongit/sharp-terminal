@@ -8,6 +8,7 @@ const BrowserPanel = @import("BrowserPanel.zig");
 const BrowserTab = @import("BrowserTab.zig");
 const browser_engine = @import("browser_engine.zig");
 const browser_messages = @import("browser_messages.zig");
+const browser_cookies = @import("browser_cookies.zig");
 
 const TabRef = browser_engine.TabRef;
 const find = browser_engine.find;
@@ -25,6 +26,9 @@ const DownloadStarting = webview2.Handler(webview2.iid_download_starting, TabRef
 const DownloadState = webview2.Handler(webview2.iid_download_state, TabRef, *webview2.Download, ?*anyopaque, onDownloadState);
 const NavigationStarting = webview2.Handler(webview2.iid_navigation_starting, TabRef, *webview2.WebView, ?*anyopaque, onNavigationStarting);
 const NavigationCompleted = webview2.Handler(webview2.iid_navigation_completed, TabRef, *webview2.WebView, ?*anyopaque, onNavigationCompleted);
+const ProcessFailed = webview2.Handler(webview2.iid_process_failed, TabRef, *webview2.WebView, *webview2.ProcessFailedArgs, onProcessFailed);
+const FaviconChanged = webview2.Handler(webview2.iid_favicon_changed, TabRef, *webview2.WebView15, ?*anyopaque, onFaviconChanged);
+const FaviconRead = webview2.Handler(webview2.iid_favicon_completed, TabRef, w32.HRESULT, ?*webview2.Stream, onFavicon);
 
 pub fn listen(ref: TabRef, controller: *webview2.Controller, webview: *webview2.WebView) void {
     var token: webview2.Token = undefined;
@@ -56,6 +60,10 @@ pub fn listen(ref: TabRef, controller: *webview2.Controller, webview: *webview2.
         _ = webview.vtable.add_NavigationCompleted(webview, h, &token);
         _ = h.release();
     }
+    if (ProcessFailed.create(ref)) |h| {
+        _ = webview.vtable.add_ProcessFailed(webview, h, &token);
+        _ = h.release();
+    }
     if (ScriptDialog.create(ref)) |h| {
         _ = webview.vtable.add_ScriptDialogOpening(webview, h, &token);
         _ = h.release();
@@ -64,6 +72,10 @@ pub fn listen(ref: TabRef, controller: *webview2.Controller, webview: *webview2.
         defer _ = v15.release();
         if (DownloadStarting.create(ref)) |h| {
             _ = v15.vtable.add_DownloadStarting(v15, h, &token);
+            _ = h.release();
+        }
+        if (FaviconChanged.create(ref)) |h| {
+            _ = v15.vtable.add_FaviconChanged(v15, h, &token);
             _ = h.release();
         }
     }
@@ -109,6 +121,48 @@ fn onNavigationCompleted(ref: TabRef, _: *webview2.WebView, _: ?*anyopaque) void
     const panel, const tab = find(ref) orelse return;
     tab.loading = false;
     panel.tabChanged(tab);
+    panel.pagesChanged();
+    browser_cookies.schedule(panel);
+}
+
+fn onProcessFailed(ref: TabRef, webview: *webview2.WebView, args: *webview2.ProcessFailedArgs) void {
+    const panel, const tab = find(ref) orelse return;
+    var kind: c_int = 0;
+    if (args.vtable.get_ProcessFailedKind(args, &kind) < 0) return;
+    switch (kind) {
+        webview2.ProcessFailedArgs.browser_exited => _ = w32.PostMessageW(panel.hwnd, BrowserPanel.message_restart, 0, 0),
+        webview2.ProcessFailedArgs.render_exited, webview2.ProcessFailedArgs.render_unresponsive => {
+            tab.page_log.add(w32.GetTickCount64(), .@"error", "The page stopped working and was reloaded.");
+            tab.answerDialog(false, "");
+            _ = webview.vtable.Reload(webview);
+        },
+        else => {},
+    }
+}
+
+fn onFaviconChanged(ref: TabRef, webview: *webview2.WebView15, _: ?*anyopaque) void {
+    const handler = FaviconRead.create(ref) orelse return;
+    defer _ = handler.release();
+    _ = webview.vtable.GetFavicon(webview, webview2.WebView15.favicon_png, handler);
+}
+
+fn onFavicon(ref: TabRef, result: w32.HRESULT, stream: ?*webview2.Stream) void {
+    const panel, const tab = find(ref) orelse return;
+    const s = stream orelse return tab.setFavicon(null);
+    if (result < 0) return;
+    _ = s.vtable.Seek(s, 0, 0, null);
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(alloc);
+    var chunk: [8192]u8 = undefined;
+    while (bytes.items.len < 256 * 1024) {
+        var got: u32 = 0;
+        const read = s.vtable.Read(s, &chunk, chunk.len, &got);
+        if (read < 0 or got == 0) break;
+        bytes.appendSlice(alloc, chunk[0..got]) catch return;
+        if (read != webview2.S_OK) break;
+    }
+    tab.setFavicon(if (bytes.items.len > 0) w32.CreateIconFromResourceEx(bytes.items.ptr, @intCast(bytes.items.len), 1, 0x00030000, 32, 32, 0) else null);
+    panel.invalidateToolbar();
 }
 
 fn onSourceChanged(ref: TabRef, _: *webview2.WebView, _: ?*anyopaque) void {

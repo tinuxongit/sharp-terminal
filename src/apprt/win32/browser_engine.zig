@@ -25,7 +25,7 @@ pub fn find(ref: TabRef) ?struct { *BrowserPanel, *BrowserTab } {
     return .{ panel, panel.tabById(ref.tab) orelse return null };
 }
 
-fn refOf(panel: *const BrowserPanel, tab: *const BrowserTab) TabRef {
+pub fn refOf(panel: *const BrowserPanel, tab: *const BrowserTab) TabRef {
     return .{ .hwnd = @intFromPtr(panel.hwnd), .tab = tab.id };
 }
 
@@ -34,8 +34,43 @@ const ControllerDone = webview2.Handler(webview2.iid_controller_completed, TabRe
 const IdentityRead = webview2.Handler(webview2.iid_cdp_completed, TabRef, w32.HRESULT, ?[*:0]const u16, onIdentityRead);
 const IdentitySet = webview2.Handler(webview2.iid_cdp_completed, TabRef, w32.HRESULT, ?[*:0]const u16, onIdentitySet);
 pub const Ignore = webview2.Handler(webview2.iid_cdp_completed, usize, w32.HRESULT, ?[*:0]const u16, ignore);
+const FindStarted = webview2.Handler(webview2.iid_find_started, usize, w32.HRESULT, usize, ignoreFind);
 
 fn ignore(_: usize, _: w32.HRESULT, _: ?[*:0]const u16) void {}
+
+fn ignoreFind(_: usize, _: w32.HRESULT, _: usize) void {}
+
+pub fn restart(panel: *BrowserPanel) void {
+    const env = panel.environment orelse return;
+    panel.environment = null;
+    env.release();
+    for (panel.tabs()) |tab| tab.dropPage();
+    panel.refresh();
+    start(panel);
+}
+
+pub fn findInPage(panel: *BrowserPanel, tab: *BrowserTab) void {
+    const env = panel.environment orelse return;
+    const webview = tab.webview orelse return;
+    const env15 = env.as15() orelse return;
+    defer _ = env15.release();
+    var made: ?*webview2.FindOptions = null;
+    if (env15.vtable.CreateFindOptions(env15, &made) < 0) return;
+    const options = made orelse return;
+    defer _ = options.release();
+    _ = options.vtable.put_FindTerm(options, std.unicode.utf8ToUtf16LeStringLiteral(""));
+    _ = options.vtable.put_SuppressDefaultFindDialog(options, 0);
+    _ = options.vtable.put_ShouldHighlightAllMatches(options, 1);
+    const v28 = webview.as28() orelse return;
+    defer _ = v28.release();
+    var found: ?*webview2.Find = null;
+    if (v28.vtable.get_Find(v28, &found) < 0) return;
+    const finder = found orelse return;
+    defer _ = finder.release();
+    const handler = FindStarted.create(0) orelse return;
+    defer _ = handler.release();
+    _ = finder.vtable.Start(finder, options, handler);
+}
 
 /// Call a DevTools method on `tab` without waiting for its answer. Calls
 /// on one page run in the order made.

@@ -27,6 +27,7 @@ color_scheme: ColorScheme = .none,
 motion: Motion = .none,
 pointer: ?[2]f64 = null,
 drag_data: ?[]u8 = null,
+favicon: ?w32.HICON = null,
 controller: ?*webview2.Controller = null,
 webview: ?*webview2.WebView = null,
 /// The page has its identity and size and has started loading; until
@@ -248,16 +249,32 @@ pub fn place(self: *const BrowserTab, bounds: w32.RECT, scale: f64, handler: *an
     _ = self.devtools("Emulation.setDeviceMetricsOverride", params, handler);
 }
 
-/// Let go of the page. A popup still waiting for its page is turned down,
-/// so WebView2 doesn't open it in a window of its own.
 pub fn setDragData(self: *BrowserTab, json: ?[]const u8) void {
     if (self.drag_data) |old| std.heap.smp_allocator.free(old);
     self.drag_data = if (json) |j| std.heap.smp_allocator.dupe(u8, j) catch null else null;
 }
 
-pub fn deinit(self: *BrowserTab) void {
+pub fn setFavicon(self: *BrowserTab, icon: ?w32.HICON) void {
+    if (self.favicon) |old| _ = w32.DestroyIcon(old);
+    self.favicon = icon;
+}
+
+pub fn dropPage(self: *BrowserTab) void {
+    var buf: [2048]u8 = undefined;
+    const url = std.heap.smp_allocator.dupe(u8, self.source(&buf) orelse "") catch return;
+    self.releasePage();
+    self.first = .{ .url = url };
+    self.ready = false;
+    self.loading = false;
+    self.frames = .{};
+}
+
+/// Let go of the page. A popup still waiting for its page is turned down,
+/// so WebView2 doesn't open it in a window of its own.
+fn releasePage(self: *BrowserTab) void {
     self.answerDialog(false, "");
     self.setDragData(null);
+    self.setFavicon(null);
     switch (self.first) {
         .url => |url| std.heap.smp_allocator.free(url),
         .popup => |p| {
@@ -273,4 +290,8 @@ pub fn deinit(self: *BrowserTab) void {
     if (self.controller) |c| c.release();
     self.webview = null;
     self.controller = null;
+}
+
+pub fn deinit(self: *BrowserTab) void {
+    self.releasePage();
 }

@@ -10,6 +10,9 @@ const browser_settings = @import("browser_settings.zig");
 const browser_chats = @import("browser_chats.zig");
 
 const log = std.log.scoped(.win32);
+const alloc = std.heap.smp_allocator;
+
+pub const PendingPage = struct { owner: browser_chats.Owner, url: []u8 };
 
 /// Settings > AI > Tools > Browser; the quick terminal has no room for it.
 pub fn enabled(self: *const Window) bool {
@@ -57,7 +60,54 @@ pub fn panelOf(self: *Window) ?*BrowserPanel {
         return null;
     };
     self.browser.?.expanded = self.browser_expanded;
+    openPending(self, self.browser.?);
     return self.browser;
+}
+
+pub fn rememberPages(self: *Window, owner: browser_chats.Owner, urls: []const []const u8) void {
+    if (!enabled(self)) return;
+    for (urls) |url| {
+        if (!std.ascii.startsWithIgnoreCase(url, "https://") and !std.ascii.startsWithIgnoreCase(url, "http://")) continue;
+        const copy = alloc.dupe(u8, url) catch return;
+        self.browser_pending.append(alloc, .{ .owner = owner, .url = copy }) catch {
+            alloc.free(copy);
+            return;
+        };
+    }
+    if (self.browser) |panel| openPending(self, panel);
+}
+
+fn openPending(self: *Window, panel: *BrowserPanel) void {
+    for (self.browser_pending.items) |page| {
+        _ = panel.openTab(page.owner, page.url);
+        alloc.free(page.url);
+    }
+    self.browser_pending.clearRetainingCapacity();
+}
+
+fn forgetPending(self: *Window) void {
+    for (self.browser_pending.items) |page| alloc.free(page.url);
+    self.browser_pending.deinit(alloc);
+    self.browser_pending = .empty;
+}
+
+pub fn pagesOf(self: *Window, owner: browser_chats.Owner, arena: std.mem.Allocator) []const []const u8 {
+    var pages: std.ArrayList([]const u8) = .empty;
+    for (self.browser_pending.items) |page| {
+        if (page.owner == owner) pages.append(arena, page.url) catch return pages.items;
+    }
+    const panel = self.browser orelse return pages.items;
+    var own: BrowserPanel.OwnTabs = undefined;
+    const active = panel.activeOf(owner);
+    const tabs = panel.ownTabs(owner, &own);
+    for (0..2) |pass| for (tabs) |tab| {
+        if ((tab == active) != (pass == 1)) continue;
+        var buf: [2048]u8 = undefined;
+        const url = tab.source(&buf) orelse continue;
+        if (!std.ascii.startsWithIgnoreCase(url, "https://") and !std.ascii.startsWithIgnoreCase(url, "http://")) continue;
+        pages.append(arena, arena.dupe(u8, url) catch continue) catch return pages.items;
+    };
+    return pages.items;
 }
 
 pub fn open(self: *Window) bool {
@@ -120,6 +170,7 @@ pub fn place(self: *Window) void {
 
 /// Free the panel and its WebView2, as when the setting is switched off.
 pub fn close(self: *Window) void {
+    forgetPending(self);
     const panel = self.browser orelse return;
     self.browser = null;
     self.browser_shown = false;

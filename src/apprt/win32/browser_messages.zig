@@ -11,6 +11,8 @@ const toolbar = @import("browser_toolbar.zig");
 const menu_theme = @import("menu_theme.zig");
 const wide_string = @import("wide_string.zig");
 const browser_settings = @import("browser_settings.zig");
+const browser_engine = @import("browser_engine.zig");
+const browser_cookies = @import("browser_cookies.zig");
 
 const Target = toolbar.Target;
 
@@ -112,7 +114,7 @@ fn editDialogField(self: *BrowserPanel) void {
 pub fn shortcut(self: *BrowserPanel, vk: u16) bool {
     if (w32.GetKeyState(@as(i32, w32.VK_CONTROL)) >= 0) return false;
     switch (vk) {
-        'T', 'W', 'L', w32.VK_TAB => {},
+        'T', 'W', 'L', 'F', w32.VK_TAB => {},
         else => return false,
     }
     const shift: usize = @intFromBool(w32.GetKeyState(@as(i32, w32.VK_SHIFT)) < 0);
@@ -125,6 +127,7 @@ fn runShortcut(self: *BrowserPanel, vk: u16, shift: bool) void {
         'T' => _ = self.openTab(self.owner, self.engine.home),
         'W' => if (self.activeTab()) |tab| self.closeTab(tab),
         'L' => editAddress(self),
+        'F' => if (self.activeTab()) |tab| browser_engine.findInPage(self, tab),
         w32.VK_TAB => {
             var own: BrowserPanel.OwnTabs = undefined;
             const shown = self.shownTabs(&own);
@@ -175,6 +178,10 @@ pub fn wndProc(hwnd: w32.HWND, msg: u32, wparam: usize, lparam: isize) callconv(
         w32.WM_ERASEBKGND => return 1,
         w32.WM_SIZE => {
             for (self.tabs()) |tab| self.placeTab(tab);
+            return 0;
+        },
+        BrowserPanel.message_restart => {
+            browser_engine.restart(self);
             return 0;
         },
         BrowserPanel.message_shortcut => {
@@ -293,6 +300,10 @@ pub fn wndProc(hwnd: w32.HWND, msg: u32, wparam: usize, lparam: isize) callconv(
             return 0;
         },
         w32.WM_TIMER => {
+            if (wparam == browser_cookies.timer_id) {
+                browser_cookies.keep(self);
+                return 0;
+            }
             if (wparam == SearchField.caret_timer) {
                 self.address.blink();
                 self.dialog_field.blink();

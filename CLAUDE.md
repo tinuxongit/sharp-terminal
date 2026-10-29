@@ -115,6 +115,8 @@ commands and conventions; this file covers what is specific to Sharp.
   tab's page and its preparation (Chrome identity, fixed size);
   `browser_events.zig` turns page events (titles, dialogs, downloads,
   frames, failed requests) into tab state.
+- `src/apprt/win32/browser_cookies.zig`: keeps sign-ins across restarts
+  by giving the profile's session cookies an expiry.
 - `src/apprt/win32/browser_dialog_bar.zig`: the bar a page's alert,
   confirm, prompt or leave-page dialog shows in, above the page.
 - `src/apprt/win32/browser_toolbar.zig`: the panel's toolbar (tabs, back,
@@ -491,6 +493,19 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   WebView2's own flyout and folder, and are logged with where they went.
   Failed and 4xx/5xx requests are logged from the Network domain. Saving
   passwords and form entries is on, as in Edge.
+- **The panel behaves like a whole browser.** Sign-ins survive a restart:
+  WebView2 drops session cookies when its process ends, so 5 seconds
+  after pages finish loading every session cookie is set again with a
+  400-day expiry (Chrome's longest), as Citropy does; host-only cookies
+  are set by URL so they stay host-only. Tabs show their site's icon
+  (`GetFavicon`'s PNG through `CreateIconFromResourceEx`). A page whose
+  renderer crashes or hangs reloads; if the whole browser process ends,
+  every tab gets a new page on the address it had. Ctrl+F opens Edge's
+  own find bar through the Find API (`ICoreWebView2_28`), which older
+  WebView2 runtimes lack. Each terminal tab's pages are saved with it in
+  `sharp-session` (`page` lines, the active one last) and reopen when the
+  panel is first used, so a restored session still loads no browser
+  until then. Not for SSH tabs, which reopen through `openServer`.
 - **Every page is 1920 × 1080, scaled to fit, as in Citropy.** Claude
   always sees the same desktop layout and coordinates however wide the
   panel is. `Emulation.setDeviceMetricsOverride` with its `scale` fits the

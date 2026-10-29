@@ -10,10 +10,12 @@
 //!     tab = Windows PowerShell|C:\Users\me\project
 //!     tab = Command Prompt|C:\Users\me|me@example.com
 //!     tab = Windows PowerShell|C:\Users\me\app||0bcf5988-ee82-4024-bf5f-338191b1ba4b
+//!     page = https://example.com/
 //!
 //! `window = N` starts a window whose active tab is the Nth (from 0);
 //! `|` separates a tab's profile, folder, server and the Claude Code
 //! conversation it was running, since no Windows path may contain it.
+//! `page` lines are the browser pages of the tab above, the active last.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const config_file = @import("config_file.zig");
@@ -29,6 +31,7 @@ pub const Tab = struct {
     server: []const u8 = "",
     /// The Claude Code session id it was running, or empty.
     claude: []const u8 = "",
+    pages: []const []const u8 = &.{},
 };
 
 pub const Window = struct {
@@ -78,6 +81,7 @@ pub fn load(alloc: Allocator, default_width: f32) !?Loaded {
     var tabs: std.ArrayList(Tab) = .empty;
     var collapsed: std.ArrayList([]const u8) = .empty;
     var servers: std.ArrayList([]const u8) = .empty;
+    var pages: std.ArrayList([]const u8) = .empty;
     var active: usize = 0;
     var in_window = false;
 
@@ -96,11 +100,15 @@ pub fn load(alloc: Allocator, default_width: f32) !?Loaded {
             try collapsed.append(a, try a.dupe(u8, value));
         } else if (std.mem.eql(u8, key, "server")) {
             try servers.append(a, try a.dupe(u8, value));
+        } else if (std.mem.eql(u8, key, "page")) {
+            if (tabs.items.len > 0) try pages.append(a, try a.dupe(u8, value));
         } else if (std.mem.eql(u8, key, "window")) {
+            try keepPages(a, &tabs, &pages);
             if (in_window) try windows.append(a, .{ .tabs = try tabs.toOwnedSlice(a), .active = active });
             active = std.fmt.parseInt(usize, value, 10) catch 0;
             in_window = true;
         } else if (std.mem.eql(u8, key, "tab") and in_window) {
+            try keepPages(a, &tabs, &pages);
             var fields = std.mem.splitScalar(u8, value, '|');
             const profile = fields.first();
             const folder = fields.next() orelse continue;
@@ -109,12 +117,18 @@ pub fn load(alloc: Allocator, default_width: f32) !?Loaded {
             try tabs.append(a, .{ .profile = try a.dupe(u8, profile), .folder = try a.dupe(u8, folder), .server = try a.dupe(u8, server), .claude = try a.dupe(u8, claude) });
         }
     }
+    try keepPages(a, &tabs, &pages);
     if (in_window) try windows.append(a, .{ .tabs = try tabs.toOwnedSlice(a), .active = active });
 
     loaded.session.windows = try windows.toOwnedSlice(a);
     loaded.session.collapsed = try collapsed.toOwnedSlice(a);
     loaded.session.servers = try servers.toOwnedSlice(a);
     return loaded;
+}
+
+fn keepPages(a: Allocator, tabs: *std.ArrayList(Tab), pages: *std.ArrayList([]const u8)) !void {
+    if (pages.items.len == 0 or tabs.items.len == 0) return;
+    tabs.items[tabs.items.len - 1].pages = try pages.toOwnedSlice(a);
 }
 
 pub fn save(alloc: Allocator, session: Session) !void {
@@ -131,6 +145,7 @@ pub fn save(alloc: Allocator, session: Session) !void {
             if (tab.server.len > 0 or tab.claude.len > 0) try out.print(alloc, "|{s}", .{tab.server});
             if (tab.claude.len > 0) try out.print(alloc, "|{s}", .{tab.claude});
             try out.append(alloc, '\n');
+            for (tab.pages) |page| try out.print(alloc, "page = {s}\n", .{page});
         }
     }
     const file = try path(alloc);

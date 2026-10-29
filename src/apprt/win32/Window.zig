@@ -87,6 +87,7 @@ settings_panel: ?*SettingsPanel = null,
 browser: ?*BrowserPanel = null,
 browser_shown: bool = false,
 browser_expanded: bool = false,
+browser_pending: std.ArrayList(browser_dock.PendingPage) = .empty,
 /// The panel's width in pixels at 96 DPI once its edge is dragged.
 browser_width: ?f32 = null,
 
@@ -860,7 +861,7 @@ fn closeTabByIndex(self: *Window, idx: usize) void {
     if (idx >= self.tab_count) return;
     // Cancel any in-progress rename (the edit control may belong to this tab).
     tab_rename.cancelTabRename(self);
-    closed_tabs.remember(workspace.sessionTab(self.tab_active_surface[idx]));
+    closed_tabs.remember(workspace.sessionTab(self.tab_active_surface[idx], null));
     var closed = self.takeTab(idx);
     closed.tree.deinit(); // This unrefs all surfaces → Surface.unref frees when ref_count=0
     // Before `closing` is set: closing the last tab by hand empties the

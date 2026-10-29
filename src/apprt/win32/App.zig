@@ -780,6 +780,8 @@ pub fn saveSession(self: *App) void {
     if (!self.keepsSession() or self.restoring_session or elevation.active()) return;
     var windows: [16]session.Window = undefined;
     var tabs: [16][64]session.Tab = undefined;
+    var pages: std.heap.ArenaAllocator = .init(self.core_app.alloc);
+    defer pages.deinit();
     var count: usize = 0;
     var any_closing = false;
     for (self.windows.items) |window| {
@@ -788,7 +790,7 @@ pub fn saveSession(self: *App) void {
             continue;
         }
         if (window.tab_count == 0 or count == windows.len) continue;
-        windows[count] = workspace.sessionWindow(window, &tabs[count]);
+        windows[count] = workspace.sessionWindow(window, &tabs[count], pages.allocator());
         count += 1;
     }
     // Closing the last window quits: keep what it had open for next time.

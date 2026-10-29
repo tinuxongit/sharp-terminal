@@ -161,6 +161,10 @@ pub fn windowWndProc(
             browser_dock.emptied(window);
             return 0;
         },
+        BrowserPanel.message_pages => {
+            window.app.saveSession();
+            return 0;
+        },
         BrowserPanel.message_expand => {
             browser_dock.setExpanded(window, wparam != 0);
             return 0;

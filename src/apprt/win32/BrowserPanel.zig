@@ -38,6 +38,8 @@ pub const message_empty: u32 = w32.WM_APP + 21;
 /// own event is over (it may close that page).
 pub const message_shortcut: u32 = w32.WM_APP + 22;
 pub const message_expand: u32 = w32.WM_APP + 23;
+pub const message_pages: u32 = w32.WM_APP + 24;
+pub const message_restart: u32 = w32.WM_APP + 25;
 
 const class_name = std.unicode.utf8ToUtf16LeStringLiteral(brand.name ++ "Browser");
 var class_atom: u16 = 0;
@@ -244,6 +246,7 @@ pub fn closeTab(self: *BrowserPanel, tab: *BrowserTab) void {
     if (owner == self.owner and self.activeTab() == null) {
         if (w32.GetParent(self.hwnd)) |parent| _ = w32.PostMessageW(parent, message_empty, 0, 0);
     }
+    self.pagesChanged();
     self.refresh();
     if (owner == self.owner) self.frontChanged();
 }
@@ -320,6 +323,10 @@ pub fn answerDialog(self: *BrowserPanel, tab: *BrowserTab, accept: bool, text: [
     if (self.dialog_field.focused) self.dialog_field.focus(self.hwnd, false);
     self.placeTab(tab);
     _ = w32.InvalidateRect(self.hwnd, null, 0);
+}
+
+pub fn pagesChanged(self: *BrowserPanel) void {
+    if (w32.GetParent(self.hwnd)) |parent| _ = w32.PostMessageW(parent, message_pages, 0, 0);
 }
 
 /// A tab finished preparing its page and may show.
@@ -448,19 +455,21 @@ pub fn toolbarLayout(self: *const BrowserPanel) toolbar.Layout {
     return .{ .scale = self.scale, .width = client.right, .tab_count = @min(count, data.max_tabs) };
 }
 
-fn toolbarView(self: *BrowserPanel, titles: *[data.max_tabs][]const u8) toolbar.View {
+fn toolbarView(self: *BrowserPanel, titles: *[data.max_tabs][]const u8, icons: *[data.max_tabs]?w32.HICON) toolbar.View {
     var own: OwnTabs = undefined;
     const shown = self.shownTabs(&own);
     const active = self.activeTab();
     var active_index: usize = shown.len;
     for (shown, 0..) |tab, i| {
         titles[i] = if (tab.title_len > 0) tab.title() else data.untitled;
+        icons[i] = tab.favicon;
         if (tab == active) active_index = i;
     }
     return .{
         .palette = self.palette,
         .fonts = self.fonts,
         .titles = titles[0..shown.len],
+        .icons = icons[0..shown.len],
         .active = active_index,
         .address = &self.address,
         .placeholder = data.address_placeholder,
@@ -478,7 +487,8 @@ fn toolbarView(self: *BrowserPanel, titles: *[data.max_tabs][]const u8) toolbar.
 
 pub fn enabled(self: *BrowserPanel, target: Target) bool {
     var titles: [data.max_tabs][]const u8 = undefined;
-    return self.toolbarView(&titles).enabled(target);
+    var icons: [data.max_tabs]?w32.HICON = undefined;
+    return self.toolbarView(&titles, &icons).enabled(target);
 }
 
 pub fn hit(self: *BrowserPanel, x: i32, y: i32) Target {
@@ -531,7 +541,8 @@ pub fn paint(self: *BrowserPanel) void {
     }
     const c: canvas_mod.Canvas = .{ .hdc = mem_dc, .pixels = @ptrCast(@alignCast(bits orelse return)), .width = width, .height = height };
     var titles: [data.max_tabs][]const u8 = undefined;
-    toolbar.paint(c, bar, self.toolbarView(&titles));
+    var icons: [data.max_tabs]?w32.HICON = undefined;
+    toolbar.paint(c, bar, self.toolbarView(&titles, &icons));
     if (dialog) |layout| {
         dialog_bar.paint(c, layout, .{
             .palette = self.palette,

@@ -3,6 +3,7 @@
 //! opening tabs in folders or on servers from it, and the polling that
 //! files SSH sessions under Servers. tab_sidebar.zig lays it out and paints.
 const std = @import("std");
+const browser_dock = @import("browser_dock.zig");
 const elevation = @import("elevation.zig");
 const Surface = @import("Surface.zig");
 const w32 = @import("win32.zig");
@@ -347,15 +348,15 @@ pub fn restoreSidebar(self: *Window, width: f32, collapsed: []const []const u8) 
 }
 
 /// This window's tabs as the session saves them.
-pub fn sessionWindow(self: *Window, buf: *[64]session.Tab) session.Window {
+pub fn sessionWindow(self: *Window, buf: *[64]session.Tab, arena: std.mem.Allocator) session.Window {
     const n = @min(self.tab_count, buf.len);
-    for (0..n) |i| buf[i] = sessionTab(self.tab_active_surface[i]);
+    for (0..n) |i| buf[i] = sessionTab(self.tab_active_surface[i], arena);
     return .{ .tabs = buf[0..n], .active = self.active_tab };
 }
 
 /// What reopens a tab: its shell, folder, server and conversation. The
 /// text belongs to `surface`.
-pub fn sessionTab(surface: *const Surface) session.Tab {
+pub fn sessionTab(surface: *const Surface, arena: ?std.mem.Allocator) session.Tab {
     const claude: ?*const claude_session.Session = if (surface.claude) |*c| c else null;
     return .{
         .profile = surface.profileName(),
@@ -363,6 +364,7 @@ pub fn sessionTab(surface: *const Surface) session.Tab {
         .folder = if (claude != null and claude.?.folder().len > 0) claude.?.folder() else surface.folderPath(),
         .server = surface.sshHost(),
         .claude = if (claude) |c| &c.id else "",
+        .pages = if (arena) |a| browser_dock.pagesOf(surface.parent_window, surface.pane_id, a) else &.{},
     };
 }
 
@@ -377,6 +379,7 @@ pub fn openSavedTab(self: *Window, tab: session.Tab) void {
         if (std.mem.eql(u8, list.name(i), tab.profile)) break i;
     } else list.selected(self.configuredCommand()) orelse return;
     const surface = self.openProfileIn(&list, index, folder, false) orelse return;
+    browser_dock.rememberPages(self, surface.pane_id, tab.pages);
     // Claude Code was running a conversation here: type its resume into
     // the new shell, which reads it once it starts. Not in WSL, whose
     // claude would be another install.

@@ -164,6 +164,7 @@ pub const View = struct {
     palette: tab_strip.Palette,
     fonts: tab_strip.Fonts,
     titles: []const []const u8,
+    icons: []const ?w32.HICON,
     active: usize,
     address: *const SearchField,
     placeholder: []const u8,
@@ -207,7 +208,14 @@ pub fn paint(c: canvas_mod.Canvas, layout: Layout, view: View) void {
         if (active or hovered) c.fillRounded(rect, layout.px(6), if (active) pal.active_tab else pal.hover);
         const shows_close = active or hovered;
         const text_right = if (shows_close) layout.tabCloseRect(i).left - layout.px(2) else rect.right - layout.px(8);
-        c.text(.{ .left = rect.left + layout.px(10), .top = rect.top, .right = text_right, .bottom = rect.bottom }, title, view.fonts.title, if (active) pal.text else pal.text_dim, .left);
+        var text_left = rect.left + layout.px(10);
+        if (view.icons[i]) |icon| {
+            const size = layout.px(16);
+            c.sync();
+            _ = w32.DrawIconEx(c.hdc, text_left, rect.top + @divTrunc(rect.bottom - rect.top - size, 2), icon, size, size, 0, null, w32.DI_NORMAL);
+            text_left += size + layout.px(6);
+        }
+        c.text(.{ .left = text_left, .top = rect.top, .right = text_right, .bottom = rect.bottom }, title, view.fonts.title, if (active) pal.text else pal.text_dim, .left);
         if (shows_close) {
             const close = layout.tabCloseRect(i);
             c.sync();
