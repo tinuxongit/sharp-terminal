@@ -1776,8 +1776,10 @@ pub const MF_POPUP: u32 = 0x00000010;
 pub const MF_CHECKED: u32 = 0x00000008;
 pub const TPM_RIGHTALIGN: u32 = 0x0008;
 pub const INVALID_FILE_ATTRIBUTES: u32 = 0xFFFFFFFF;
+pub const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
 pub extern "kernel32" fn SearchPathW(lpPath: ?[*:0]const u16, lpFileName: [*:0]const u16, lpExtension: ?[*:0]const u16, nBufferLength: u32, lpBuffer: ?[*]u16, lpFilePart: ?*?[*]u16) callconv(.winapi) u32;
 pub extern "kernel32" fn GetFileAttributesW(lpFileName: [*:0]const u16) callconv(.winapi) u32;
+pub extern "kernel32" fn GetFullPathNameW(lpFileName: [*:0]const u16, nBufferLength: u32, lpBuffer: [*]u16, lpFilePart: ?*?[*:0]u16) callconv(.winapi) u32;
 pub extern "kernel32" fn GetCommandLineW() callconv(.winapi) [*:0]const u16;
 pub extern "kernel32" fn LoadLibraryExW(lpLibFileName: [*:0]const u16, hFile: ?HANDLE, dwFlags: u32) callconv(.winapi) ?HINSTANCE;
 /// Search only System32, never the program's folder or the current one.

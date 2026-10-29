@@ -110,9 +110,13 @@ commands and conventions; this file covers what is specific to Sharp.
   comes from (the processes above `sharp-mcp.exe`) and which terminal
   pane, and so which tabs, it belongs to.
 - `src/apprt/win32/BrowserTab.zig`: one tab's page, title, history and
-  log. `browser_engine.zig` is the WebView2 side: the browser process,
-  each tab's page and its preparation (Chrome identity, fixed size), and
-  page events.
+  log, and what the page is waiting on (a dialog, its frames).
+  `browser_engine.zig` is the WebView2 side: the browser process, each
+  tab's page and its preparation (Chrome identity, fixed size);
+  `browser_events.zig` turns page events (titles, dialogs, downloads,
+  frames, failed requests) into tab state.
+- `src/apprt/win32/browser_dialog_bar.zig`: the bar a page's alert,
+  confirm, prompt or leave-page dialog shows in, above the page.
 - `src/apprt/win32/browser_toolbar.zig`: the panel's toolbar (tabs, back,
   forward, reload, address box), its layout and painting.
 - `src/apprt/win32/browser_log.zig`: what a page logged (console,
@@ -125,6 +129,9 @@ commands and conventions; this file covers what is specific to Sharp.
   descriptions, input schemas). `browser_tools.zig` runs them on
   `browser_page.zig`, a tab seen from the MCP server's thread;
   `browser_snapshot.zig` turns the accessibility tree into Claude's text,
+  `browser_frames.zig` adds each iframe's tree to it,
+  `browser_locator.zig` finds the element a tool names (ref, selector, or
+  role and name) and its box,
   `browser_remote.zig` carries their calls to the UI thread, and
   `json_read.zig` reads the JSON that comes back.
 - `src/apprt/win32/mcp_server.zig`: Sharp's MCP server (JSON-RPC over a
@@ -456,6 +463,25 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   WebView2 stops drawing hidden pages. Sign-ins stay shared, one profile
   for every chat. A pane's tabs close when the pane does, checked every
   3 seconds. Up to 12 tabs per chat and 48 per panel (`browser.zon`).
+- **Claude's browser covers what stops it on real pages, as Citropy's
+  does.** Dialogs: WebView2's own are off, so an alert, confirm, prompt or
+  leave-page dialog shows in a bar above the page that the user can
+  answer, and Claude answers it with `dialog`; since the page stops while
+  one is open, every DevTools call Claude makes checks for one every
+  250 ms and gives up with the dialog's text instead of hanging.
+  Iframes: each tab auto-attaches to its out-of-process frames
+  (`Target.setAutoAttach` with flatten, then
+  `CallDevToolsProtocolMethodForSession`), and a snapshot hangs each
+  frame's tree under its Iframe, with refs like `f2.31` for frames in
+  their own session; a frame's box adds where its iframe sits. Elements
+  are named by ref, CSS selector or role and name. `select` picks a
+  dropdown option. `upload` sets a file input's files, only from inside
+  the conversation's folder (its `~/.claude/sessions` file), since a page
+  could otherwise ask for `~/.ssh`; a click that would open the file
+  chooser is intercepted and reports the input's ref. Downloads keep
+  WebView2's own flyout and folder, and are logged with where they went.
+  Failed and 4xx/5xx requests are logged from the Network domain. Saving
+  passwords and form entries is on, as in Edge.
 - **Every page is 1920 × 1080, scaled to fit, as in Citropy.** Claude
   always sees the same desktop layout and coordinates however wide the
   panel is. `Emulation.setDeviceMetricsOverride` with its `scale` fits the

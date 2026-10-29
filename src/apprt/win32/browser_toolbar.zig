@@ -37,6 +37,9 @@ pub const Target = union(enum) {
     forward,
     reload,
     address,
+    dialog_ok,
+    dialog_cancel,
+    dialog_field,
 
     pub fn eql(a: Target, b: Target) bool {
         return std.meta.eql(a, b);
@@ -113,7 +116,7 @@ pub const Layout = struct {
             .tab => |i| return self.tabRect(i),
             .tab_close => |i| return self.tabCloseRect(i),
             .grip => return .{ .left = 0, .top = 0, .right = self.gripWidth(), .bottom = std.math.maxInt(i32) },
-            .none => return .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
+            .none, .dialog_ok, .dialog_cancel, .dialog_field => return .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
         };
         const left = self.gripWidth() + self.px(gap) + slot * self.px(button_width);
         return .{ .left = left, .top = top, .right = left + self.px(button_width), .bottom = bottom };
@@ -159,7 +162,7 @@ pub const View = struct {
             .forward => self.can_forward,
             .reload, .address => self.ready,
             .new_tab => self.can_add,
-            .tab, .tab_close, .grip => true,
+            .tab, .tab_close, .grip, .dialog_ok, .dialog_cancel, .dialog_field => true,
             .none => false,
         };
     }

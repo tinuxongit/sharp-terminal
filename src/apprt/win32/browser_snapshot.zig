@@ -26,8 +26,8 @@ const Tree = struct {
 };
 
 /// Write the tree of Accessibility.getFullAXTree's `nodes`, or only the
-/// element whose backend node id is `root_ref`.
-pub fn write(alloc: std.mem.Allocator, nodes: []const Value, root_ref: ?i64, out: *std.Io.Writer) !void {
+/// element whose ref is `root_ref`.
+pub fn write(alloc: std.mem.Allocator, nodes: []const Value, root_ref: ?[]const u8, out: *std.Io.Writer) !void {
     var tree: Tree = .{ .nodes = nodes, .out = out };
     defer tree.by_id.deinit(alloc);
     var has_parent: std.StringHashMapUnmanaged(void) = .empty;
@@ -41,7 +41,7 @@ pub fn write(alloc: std.mem.Allocator, nodes: []const Value, root_ref: ?i64, out
     }
     for (nodes) |node| {
         const is_root = if (root_ref) |ref|
-            backendId(node) == ref
+            isRef(node, ref)
         else
             !has_parent.contains(string(node, "nodeId") orelse continue);
         if (!is_root) continue;
@@ -53,11 +53,11 @@ pub fn write(alloc: std.mem.Allocator, nodes: []const Value, root_ref: ?i64, out
 
 const Names = std.StringHashMapUnmanaged(void);
 
-fn walk(alloc: std.mem.Allocator, tree: *Tree, node: Value, depth: usize, nearby: *const Names, root_ref: ?i64) !void {
+fn walk(alloc: std.mem.Allocator, tree: *Tree, node: Value, depth: usize, nearby: *const Names, root_ref: ?[]const u8) !void {
     const role = roleOf(node);
     const name = nameOf(node);
     const repeats = std.mem.eql(u8, role, "StaticText") and name.len > 0 and nearby.contains(name);
-    const shown = !repeats and (visible(node) or (root_ref != null and backendId(node) == root_ref.?));
+    const shown = !repeats and (visible(node) or (root_ref != null and isRef(node, root_ref.?)));
     if (shown) try line(tree.out, node, depth);
 
     // Text that repeats this element's name or a sibling's label is noise.
@@ -119,8 +119,16 @@ fn line(w: *std.Io.Writer, node: Value, depth: usize) !void {
         if (mixed) try w.print("{s}=mixed", .{prop_name}) else try w.writeAll(text.?);
     };
     if (!first) try w.writeByte(')');
-    if (backendId(node)) |id| try w.print(" [ref={d}]", .{id});
+    if (string(node, "ref")) |ref| {
+        try w.print(" [ref={s}]", .{ref});
+    } else if (backendId(node)) |id| try w.print(" [ref={d}]", .{id});
     try w.writeByte('\n');
+}
+
+fn isRef(node: Value, ref: []const u8) bool {
+    if (string(node, "ref")) |own| return std.mem.eql(u8, own, ref);
+    const id = backendId(node) orelse return false;
+    return (std.fmt.parseInt(i64, ref, 10) catch return false) == id;
 }
 
 fn roleOf(node: Value) []const u8 {

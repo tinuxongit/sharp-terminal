@@ -36,8 +36,19 @@ fn act(self: *BrowserPanel, target: Target) void {
                 else => webview.vtable.Reload(webview),
             };
         },
-        .address, .grip, .none => {},
+        .dialog_ok, .dialog_cancel => {
+            const tab = self.activeTab() orelse return;
+            self.answerDialog(tab, target == .dialog_ok, self.dialog_field.text());
+        },
+        .address, .grip, .none, .dialog_field => {},
     }
+}
+
+fn editDialogField(self: *BrowserPanel) void {
+    if (self.address.focused) stopEditing(self);
+    _ = w32.SetFocus(self.hwnd);
+    self.dialog_field.focus(self.hwnd, true);
+    self.invalidateToolbar();
 }
 
 /// Whether `vk`, pressed with the keys held now, is one of the panel's
@@ -125,7 +136,7 @@ pub fn wndProc(hwnd: w32.HWND, msg: u32, wparam: usize, lparam: isize) callconv(
                 _ = w32.TrackMouseEvent(&tme);
                 self.tracking_mouse = true;
             }
-            const target = self.toolbarLayout().hit(x, y);
+            const target = self.hit(x, y);
             setHover(self, if (self.enabled(target)) target else .none);
             if (self.hover == .grip) _ = w32.InvalidateRect(hwnd, null, 0);
             return 0;
@@ -137,10 +148,15 @@ pub fn wndProc(hwnd: w32.HWND, msg: u32, wparam: usize, lparam: isize) callconv(
             return 0;
         },
         w32.WM_LBUTTONDOWN => {
-            const target = self.toolbarLayout().hit(x, y);
+            const target = self.hit(x, y);
             if (!self.enabled(target)) return 0;
             if (target == .address) {
+                if (self.dialog_field.focused) self.dialog_field.focus(hwnd, false);
                 if (!self.address.focused) editAddress(self);
+                return 0;
+            }
+            if (target == .dialog_field) {
+                editDialogField(self);
                 return 0;
             }
             stopEditing(self);
@@ -162,12 +178,12 @@ pub fn wndProc(hwnd: w32.HWND, msg: u32, wparam: usize, lparam: isize) callconv(
             self.pressed = .none;
             self.resizing = false;
             _ = w32.ReleaseCapture();
-            if (self.toolbarLayout().hit(x, y).eql(pressed)) act(self, pressed);
+            if (self.hit(x, y).eql(pressed)) act(self, pressed);
             _ = w32.InvalidateRect(hwnd, null, 0);
             return 0;
         },
         w32.WM_MBUTTONUP => {
-            switch (self.toolbarLayout().hit(x, y)) {
+            switch (self.hit(x, y)) {
                 .tab, .tab_close => |i| act(self, .{ .tab_close = i }),
                 else => {},
             }
@@ -185,6 +201,14 @@ pub fn wndProc(hwnd: w32.HWND, msg: u32, wparam: usize, lparam: isize) callconv(
         w32.WM_KEYDOWN => {
             const vk: u16 = @truncate(wparam);
             if (shortcut(self, vk)) return 0;
+            if (self.dialog_field.focused) {
+                switch (vk) {
+                    w32.VK_RETURN => act(self, .dialog_ok),
+                    w32.VK_ESCAPE => act(self, .dialog_cancel),
+                    else => if (self.dialog_field.key(hwnd, vk)) self.invalidateToolbar(),
+                }
+                return 0;
+            }
             if (!self.address.focused) return 0;
             switch (vk) {
                 w32.VK_RETURN => {
@@ -202,15 +226,21 @@ pub fn wndProc(hwnd: w32.HWND, msg: u32, wparam: usize, lparam: isize) callconv(
         },
         w32.WM_CHAR => {
             if (self.address.focused and self.address.typeChar(@truncate(wparam))) self.invalidateToolbar();
+            if (self.dialog_field.focused and self.dialog_field.typeChar(@truncate(wparam))) self.invalidateToolbar();
             return 0;
         },
         w32.WM_KILLFOCUS => {
             stopEditing(self);
+            if (self.dialog_field.focused) {
+                self.dialog_field.focus(hwnd, false);
+                self.invalidateToolbar();
+            }
             return 0;
         },
         w32.WM_TIMER => {
             if (wparam == SearchField.caret_timer) {
                 self.address.blink();
+                self.dialog_field.blink();
                 self.invalidateToolbar();
             }
             return 0;

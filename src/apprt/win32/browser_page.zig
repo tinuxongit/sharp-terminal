@@ -34,12 +34,15 @@ const PageInfo = struct {
 /// Claude.
 pub const TabInfo = struct { id: u32, title: []const u8, url: []const u8, active: bool };
 
+pub const Frame = struct { key: u32, session: []const u8, target: []const u8, parent: []const u8 };
+
 pub const Page = struct {
     arena: Allocator,
     chat: *const Chat,
     failure: ?[]const u8 = null,
     /// The tab the call acts on, once chosen.
     tab: u32 = 0,
+    frame_list: ?[]const Frame = null,
 
     pub fn fail(self: *Page, comptime fmt: []const u8, args: anytype) error{ Failed, OutOfMemory } {
         self.failure = try std.fmt.allocPrint(self.arena, fmt, args);
@@ -59,10 +62,15 @@ pub const Page = struct {
 
     /// Call a DevTools method; its error message becomes the failure.
     pub fn devtools(self: *Page, method: []const u8, params: anytype) !Value {
-        const json = try std.json.Stringify.valueAlloc(self.arena, params, .{});
-        const answer = remote.call(self.chat, .{ .devtools = .{ .tab = self.tab, .method = method, .params = json } }, 30_000) catch |err| return switch (err) {
+        return self.devtoolsIn("", method, params);
+    }
+
+    pub fn devtoolsIn(self: *Page, session: []const u8, method: []const u8, params: anytype) !Value {
+        const json = try std.json.Stringify.valueAlloc(self.arena, params, .{ .emit_null_optional_fields = false });
+        const answer = remote.callWatching(self.chat, .{ .devtools = .{ .tab = self.tab, .session = session, .method = method, .params = json } }, 30_000, self.tab) catch |err| return switch (err) {
             error.Unavailable => self.fail("Sharp couldn't reach its browser.", .{}),
             error.TimedOut => self.fail("The page didn't answer {s} in time.", .{method}),
+            error.Dialog => self.dialogFailure(),
         };
         defer answer.free();
         const parsed = std.json.parseFromSliceLeaky(Value, self.arena, answer.text, .{ .allocate = .alloc_always }) catch null;
@@ -83,6 +91,29 @@ pub const Page = struct {
         }
         const result = field(answer, "result") orelse return .null;
         return field(result, "value") orelse .null;
+    }
+
+    pub const Dialog = struct { kind: []const u8, message: []const u8 };
+
+    pub fn dialog(self: *Page) !?Dialog {
+        const json = try self.remoteCall(.{ .dialog = .{ .tab = self.tab } }, 5_000);
+        if (json.len == 0) return null;
+        return std.json.parseFromSliceLeaky(Dialog, self.arena, json, .{ .allocate = .alloc_always, .ignore_unknown_fields = true }) catch null;
+    }
+
+    fn dialogFailure(self: *Page) error{ Dialog, Failed, OutOfMemory } {
+        const open = (self.dialog() catch null) orelse return self.fail("The page stopped answering.", .{});
+        self.failure = try std.fmt.allocPrint(self.arena, "A {s} dialog is open on the page: {s}\nAnswer it with browser_action dialog (accept true or false, and text for a prompt).", .{ open.kind, open.message });
+        return error.Dialog;
+    }
+
+    pub fn frames(self: *Page) ![]const Frame {
+        if (self.frame_list) |list| return list;
+        const json = try self.remoteCall(.{ .frames = .{ .tab = self.tab } }, 5_000);
+        const list = std.json.parseFromSliceLeaky([]const Frame, self.arena, json, .{ .allocate = .alloc_always }) catch
+            return self.fail("The browser listed its frames unreadably.", .{});
+        self.frame_list = list;
+        return list;
     }
 
     pub fn parseId(self: *Page, text: []const u8) !u32 {
@@ -122,7 +153,8 @@ pub const Page = struct {
         w32.Sleep(300);
         var waited: u32 = 0;
         while (waited < 10_000) : (waited += 250) {
-            const state = self.evaluate("[document.readyState, location.href]") catch {
+            const state = self.evaluate("[document.readyState, location.href]") catch |err| {
+                if (err == error.Dialog) break;
                 w32.Sleep(250);
                 continue;
             };
@@ -135,6 +167,7 @@ pub const Page = struct {
         }
         // Calls that failed mid-navigation are not the action's failure.
         self.failure = null;
+        self.frame_list = null;
     }
 
     pub fn navigate(self: *Page, typed: []const u8) !void {
@@ -193,34 +226,6 @@ pub const Page = struct {
         return string(answer, "data") orelse self.fail("The page gave no picture.", .{});
     }
 
-    pub fn parseRef(self: *Page, ref: []const u8) !i64 {
-        return std.fmt.parseInt(i64, ref, 10) catch self.fail("Use a ref from the latest snapshot.", .{});
-    }
-
-    /// The middle of the element `ref` names, scrolled into view.
-    pub fn refPoint(self: *Page, ref: []const u8) !Point {
-        const id = try self.parseRef(ref);
-        _ = self.devtools("DOM.scrollIntoViewIfNeeded", .{ .backendNodeId = id }) catch
-            return self.fail("That element is no longer on the page. Take a new snapshot for current refs.", .{});
-        const box = try self.devtools("DOM.getBoxModel", .{ .backendNodeId = id });
-        const model = field(box, "model") orelse return self.fail("That element has no box on the page.", .{});
-        const quad = field(model, "content") orelse return self.fail("That element has no box on the page.", .{});
-        if (quad != .array or quad.array.items.len != 8) return self.fail("That element has no box on the page.", .{});
-        var sum: Point = .{ .x = 0, .y = 0 };
-        for (0..4) |c| {
-            sum.x += asNumber(quad.array.items[2 * c]) orelse 0;
-            sum.y += asNumber(quad.array.items[2 * c + 1]) orelse 0;
-        }
-        return .{ .x = sum.x / 4, .y = sum.y / 4 };
-    }
-
-    pub fn target(self: *Page, args: Value, verb: []const u8) !Point {
-        if (string(args, "ref")) |ref| return self.refPoint(ref);
-        const x = number(args, "x") orelse return self.fail("Choose an element by ref, or x/y coordinates to {s}.", .{verb});
-        const y = number(args, "y") orelse return self.fail("Choose an element by ref, or x/y coordinates to {s}.", .{verb});
-        return .{ .x = x, .y = y };
-    }
-
     pub fn mouse(self: *Page, kind: []const u8, p: Point, button: []const u8) !void {
         _ = try self.devtools("Input.dispatchMouseEvent", .{ .type = kind, .x = p.x, .y = p.y, .button = button, .clickCount = 1 });
     }
@@ -229,15 +234,6 @@ pub const Page = struct {
         try self.mouse("mouseMoved", p, "none");
         try self.mouse("mousePressed", p, "left");
         try self.mouse("mouseReleased", p, "left");
-    }
-
-    /// Click a field and select what it holds, so typing replaces it.
-    pub fn focusAndSelect(self: *Page, ref: []const u8) !void {
-        try self.click(try self.refPoint(ref));
-        const resolved = try self.devtools("DOM.resolveNode", .{ .backendNodeId = try self.parseRef(ref) });
-        const object = field(resolved, "object") orelse return;
-        const object_id = string(object, "objectId") orelse return;
-        _ = try self.devtools("Runtime.callFunctionOn", .{ .objectId = object_id, .functionDeclaration = select_contents });
     }
 
     pub fn press(self: *Page, combo: []const u8) !void {
@@ -281,18 +277,6 @@ pub const Page = struct {
         }
     }
 };
-
-const select_contents =
-    \\function () {
-    \\  if (typeof this.select === "function") { this.select(); return; }
-    \\  if (!(this instanceof HTMLElement) || !this.isContentEditable) return;
-    \\  const range = document.createRange();
-    \\  range.selectNodeContents(this);
-    \\  const selection = getSelection();
-    \\  selection.removeAllRanges();
-    \\  selection.addRange(range);
-    \\}
-;
 
 const shift_bit: u8 = 8;
 

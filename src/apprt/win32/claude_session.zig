@@ -41,7 +41,7 @@ pub fn find(procs: *const process_tree.Processes, shell_pid: u32) ?Session {
     return null;
 }
 
-fn read(pid: u32) ?Session {
+pub fn read(pid: u32) ?Session {
     var dir_buf: [1024]u8 = undefined;
     const dir = configDir(&dir_buf) orelse return null;
     var path_buf: [1200]u8 = undefined;

@@ -8,12 +8,14 @@ const Value = std.json.Value;
 const w32 = @import("win32.zig");
 const snapshot_tree = @import("browser_snapshot.zig");
 const browser_page = @import("browser_page.zig");
+const locator = @import("browser_locator.zig");
+const browser_frames = @import("browser_frames.zig");
+const claude_session = @import("claude_session.zig");
 const json_read = @import("json_read.zig");
 const Page = browser_page.Page;
+const Point = browser_page.Point;
 const Chat = @import("browser_chats.zig").Chat;
 const remote = @import("browser_remote.zig");
-const Point = browser_page.Point;
-const no_params = browser_page.no_params;
 const field = json_read.field;
 const string = json_read.string;
 const boolean = json_read.boolean;
@@ -43,7 +45,7 @@ comptime {
     }
 }
 
-const Action = enum { navigate, back, forward, reload, click, hover, type, press, scroll, wait, evaluate };
+const Action = enum { navigate, back, forward, reload, click, hover, type, press, scroll, select, upload, wait, evaluate, dialog };
 
 /// What a tool answers: text, and a JPEG (base64) when it took a picture.
 pub const Output = struct {
@@ -99,12 +101,10 @@ fn snapshot(page: *Page, args: Value) !Output {
     var out: std.Io.Writer.Allocating = .init(page.arena);
     try page.header(&out.writer);
     if (boolean(args, "tree") orelse true) {
-        const root_ref: ?i64 = if (string(args, "ref")) |ref| try page.parseRef(ref) else null;
-        const ax = try page.devtools("Accessibility.getFullAXTree", no_params);
-        const nodes = field(ax, "nodes") orelse return page.fail("The page gave no accessibility tree.", .{});
-        if (nodes != .array) return page.fail("The page gave no accessibility tree.", .{});
+        const root_ref = try scopeRef(page, args);
+        const nodes = try browser_frames.tree(page);
         var tree: std.Io.Writer.Allocating = .init(page.arena);
-        try snapshot_tree.write(page.arena, nodes.array.items, root_ref, &tree.writer);
+        try snapshot_tree.write(page.arena, nodes.items, root_ref, &tree.writer);
         const text = tree.written();
         try out.writer.writeAll("\n\n");
         if (text.len <= snapshot_tree.max_length) {
@@ -112,11 +112,25 @@ fn snapshot(page: *Page, args: Value) !Output {
         } else {
             // Cut at a line so no element is half shown.
             const cut = std.mem.lastIndexOfScalar(u8, text[0..snapshot_tree.max_length], '\n') orelse snapshot_tree.max_length;
-            try out.writer.print("{s}\n… truncated. Snapshot a ref to see the rest.", .{text[0..cut]});
+            try out.writer.print("{s}\n… truncated. Snapshot a ref or selector to see the rest.", .{text[0..cut]});
         }
     }
     const image = if (boolean(args, "screenshot") orelse false) try page.screenshot() else null;
     return .{ .text = out.written(), .image = image };
+}
+
+fn scopeRef(page: *Page, args: Value) !?[]const u8 {
+    if (string(args, "ref")) |ref| {
+        _ = try locator.fromRef(page, ref);
+        return ref;
+    }
+    const selector = string(args, "selector") orelse return null;
+    var only: std.json.ObjectMap = .empty;
+    try only.put(page.arena, "selector", .{ .string = selector });
+    const node = (try locator.find(page, .{ .object = only })) orelse return null;
+    const described = try page.devtools("DOM.describeNode", node.params());
+    const id = number(field(described, "node") orelse return null, "backendNodeId") orelse return null;
+    return try std.fmt.allocPrint(page.arena, "{d}", .{@as(i64, @intFromFloat(id))});
 }
 
 fn logs(page: *Page, args: Value) !Output {
@@ -128,12 +142,31 @@ fn logs(page: *Page, args: Value) !Output {
 fn action(page: *Page, args: Value) !Output {
     try page.selectTab(args);
     try page.waitReady();
+    const name = string(args, "action") orelse return page.fail("Choose an action.", .{});
+    const act = std.meta.stringToEnum(Action, name) orelse return page.fail("Unknown browser action: {s}", .{name});
+    if (act != .dialog) {
+        if (try page.dialog()) |d| return page.fail("Answer the page's {s} dialog first: {s}", .{ d.kind, d.message });
+    }
     const since = w32.GetTickCount64();
     var newest: u32 = 0;
     for (try page.tabs()) |t| newest = @max(newest, t.id);
-    const name = string(args, "action") orelse return page.fail("Choose an action.", .{});
-    const act = std.meta.stringToEnum(Action, name) orelse return page.fail("Unknown browser action: {s}", .{name});
-    var result: ?[]const u8 = null;
+    const result = perform(page, args, act) catch |err| switch (err) {
+        error.Dialog => null,
+        else => return err,
+    };
+
+    var out: std.Io.Writer.Allocating = .init(page.arena);
+    for (try page.tabs()) |t| if (t.id == page.tab) try out.writer.print("{s}\n{s}\n", .{ t.title, t.url });
+    if (result) |r| try out.writer.print("\nResult: {s}\n", .{r});
+    if (try page.dialog()) |d| try out.writer.print("\nA {s} dialog is open: {s}\nAnswer it with browser_action dialog (accept true or false, and text for a prompt).\n", .{ d.kind, d.message });
+    const logged = try page.remoteCall(.{ .logs = .{ .tab = page.tab, .since_ms = since, .clear = false } }, 5_000);
+    if (logged.len > 0) try out.writer.print("\nThe page logged:\n{s}", .{logged});
+    // A link or script may have opened tabs.
+    for (try page.tabs()) |t| if (t.id > newest) try out.writer.print("\nIt opened tab {d}: {s}\n", .{ t.id, t.url });
+    return .{ .text = out.written() };
+}
+
+fn perform(page: *Page, args: Value, act: Action) !?[]const u8 {
     switch (act) {
         .navigate => try page.navigate(string(args, "url") orelse return page.fail("navigate needs a url.", .{})),
         .back, .forward, .reload => {
@@ -145,13 +178,19 @@ fn action(page: *Page, args: Value) !Output {
             page.settle(false);
         },
         .click => {
-            try page.click(try page.target(args, "click"));
+            const point = try locator.target(page, args, "click");
+            if (page.devtools("Page.setInterceptFileChooserDialog", .{ .enabled = true })) |_| {} else |err| if (err == error.Dialog) return err;
+            defer _ = page.devtools("Page.setInterceptFileChooserDialog", .{ .enabled = false }) catch null;
+            try page.click(point);
             page.settle(false);
         },
-        .hover => try page.mouse("mouseMoved", try page.target(args, "hover"), "none"),
+        .hover => try page.mouse("mouseMoved", try locator.target(page, args, "hover"), "none"),
         .type => {
             const text = string(args, "text") orelse return page.fail("type needs text.", .{});
-            if (string(args, "ref")) |ref| try page.focusAndSelect(ref);
+            if (try locator.find(page, args)) |node| {
+                try page.click(locator.center(try locator.elementBox(page, node, .content)));
+                _ = try locator.call(page, node, locator.select_contents, null);
+            }
             _ = try page.devtools("Input.insertText", .{ .text = text });
             page.settle(false);
         },
@@ -162,26 +201,68 @@ fn action(page: *Page, args: Value) !Output {
         .scroll => {
             const dx = number(args, "x") orelse return page.fail("scroll needs x and y distances.", .{});
             const dy = number(args, "y") orelse return page.fail("scroll needs x and y distances.", .{});
-            const point = if (string(args, "ref")) |ref| try page.refPoint(ref) else middle: {
+            const point = if (try locator.find(page, args)) |node| locator.center(try locator.elementBox(page, node, .content)) else middle: {
                 const info = try page.info();
                 break :middle Point{ .x = info.width / 2, .y = info.height / 2 };
             };
             _ = try page.devtools("Input.dispatchMouseEvent", .{ .type = "mouseWheel", .x = point.x, .y = point.y, .deltaX = dx, .deltaY = dy });
         },
+        .select => {
+            const option = string(args, "option") orelse return page.fail("select needs the option's value or visible text.", .{});
+            const node = (try locator.find(page, args)) orelse return page.fail("Choose the dropdown by ref, selector or role.", .{});
+            const chosen = try locator.call(page, node, locator.choose_option, option);
+            page.settle(false);
+            return try std.fmt.allocPrint(page.arena, "Selected {s}", .{if (chosen == .string) chosen.string else option});
+        },
+        .upload => {
+            const node = (try locator.find(page, args)) orelse return page.fail("Choose the file input by ref, selector or role.", .{});
+            const files = try uploadPaths(page, args);
+            _ = try page.devtoolsIn(node.session, "DOM.setFileInputFiles", .{ .files = files, .backendNodeId = node.backend, .objectId = node.object });
+            page.settle(false);
+            return try std.fmt.allocPrint(page.arena, "Chose {d} file{s}", .{ files.len, if (files.len == 1) "" else "s" });
+        },
         .wait => try page.wait(args),
         .evaluate => {
             const value = try page.evaluate(string(args, "expression") orelse return page.fail("evaluate needs an expression.", .{}));
-            result = try std.json.Stringify.valueAlloc(page.arena, value, .{});
+            return try std.json.Stringify.valueAlloc(page.arena, value, .{});
+        },
+        .dialog => {
+            _ = try page.remoteCall(.{ .answer = .{ .tab = page.tab, .accept = boolean(args, "accept") orelse true, .text = string(args, "text") orelse "" } }, 5_000);
+            page.settle(false);
         },
     }
+    return null;
+}
 
-    var out: std.Io.Writer.Allocating = .init(page.arena);
-    const info = try page.info();
-    try out.writer.print("{s}\n{s}\n", .{ info.title, info.url });
-    if (result) |r| try out.writer.print("\nResult: {s}\n", .{r});
-    const logged = try page.remoteCall(.{ .logs = .{ .tab = page.tab, .since_ms = since, .clear = false } }, 5_000);
-    if (logged.len > 0) try out.writer.print("\nThe page logged:\n{s}", .{logged});
-    // A link or script may have opened tabs.
-    for (try page.tabs()) |t| if (t.id > newest) try out.writer.print("\nIt opened tab {d}: {s}\n", .{ t.id, t.url });
-    return .{ .text = out.written() };
+fn uploadPaths(page: *Page, args: Value) ![]const []const u8 {
+    const list = field(args, "paths") orelse return page.fail("upload needs paths.", .{});
+    if (list != .array or list.array.items.len == 0) return page.fail("upload needs paths.", .{});
+    const session = claude_session.read(page.chat.claude) orelse
+        return page.fail("Sharp couldn't tell which folder this conversation works in, so it can't upload files.", .{});
+    const root = try fullPath(page, session.folder());
+    var files: std.ArrayList([]const u8) = .empty;
+    for (list.array.items) |item| {
+        if (item != .string or item.string.len == 0) return page.fail("Give each file as a path.", .{});
+        const absolute = (item.string.len > 2 and item.string[1] == ':') or std.mem.startsWith(u8, item.string, "\\\\");
+        const joined = if (absolute) item.string else try std.fmt.allocPrint(page.arena, "{s}\\{s}", .{ root, item.string });
+        const full = try fullPath(page, joined);
+        const inside = full.len > root.len and std.ascii.startsWithIgnoreCase(full, root) and (full[root.len] == '\\' or root[root.len - 1] == '\\');
+        if (!inside) return page.fail("Only files inside this conversation's folder ({s}) can be uploaded: {s}", .{ root, item.string });
+        const wide = try std.unicode.utf8ToUtf16LeAllocZ(page.arena, full);
+        const attributes = w32.GetFileAttributesW(wide);
+        if (attributes == w32.INVALID_FILE_ATTRIBUTES) return page.fail("File not found: {s}", .{item.string});
+        if (attributes & w32.FILE_ATTRIBUTE_DIRECTORY != 0) return page.fail("That is a folder, not a file: {s}", .{item.string});
+        try files.append(page.arena, full);
+    }
+    return files.items;
+}
+
+fn fullPath(page: *Page, path: []const u8) ![]const u8 {
+    const wide = try std.unicode.utf8ToUtf16LeAllocZ(page.arena, path);
+    var buf: [1024]u16 = undefined;
+    const len = w32.GetFullPathNameW(wide, buf.len, &buf, null);
+    if (len == 0 or len >= buf.len) return page.fail("That path is too long: {s}", .{path});
+    var trimmed = buf[0..len];
+    while (trimmed.len > 3 and trimmed[trimmed.len - 1] == '\\') trimmed = trimmed[0 .. trimmed.len - 1];
+    return std.unicode.utf16LeToUtf8Alloc(page.arena, trimmed);
 }

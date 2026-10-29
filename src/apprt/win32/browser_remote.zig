@@ -27,8 +27,9 @@ pub const Op = union(enum) {
     select: struct { tab: u32 },
     /// Whether the tab's page can take calls yet.
     ready: struct { tab: u32 },
-    /// A DevTools Protocol method and its JSON parameters.
-    devtools: struct { tab: u32, method: []const u8, params: []const u8 },
+    /// A DevTools Protocol method and its JSON parameters, in the page's
+    /// own session or a frame's.
+    devtools: struct { tab: u32, session: []const u8 = "", method: []const u8, params: []const u8 },
     history: struct { tab: u32, step: History },
     /// The tab's log from `since_ms` (GetTickCount64) on.
     logs: struct { tab: u32, since_ms: u64, clear: bool },
@@ -36,6 +37,9 @@ pub const Op = union(enum) {
     tabs,
     close: struct { tab: u32 },
     idle,
+    dialog: struct { tab: u32 },
+    answer: struct { tab: u32, accept: bool, text: []const u8 },
+    frames: struct { tab: u32 },
 };
 
 /// One call, shared by the waiting thread and the UI thread; the last of
@@ -64,9 +68,15 @@ pub const Request = struct {
                     alloc.free(method);
                     return self.fail(event);
                 };
-                break :blk .{ .devtools = .{ .tab = d.tab, .method = method, .params = params } };
+                const session = alloc.dupe(u8, d.session) catch {
+                    alloc.free(method);
+                    alloc.free(params);
+                    return self.fail(event);
+                };
+                break :blk .{ .devtools = .{ .tab = d.tab, .session = session, .method = method, .params = params } };
             },
             .open => |o| .{ .open = .{ .url = alloc.dupe(u8, o.url) catch return self.fail(event) } },
+            .answer => |a| .{ .answer = .{ .tab = a.tab, .accept = a.accept, .text = alloc.dupe(u8, a.text) catch return self.fail(event) } },
             else => op,
         };
         self.* = .{ .chat = chat.*, .op = owned, .done = event };
@@ -85,8 +95,10 @@ pub const Request = struct {
             .devtools => |d| {
                 alloc.free(d.method);
                 alloc.free(d.params);
+                alloc.free(d.session);
             },
             .open => |o| alloc.free(o.url),
+            .answer => |a| alloc.free(a.text),
             else => {},
         }
         alloc.free(self.result);
@@ -126,6 +138,13 @@ pub const Answer = struct {
 
 /// Run `op` on the UI thread and wait up to `timeout_ms` for its answer.
 pub fn call(chat: *const Chat, op: Op, timeout_ms: u32) error{ Unavailable, TimedOut }!Answer {
+    return callWatching(chat, op, timeout_ms, null) catch |err| switch (err) {
+        error.Dialog => error.TimedOut,
+        else => |e| e,
+    };
+}
+
+pub fn callWatching(chat: *const Chat, op: Op, timeout_ms: u32, watched: ?u32) error{ Unavailable, TimedOut, Dialog }!Answer {
     const hwnd = target orelse return error.Unavailable;
     const request = Request.create(chat, op) orelse return error.Unavailable;
     defer request.release();
@@ -134,8 +153,21 @@ pub fn call(chat: *const Chat, op: Op, timeout_ms: u32) error{ Unavailable, Time
         request.release();
         return error.Unavailable;
     }
-    if (w32.WaitForSingleObject(request.done, timeout_ms) != w32.WAIT_OBJECT_0) return error.TimedOut;
+    var waited: u32 = 0;
+    while (true) {
+        const slice: u32 = if (watched == null) timeout_ms else @min(250, timeout_ms - waited);
+        if (w32.WaitForSingleObject(request.done, slice) == w32.WAIT_OBJECT_0) break;
+        waited += slice;
+        if (waited >= timeout_ms) return error.TimedOut;
+        if (dialogShown(chat, watched.?)) return error.Dialog;
+    }
     return .{ .ok = request.ok, .text = alloc.dupe(u8, request.result) catch return error.Unavailable };
+}
+
+fn dialogShown(chat: *const Chat, tab: u32) bool {
+    const answer = call(chat, .{ .dialog = .{ .tab = tab } }, 2_000) catch return false;
+    defer answer.free();
+    return answer.ok and answer.text.len > 0;
 }
 
 const DevtoolsDone = webview2.Handler(webview2.iid_cdp_completed, usize, w32.HRESULT, ?[*:0]const u16, onDevtools);
@@ -200,7 +232,7 @@ pub fn serve(app: *App, request: *Request) void {
             }
             request.finish(true, "");
         },
-        inline .ready, .devtools, .history, .logs, .close => |op, tag| {
+        inline .ready, .devtools, .history, .logs, .close, .dialog, .answer, .frames => |op, tag| {
             const panel = window.browser orelse return request.finish(false, not_open);
             const tab = panel.ownTab(owner, op.tab) orelse return request.finish(false, "That tab was closed. browser_tabs lists the open ones.");
             serveTab(panel, tab, request, @unionInit(Op, @tagName(tag), op));
@@ -241,7 +273,30 @@ fn serveTab(panel: *BrowserPanel, tab: *BrowserTab, request: *Request, op: Op) v
             const handler = DevtoolsDone.create(@intFromPtr(request)) orelse return request.finish(false, "Out of memory");
             defer _ = handler.release();
             // From here the handler owns the UI thread's reference.
-            if (!tab.devtools(d.method, d.params, handler)) request.finish(false, "The page is still loading.");
+            if (!tab.devtoolsIn(d.session, d.method, d.params, handler)) request.finish(false, "The page is still loading.");
+        },
+        .dialog => {
+            const dialog = tab.dialog orelse return request.finish(true, "");
+            var out: std.Io.Writer.Allocating = .init(alloc);
+            defer out.deinit();
+            std.json.Stringify.value(.{ .kind = @tagName(dialog.kind), .message = dialog.message() }, .{}, &out.writer) catch {};
+            request.finish(true, out.written());
+        },
+        .answer => |a| {
+            if (tab.dialog == null) return request.finish(false, "No dialog is open on this page.");
+            panel.answerDialog(tab, a.accept, a.text);
+            request.finish(true, "");
+        },
+        .frames => {
+            var out: std.Io.Writer.Allocating = .init(alloc);
+            defer out.deinit();
+            var json: std.json.Stringify = .{ .writer = &out.writer };
+            json.beginArray() catch {};
+            for (tab.frames.all()) |f| {
+                json.write(.{ .key = f.key, .session = f.session.get(), .target = f.target.get(), .parent = f.parent.get() }) catch {};
+            }
+            json.endArray() catch {};
+            request.finish(true, out.written());
         },
         else => unreachable,
     }

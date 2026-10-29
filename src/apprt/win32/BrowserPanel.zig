@@ -19,6 +19,7 @@ const toolbar = @import("browser_toolbar.zig");
 const browser_settings = @import("browser_settings.zig");
 const browser_messages = @import("browser_messages.zig");
 const browser_chats = @import("browser_chats.zig");
+const dialog_bar = @import("browser_dialog_bar.zig");
 
 const Owner = browser_chats.Owner;
 
@@ -57,6 +58,7 @@ failed: bool = false,
 shown: bool = true,
 /// Shows the active page's address, or what is being typed.
 address: SearchField = .{},
+dialog_field: SearchField = .{},
 hover: Target = .none,
 pressed: Target = .none,
 tracking_mouse: bool = false,
@@ -280,7 +282,38 @@ pub fn refresh(self: *BrowserPanel) void {
 
 fn frontChanged(self: *BrowserPanel) void {
     if (self.address.focused) self.address.focus(self.hwnd, false);
+    if (self.dialog_field.focused) self.dialog_field.focus(self.hwnd, false);
     self.showSource();
+    const tab = self.activeTab() orelse return;
+    if (tab.dialog) |d| self.dialog_field.set(d.defaultText());
+    self.placeTab(tab);
+}
+
+pub fn dialogLayout(self: *BrowserPanel) ?dialog_bar.Layout {
+    const tab = self.activeTab() orelse return null;
+    const dialog = tab.dialog orelse return null;
+    const bar = self.toolbarLayout();
+    return .{ .scale = self.scale, .left = bar.gripWidth(), .top = bar.height(), .width = bar.width, .kind = dialog.kind };
+}
+
+fn dialogHeight(self: *BrowserPanel) i32 {
+    return if (self.dialogLayout() != null) dialog_bar.Layout.height(self.scale) else 0;
+}
+
+pub fn dialogChanged(self: *BrowserPanel, tab: *BrowserTab) void {
+    if (self.activeTab() != tab) return;
+    const dialog = tab.dialog orelse return;
+    self.dialog_field.set(dialog.defaultText());
+    self.placeTab(tab);
+    _ = w32.InvalidateRect(self.hwnd, null, 0);
+}
+
+pub fn answerDialog(self: *BrowserPanel, tab: *BrowserTab, accept: bool, text: []const u8) void {
+    tab.answerDialog(accept, text);
+    if (self.activeTab() != tab) return;
+    if (self.dialog_field.focused) self.dialog_field.focus(self.hwnd, false);
+    self.placeTab(tab);
+    _ = w32.InvalidateRect(self.hwnd, null, 0);
 }
 
 /// A tab finished preparing its page and may show.
@@ -318,12 +351,12 @@ pub fn place(self: *BrowserPanel, rect: w32.RECT, scale: f32, palette: tab_strip
 
 /// Where pages show: the fixed layout size scaled to fit below the
 /// toolbar, centered both ways.
-fn pageRect(self: *const BrowserPanel) struct { w32.RECT, f64 } {
+fn pageRect(self: *BrowserPanel) struct { w32.RECT, f64 } {
     var client: w32.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
     _ = w32.GetClientRect(self.hwnd, &client);
     const bar = self.toolbarLayout();
     const left = bar.gripWidth();
-    const top = bar.height();
+    const top = bar.height() + self.dialogHeight();
     const width: f64 = @floatFromInt(@max(1, client.right - left));
     const height: f64 = @floatFromInt(@max(1, client.bottom - top));
     const vw: f64 = @floatFromInt(data.viewport_width);
@@ -418,8 +451,15 @@ pub fn enabled(self: *BrowserPanel, target: Target) bool {
     return self.toolbarView(&titles).enabled(target);
 }
 
+pub fn hit(self: *BrowserPanel, x: i32, y: i32) Target {
+    const target = self.toolbarLayout().hit(x, y);
+    if (target != .none) return target;
+    const layout = self.dialogLayout() orelse return .none;
+    return layout.hit(x, y);
+}
+
 pub fn invalidateToolbar(self: *BrowserPanel) void {
-    var rect: w32.RECT = .{ .left = 0, .top = 0, .right = 100000, .bottom = self.toolbarLayout().height() };
+    var rect: w32.RECT = .{ .left = 0, .top = 0, .right = 100000, .bottom = self.toolbarLayout().height() + self.dialogHeight() };
     _ = w32.InvalidateRect(self.hwnd, &rect, 0);
 }
 
@@ -431,7 +471,8 @@ pub fn paint(self: *BrowserPanel) void {
     if (w32.GetClientRect(self.hwnd, &client) == 0) return;
     const bar = self.toolbarLayout();
     const width = bar.width;
-    const height = bar.height();
+    const dialog = self.dialogLayout();
+    const height = bar.height() + self.dialogHeight();
     if (width <= 0) return;
 
     // Around and behind the page is the terminal's color, with the edge
@@ -461,6 +502,16 @@ pub fn paint(self: *BrowserPanel) void {
     const c: canvas_mod.Canvas = .{ .hdc = mem_dc, .pixels = @ptrCast(@alignCast(bits orelse return)), .width = width, .height = height };
     var titles: [data.max_tabs][]const u8 = undefined;
     toolbar.paint(c, bar, self.toolbarView(&titles));
+    if (dialog) |layout| {
+        dialog_bar.paint(c, layout, .{
+            .palette = self.palette,
+            .fonts = self.fonts,
+            .message = self.activeTab().?.dialog.?.message(),
+            .field = &self.dialog_field,
+            .hover = self.hover,
+            .pressed = self.pressed,
+        });
+    }
     _ = w32.BitBlt(hdc, 0, 0, width, height, mem_dc, 0, 0, w32.SRCCOPY);
 
     const notice: ?[]const u8 = if (self.failed) data.unavailable else if (self.activeTab() == null) data.empty else null;

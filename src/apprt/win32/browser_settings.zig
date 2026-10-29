@@ -22,6 +22,7 @@ pub const Data = struct {
     address_placeholder: []const u8,
     untitled: []const u8,
     empty: []const u8,
+    dialog: struct { says: []const u8, ok: []const u8, cancel: []const u8, leave: []const u8, stay: []const u8 },
     unavailable: []const u8,
 };
 

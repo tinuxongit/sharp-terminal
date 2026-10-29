@@ -94,6 +94,7 @@ pub const Log = struct {
             // arrive here with source "network".
             .browser => {
                 const entry = field(params, "entry") orelse return;
+                if (std.mem.eql(u8, string(entry, "source") orelse "", "network")) return;
                 const level = levelOf(string(entry, "level") orelse return);
                 if (level != .warning and level != .@"error") return;
                 w.writeAll(string(entry, "text") orelse return) catch {};

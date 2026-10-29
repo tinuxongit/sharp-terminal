@@ -7,20 +7,19 @@ const w32 = @import("win32.zig");
 const brand = @import("brand.zig");
 const webview2 = @import("webview2.zig");
 const wide_string = @import("wide_string.zig");
-const browser_log = @import("browser_log.zig");
 const BrowserPanel = @import("BrowserPanel.zig");
 const browser_settings = @import("browser_settings.zig");
 const BrowserTab = @import("BrowserTab.zig");
-const browser_messages = @import("browser_messages.zig");
+const browser_events = @import("browser_events.zig");
 
 const log = std.log.scoped(.win32);
 const alloc = std.heap.smp_allocator;
 
 /// Which tab a callback is about. Ids rather than pointers, so a callback
 /// arriving after the panel or tab closed finds nothing.
-const TabRef = extern struct { hwnd: usize, tab: u32 };
+pub const TabRef = extern struct { hwnd: usize, tab: u32 };
 
-fn find(ref: TabRef) ?struct { *BrowserPanel, *BrowserTab } {
+pub fn find(ref: TabRef) ?struct { *BrowserPanel, *BrowserTab } {
     const panel = BrowserPanel.fromHwnd(@ptrFromInt(ref.hwnd)) orelse return null;
     return .{ panel, panel.tabById(ref.tab) orelse return null };
 }
@@ -33,11 +32,6 @@ const EnvironmentDone = webview2.Handler(webview2.iid_environment_completed, usi
 const ControllerDone = webview2.Handler(webview2.iid_controller_completed, TabRef, w32.HRESULT, ?*webview2.Controller, onController);
 const IdentityRead = webview2.Handler(webview2.iid_cdp_completed, TabRef, w32.HRESULT, ?[*:0]const u16, onIdentityRead);
 const IdentitySet = webview2.Handler(webview2.iid_cdp_completed, TabRef, w32.HRESULT, ?[*:0]const u16, onIdentitySet);
-const SourceChanged = webview2.Handler(webview2.iid_source_changed, TabRef, *webview2.WebView, ?*anyopaque, onSourceChanged);
-const HistoryChanged = webview2.Handler(webview2.iid_history_changed, TabRef, *webview2.WebView, ?*anyopaque, onHistoryChanged);
-const TitleChanged = webview2.Handler(webview2.iid_title_changed, TabRef, *webview2.WebView, ?*anyopaque, onTitleChanged);
-const NewWindow = webview2.Handler(webview2.iid_new_window, TabRef, *webview2.WebView, *webview2.NewWindowArgs, onNewWindow);
-const KeyPressed = webview2.Handler(webview2.iid_accelerator_key, TabRef, *webview2.Controller, *webview2.KeyArgs, onKeyPressed);
 pub const Ignore = webview2.Handler(webview2.iid_cdp_completed, usize, w32.HRESULT, ?[*:0]const u16, ignore);
 
 fn ignore(_: usize, _: w32.HRESULT, _: ?[*:0]const u16) void {}
@@ -109,7 +103,7 @@ fn onController(ref: TabRef, result: w32.HRESULT, created: ?*webview2.Controller
     tab.webview = webview;
 
     harden(webview);
-    listen(ref, controller, webview);
+    browser_events.listen(ref, controller, webview);
     // Hidden until it has its identity, so nothing shows before then.
     tab.show(false);
     panel.placeTab(tab);
@@ -126,42 +120,11 @@ fn harden(webview: *webview2.WebView) void {
     _ = s.vtable.put_IsWebMessageEnabled(s, 0);
     _ = s.vtable.put_AreHostObjectsAllowed(s, 0);
     _ = s.vtable.put_IsZoomControlEnabled(s, 0);
-}
-
-fn listen(ref: TabRef, controller: *webview2.Controller, webview: *webview2.WebView) void {
-    var token: webview2.Token = undefined;
-    if (SourceChanged.create(ref)) |h| {
-        _ = webview.vtable.add_SourceChanged(webview, h, &token);
-        _ = h.release();
-    }
-    if (HistoryChanged.create(ref)) |h| {
-        _ = webview.vtable.add_HistoryChanged(webview, h, &token);
-        _ = h.release();
-    }
-    if (TitleChanged.create(ref)) |h| {
-        _ = webview.vtable.add_DocumentTitleChanged(webview, h, &token);
-        _ = h.release();
-    }
-    if (NewWindow.create(ref)) |h| {
-        _ = webview.vtable.add_NewWindowRequested(webview, h, &token);
-        _ = h.release();
-    }
-    if (KeyPressed.create(ref)) |h| {
-        _ = controller.vtable.add_AcceleratorKeyPressed(controller, h, &token);
-        _ = h.release();
-    }
-    inline for (log_events) |entry| {
-        const name, const event = entry;
-        var receiver: ?*webview2.EventReceiver = null;
-        if (webview.vtable.GetDevToolsProtocolEventReceiver(webview, name, &receiver) >= 0) {
-            if (receiver) |r| {
-                defer r.release();
-                if (LogEvent(event).create(ref)) |h| {
-                    _ = r.vtable.add_DevToolsProtocolEventReceived(r, h, &token);
-                    _ = h.release();
-                }
-            }
-        }
+    _ = s.vtable.put_AreDefaultScriptDialogsEnabled(s, 0);
+    if (s.as4()) |s4| {
+        defer _ = s4.release();
+        _ = s4.vtable.put_IsPasswordAutosaveEnabled(s4, 1);
+        _ = s4.vtable.put_IsGeneralAutofillEnabled(s4, 1);
     }
 }
 
@@ -298,8 +261,7 @@ fn onIdentitySet(ref: TabRef, _: w32.HRESULT, _: ?[*:0]const u16) void {
 /// was opened for.
 fn finish(ref: TabRef) void {
     const panel, const tab = find(ref) orelse return;
-    send(tab, "Runtime.enable", "{}");
-    send(tab, "Log.enable", "{}");
+    browser_events.enableDomains(tab, "");
     switch (tab.first) {
         .url => |url| {
             if (url.len > 0) tab.navigate(url);
@@ -315,82 +277,4 @@ fn finish(ref: TabRef) void {
     tab.first = .{ .url = &.{} };
     tab.ready = true;
     panel.tabReady(tab);
-}
-
-// ---- Page events -------------------------------------------------------
-
-fn onSourceChanged(ref: TabRef, _: *webview2.WebView, _: ?*anyopaque) void {
-    const panel, const tab = find(ref) orelse return;
-    panel.tabChanged(tab);
-}
-
-fn onHistoryChanged(ref: TabRef, webview: *webview2.WebView, _: ?*anyopaque) void {
-    const panel, const tab = find(ref) orelse return;
-    var back: c_int = 0;
-    var forward: c_int = 0;
-    _ = webview.vtable.get_CanGoBack(webview, &back);
-    _ = webview.vtable.get_CanGoForward(webview, &forward);
-    tab.can_back = back != 0;
-    tab.can_forward = forward != 0;
-    panel.tabChanged(tab);
-}
-
-fn onTitleChanged(ref: TabRef, webview: *webview2.WebView, _: ?*anyopaque) void {
-    const panel, const tab = find(ref) orelse return;
-    var title: ?[*:0]u16 = null;
-    if (webview.vtable.get_DocumentTitle(webview, &title) < 0) return;
-    defer w32.CoTaskMemFree(title);
-    var buf: [256]u8 = undefined;
-    tab.setTitle(buf[0..wide_string.toUtf8(&buf, std.mem.span(title orelse return))]);
-    panel.tabChanged(tab);
-}
-
-/// A page opening a window gets a new tab for it, as in Chrome.
-fn onNewWindow(ref: TabRef, webview: *webview2.WebView, args: *webview2.NewWindowArgs) void {
-    const panel, const opener = find(ref) orelse return;
-    var deferral: ?*webview2.Deferral = null;
-    if (args.vtable.GetDeferral(args, &deferral) >= 0) {
-        if (deferral) |d| {
-            args.addRef();
-            if (panel.openPopup(opener.owner, args, d)) return;
-            args.release();
-            d.release();
-        }
-    }
-    // No room for another tab: open it in this one.
-    var uri: ?[*:0]u16 = null;
-    if (args.vtable.get_Uri(args, &uri) < 0) return;
-    defer w32.CoTaskMemFree(uri);
-    _ = args.vtable.put_Handled(args, 1);
-    _ = webview.vtable.Navigate(webview, uri orelse return);
-}
-
-fn onKeyPressed(ref: TabRef, _: *webview2.Controller, args: *webview2.KeyArgs) void {
-    const panel, _ = find(ref) orelse return;
-    var kind: c_int = 0;
-    var key: u32 = 0;
-    if (args.vtable.get_KeyEventKind(args, &kind) < 0 or args.vtable.get_VirtualKey(args, &key) < 0) return;
-    if (kind != webview2.KeyArgs.key_down and kind != webview2.KeyArgs.system_key_down) return;
-    if (browser_messages.shortcut(panel, @truncate(key))) _ = args.vtable.put_Handled(args, 1);
-}
-
-/// The DevTools events the page's log listens to.
-const log_events = [_]struct { [:0]const u16, browser_log.Event }{
-    .{ std.unicode.utf8ToUtf16LeStringLiteral("Runtime.consoleAPICalled"), .console },
-    .{ std.unicode.utf8ToUtf16LeStringLiteral("Runtime.exceptionThrown"), .exception },
-    .{ std.unicode.utf8ToUtf16LeStringLiteral("Log.entryAdded"), .browser },
-};
-
-fn LogEvent(comptime event: browser_log.Event) type {
-    return webview2.Handler(webview2.iid_cdp_event, TabRef, *webview2.WebView, *webview2.EventArgs, struct {
-        fn f(ref: TabRef, _: *webview2.WebView, args: *webview2.EventArgs) void {
-            _, const tab = find(ref) orelse return;
-            var json: ?[*:0]u16 = null;
-            if (args.vtable.get_ParameterObjectAsJson(args, &json) < 0) return;
-            defer w32.CoTaskMemFree(json);
-            const utf8 = std.unicode.utf16LeToUtf8Alloc(alloc, std.mem.span(json orelse return)) catch return;
-            defer alloc.free(utf8);
-            tab.page_log.addEvent(alloc, w32.GetTickCount64(), event, utf8);
-        }
-    }.f);
 }

@@ -25,6 +25,9 @@
     .address_placeholder = "Search or enter address",
     // A tab's name until its page has a title.
     .untitled = "New tab",
+    // The bar a page's alert, confirm, prompt or "leave this page?" shows
+    // in, above the page.
+    .dialog = .{ .says = "This page says", .ok = "OK", .cancel = "Cancel", .leave = "Leave", .stay = "Stay" },
     // Shown in the panel while the terminal pane in front has no pages.
     .empty = "No pages for this terminal yet. + opens one.",
     // Shown in the panel when Windows has no WebView2 runtime.
