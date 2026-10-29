@@ -379,8 +379,8 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   `Window.paneInSight`) gets no mark, and showing the tab or bringing the
   window to the front clears it, as with the bell. The same rule keeps a
   program's desktop notification from popping up over the pane it came
-  from, as Ghostty on macOS does; Claude Code can't tell through ConPTY
-  whether it is being watched, so it notified anyway. Checked 2026-10-29
+  from, as Ghostty on macOS does; Claude Code's notifications reached the
+  user even with its tab in front. Checked 2026-10-29
   that activating the window clears the dot; the in-sight case needs the
   window in front, so it wasn't tried. Claude
   sessions started before this build asked once at start and got no
