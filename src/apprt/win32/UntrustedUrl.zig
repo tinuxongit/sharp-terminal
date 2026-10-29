@@ -12,21 +12,8 @@ pub fn decide(value: OpenUrl) Decision {
         .unknown, .osc8 => {},
     }
     if (value.url.len == 0) return .deny;
-    const view = std.unicode.Utf8View.init(value.url) catch return .deny;
-    var iter = view.iterator();
-    while (iter.nextCodepoint()) |cp| switch (cp) {
-        0...0x20,
-        0x7F...0x9F,
-        '\\',
-        0x061C,
-        0x200B...0x200F,
-        0x2028...0x202E,
-        0x2060,
-        0x2066...0x2069,
-        0xFEFF,
-        => return .deny,
-        else => {},
-    };
+    if (std.mem.indexOfAny(u8, value.url, "\\ ") != null) return .deny;
+    if (hasHiddenText(value.url)) return .deny;
     const uri = std.Uri.parse(value.url) catch return .deny;
     // A drive path can parse as a URI with a one-letter scheme. Never
     // reinterpret it as a custom protocol and pass it to ShellExecute.
@@ -46,6 +33,92 @@ pub fn decide(value: OpenUrl) Decision {
     // exists, refuse all terminal-supplied local/remote file targets.
     if (std.ascii.eqlIgnoreCase(uri.scheme, "file")) return .deny;
     return .confirm;
+}
+
+/// The Windows path of a file or folder on this computer or in WSL that a
+/// link points to, written to `buf`: a `file:` URI without a host (or for
+/// localhost or WSL), or a drive or WSL path, which is what Ghostty hands
+/// over for a clicked relative path. Null for anything else, which
+/// `decide` judges as an address. Like Windows Terminal, other computers'
+/// files are never opened: reaching them can send the user's credentials.
+pub fn localPath(value: OpenUrl, buf: []u8) ?[]const u8 {
+    switch (value.kind) {
+        .text, .html => return null,
+        .unknown, .osc8 => {},
+    }
+    const url = value.url;
+    const path = if (std.ascii.startsWithIgnoreCase(url, "file:"))
+        fromFileUri(url, buf) orelse return null
+    else if (isDrivePath(url) or isWslPath(url))
+        copyInto(buf, 0, url) orelse return null
+    else
+        return null;
+    std.mem.replaceScalar(u8, path, '/', '\\');
+    if (!isDrivePath(path) and !isWslPath(path)) return null;
+    if (hasHiddenText(path)) return null;
+    // A colon past the drive's names an alternate data stream.
+    if (std.mem.indexOfScalarPos(u8, path, 2, ':') != null) return null;
+    return path;
+}
+
+fn fromFileUri(url: []const u8, buf: []u8) ?[]u8 {
+    const uri = std.Uri.parse(url) catch return null;
+    var host_buf: [64]u8 = undefined;
+    const host = if (uri.host) |h| h.toRaw(&host_buf) catch return null else "";
+    var decoded_buf: [2048]u8 = undefined;
+    var decoded = uri.path.toRaw(&decoded_buf) catch return null;
+    if (host.len == 0 or std.ascii.eqlIgnoreCase(host, "localhost")) {
+        // file:///C:/notes.txt has the path /C:/notes.txt.
+        if (decoded.len > 1 and decoded[0] == '/' and isDrivePath(decoded[1..])) decoded = decoded[1..];
+        return copyInto(buf, 0, decoded);
+    }
+    if (!isWslHost(host)) return null;
+    const prefix = copyInto(buf, 0, "\\\\") orelse return null;
+    const named = copyInto(buf, prefix.len, host) orelse return null;
+    return copyInto(buf, named.len, decoded);
+}
+
+/// Copy `text` to `buf` at `at`, returning everything written so far.
+fn copyInto(buf: []u8, at: usize, text: []const u8) ?[]u8 {
+    if (at + text.len > buf.len) return null;
+    @memcpy(buf[at..][0..text.len], text);
+    return buf[0 .. at + text.len];
+}
+
+fn isDrivePath(path: []const u8) bool {
+    return path.len >= 3 and std.ascii.isAlphabetic(path[0]) and path[1] == ':' and (path[2] == '\\' or path[2] == '/');
+}
+
+fn isWslPath(path: []const u8) bool {
+    if (path.len < 3 or path[0] != path[1] or (path[0] != '\\' and path[0] != '/')) return false;
+    const rest = path[2..];
+    const end = std.mem.indexOfAny(u8, rest, "\\/") orelse return false;
+    return isWslHost(rest[0..end]);
+}
+
+fn isWslHost(host: []const u8) bool {
+    return std.ascii.eqlIgnoreCase(host, "wsl.localhost") or std.ascii.eqlIgnoreCase(host, "wsl$");
+}
+
+/// Control characters, invisible ones and text-direction overrides, which
+/// make what is opened differ from what the user read. Invalid UTF-8
+/// counts too.
+fn hasHiddenText(text: []const u8) bool {
+    const view = std.unicode.Utf8View.init(text) catch return true;
+    var iter = view.iterator();
+    while (iter.nextCodepoint()) |cp| switch (cp) {
+        0...0x1F,
+        0x7F...0x9F,
+        0x061C,
+        0x200B...0x200F,
+        0x2028...0x202E,
+        0x2060,
+        0x2066...0x2069,
+        0xFEFF,
+        => return true,
+        else => {},
+    };
+    return false;
 }
 
 test "terminal URL policy blocks paths and unsafe or malformed targets" {

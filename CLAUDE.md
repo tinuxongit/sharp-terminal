@@ -35,8 +35,10 @@ commands and conventions; this file covers what is specific to Sharp.
     palette.
   - `global_hotkey.zig`: the quick terminal's system-wide hotkey.
 - `src/apprt/win32/UntrustedUrl.zig`: decides which links printed by programs
-  may be opened. Anything that reaches `ShellExecuteW` from terminal output
-  must go through it.
+  may be opened, and which of them are local files or folders. Anything
+  that reaches `ShellExecuteW` from terminal output must go through it.
+  `shell_open.zig` opens those files and folders, with the file types
+  that open without asking in `open_files.zon`.
 - `src/os/console_programs.zig`: which programs a tab started on Windows
   (through its Job Object) and which of them end with it.
 - `src/os/Conpty.zig` and `pkg/conpty/`: the bundled Microsoft ConPTY. The
@@ -154,7 +156,7 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/tab_status.zig`: what a tab shows of the state its
   programs report (OSC 7501), for the strip and the sidebar.
 - `src/apprt/win32/mark_mode.zig`: selecting with the keyboard and
-  block selection; `shell_open.zig` shows a folder in Explorer.
+  block selection.
 - `src/apprt/win32/startup.zig`: starting Sharp at sign-in.
 - `src/apprt/win32/ipc.zig`: `sharp +new-tab` and `+new-window` reaching
   a running Sharp.
@@ -478,6 +480,20 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   dialogs, mobile emulation and connected accounts are left out. Checked
   2026-10-28 through the real protocol and against a throwaway Claude
   Code config (`claude mcp list`: connected).
+- **Ctrl+click opens local files and folders, more carefully than Windows
+  Terminal.** The fork refused every file link, since Windows has no
+  not-executable bit, so Claude Code's `file://` links and clicked paths
+  did nothing. Windows Terminal opens local `file:` links (no host,
+  localhost or WSL) and asks only for `PATHEXT` extensions. Sharp opens
+  the same targets, also the drive paths Ghostty makes of clicked relative
+  paths, but only once the path exists: a folder opens in Explorer, a file
+  type its app only shows (`open_files.zon`: images, text, PDF, media)
+  opens directly, and every other file asks first, since `.lnk`, `.py` or
+  `.hta` run too. Trailing dots and spaces, which Windows drops, can't hide
+  an extension, and alternate data streams and other computers' paths are
+  refused. Plain Windows paths with backslashes printed as text aren't
+  links: Ghostty's link pattern doesn't match them. Not yet tried by hand:
+  a click's Ctrl is read from the real keyboard.
 - **Copy and paste use Windows' keys.** `clipboard-keys = windows`, the
   default, binds `performable:ctrl+c=copy_to_clipboard` and
   `performable:ctrl+v=paste_from_clipboard` on the loaded config, unless

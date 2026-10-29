@@ -1,0 +1,18 @@
+// What Ctrl+click on a local file printed in the terminal opens without
+// asking, and the question asked for any other file. Folders always open in
+// Explorer. These extensions are files that their apps only show, never
+// run; anything else, programs and scripts included, asks first, as Windows
+// Terminal asks for programs. Extensions start with a dot and are compared
+// ignoring case. Checked when Sharp is compiled.
+.{
+    .viewed = .{
+        // Images
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".svg", ".avif", ".heic", ".tif", ".tiff",
+        // Text and documents
+        ".txt", ".md", ".log", ".csv", ".json", ".pdf",
+        // Sound and video
+        ".mp3", ".wav", ".ogg", ".flac", ".mp4", ".webm", ".mov", ".mkv",
+    },
+    .confirm_title = "Open file?",
+    .confirm_text = "Open this file from the terminal with its app? It may run as a program. Continue only if you trust it.\n\n",
+}

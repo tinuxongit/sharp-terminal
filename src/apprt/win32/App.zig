@@ -32,6 +32,7 @@ const servers = @import("servers.zig");
 const w32 = @import("win32.zig");
 const brand = @import("brand.zig");
 const UntrustedUrl = @import("UntrustedUrl.zig");
+const shell_open = @import("shell_open.zig");
 const wide_string = @import("wide_string.zig");
 
 pub const OpenUrlRequest = struct {
@@ -1196,6 +1197,8 @@ fn tick(self: *App) void {
 /// std.process.Child which can hit unreachable on Windows, so we use
 /// ShellExecuteW directly.
 fn openUrlNow(value: apprt.action.OpenUrl) void {
+    var path_buf: [1024]u8 = undefined;
+    if (UntrustedUrl.localPath(value, &path_buf)) |path| return shell_open.linked(path);
     const decision = UntrustedUrl.decide(value);
     if (decision == .deny) {
         log.warn("blocked unsafe terminal URL", .{});
