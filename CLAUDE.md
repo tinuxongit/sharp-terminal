@@ -100,7 +100,9 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/servers.zig`: the servers the sidebar offers (hosts in
   `~/.ssh/config` and recent ones), and which addresses ssh may be given.
 - `src/apprt/win32/BrowserPanel.zig`: the browser panel, a child window
-  with its tabs, where pages sit in it, and its painting.
+  with its tabs, which chat each belongs to, and where pages sit in it.
+  `browser_panel_view.zig` hit-tests and paints its toolbar, dialog bar
+  and notices.
   `browser_messages.zig` is where its Windows messages go (toolbar,
   address box, shortcuts, dragging its edge).
 - `src/apprt/win32/browser_settings.zig`: reads `browser.zon` (sizes,

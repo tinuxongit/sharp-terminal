@@ -260,6 +260,7 @@ pub fn setFavicon(self: *BrowserTab, icon: ?w32.HICON) void {
 }
 
 pub fn dropPage(self: *BrowserTab) void {
+    if (self.webview == null) return;
     var buf: [2048]u8 = undefined;
     const url = std.heap.smp_allocator.dupe(u8, self.source(&buf) orelse "") catch return;
     self.releasePage();
