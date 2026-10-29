@@ -432,9 +432,15 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   Turning Settings > AI > Tools > Browser on starts Sharp's MCP server
   and runs `claude mcp add --scope user sharp -- <dir>\sharp-mcp.exe`;
   turning it off stops the server and runs `claude mcp remove`. That is
-  the only change Sharp makes to Claude Code's configuration. Claude Code
-  runs `sharp-mcp.exe`, which relays its stdio to a named pipe named after
-  the Windows user, so the tools act on the panel the user sees. The pipe
+  the only change Sharp makes to Claude Code's configuration. Its
+  `initialize` reply carries instructions, as Citropy's does: the panel is
+  what the user means by "the browser", use it rather than Chrome or a
+  headless script to check web UI and signed-in sites, the snapshot,
+  ref and action loop, and asking before submitting or buying. Since the
+  server runs only while the switch is on, they describe only what is on.
+  Claude Code runs `sharp-mcp.exe`, which relays its stdio to a named pipe
+  named after the Windows user, so the tools act on the panel the user
+  sees. The pipe
   is created first-instance-only, closed to remote clients, and with a
   DACL for the user alone (the default lets everyone read it); the bridge
   refuses a pipe whose server runs as another user. Claude may open only
