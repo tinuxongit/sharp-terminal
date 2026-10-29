@@ -374,8 +374,10 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   strip and in the sidebar's right column, below close on hover and the
   bell dot. The program decides when done becomes idle again. Claude
   sessions started before this build asked once at start and got no
-  answer, so they keep their glyph until restarted. Not yet tried in the
-  app.
+  answer, so they keep their glyph until restarted. Checked 2026-10-29
+  in a Sharp with its own config: the reply passes through the bundled
+  ConPTY, every state draws, and a real Claude Code session dropped its
+  glyph and showed the green dot when it finished.
 - **SSH sessions are found by polling.** Windows doesn't announce them, so
   every 3 seconds one process snapshot is searched below each tab's shell
   for an SSH client (ssh.exe, PuTTY's plink.exe, or wsl.exe running ssh)
