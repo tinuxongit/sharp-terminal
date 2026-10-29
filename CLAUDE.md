@@ -495,8 +495,11 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   gains two branches (`src/config/url.zig`, compiled in only there): drive
   paths like `C:\Users\me\shot.png`, and relative ones like
   `src\main.zig:12:5` that contain a dot, so `DOMAIN\user` isn't a link.
-  A space ends a path. Not yet tried by hand: a click's Ctrl is read from
-  the real keyboard.
+  A space ends a path. Checked 2026-10-29 in a Sharp with its own config
+  (Ctrl held only in its input state, the pointer on the link, since
+  Ghostty reads the real pointer on press): a printed folder and an OSC 8
+  `file://` folder opened in Explorer, a PNG in Photos, and a `.cmd`
+  asked and didn't run when cancelled.
 - **Copy and paste use Windows' keys.** `clipboard-keys = windows`, the
   default, binds `performable:ctrl+c=copy_to_clipboard` and
   `performable:ctrl+v=paste_from_clipboard` on the loaded config, unless
