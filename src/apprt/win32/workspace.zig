@@ -11,6 +11,7 @@ const tab_strip = @import("tab_strip.zig");
 const profiles = @import("profiles.zig");
 const new_tab_menu = @import("new_tab_menu.zig");
 const tab_sidebar = @import("tab_sidebar.zig");
+const tab_status = @import("tab_status.zig");
 const folder_picker = @import("folder_picker.zig");
 const canvas_mod = @import("canvas.zig");
 const SearchField = @import("SearchField.zig");
@@ -61,6 +62,7 @@ pub fn paintSidebar(self: *Window, hdc_screen: w32.HDC, palette: tab_strip.Palet
             .group_label = groupLabel(self, i, &labels[i]),
             .age_ms = now -| surface.opened_ms,
             .attention = tabNeedsAttention(self, i),
+            .status = tab_status.ofTab(&self.tab_trees[i]),
         };
     }
     var collapsed: [Window.max_collapsed][]const u8 = undefined;

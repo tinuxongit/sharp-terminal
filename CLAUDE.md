@@ -151,6 +151,8 @@ commands and conventions; this file covers what is specific to Sharp.
   (`tab_colors.zon`); the color lives on the tab's panes, like its icon.
 - `src/apprt/win32/tab_order.zig`: Ctrl+Tab in the order tabs were last
   used (`tab-switch-order = recent`).
+- `src/apprt/win32/tab_status.zig`: what a tab shows of the state its
+  programs report (OSC 7501), for the strip and the sidebar.
 - `src/apprt/win32/mark_mode.zig`: selecting with the keyboard and
   block selection; `shell_open.zig` shows a folder in Explorer.
 - `src/apprt/win32/startup.zig`: starting Sharp at sign-in.
@@ -360,6 +362,20 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   (`ai-resume-claude`, on by default) turns it off. Checked 2026-10-28
   with a throwaway Claude config: a saved conversation resumed, an unsaved
   one typed nothing.
+- **Tabs show what their programs report, through OSC 7501.** Claude Code
+  asks the terminal whether it speaks the Program Status Protocol
+  (`OSC 7501 ; ?`) and, if it gets an answer, reports working, done,
+  waiting on the user (blocked) or failed, and drops the status glyph from
+  its title. Upstream parses the protocol but its app ignores it, so the
+  core gains one action, `program_status`, carrying the state of the
+  program's own record; records with ids (its subtasks) aren't shown.
+  Each tab shows its most urgent pane: a ring while working, then a green
+  (done), amber (waiting) or red (failed) dot, before the title in the
+  strip and in the sidebar's right column, below close on hover and the
+  bell dot. The program decides when done becomes idle again. Claude
+  sessions started before this build asked once at start and got no
+  answer, so they keep their glyph until restarted. Not yet tried in the
+  app.
 - **SSH sessions are found by polling.** Windows doesn't announce them, so
   every 3 seconds one process snapshot is searched below each tab's shell
   for an SSH client (ssh.exe, PuTTY's plink.exe, or wsl.exe running ssh)

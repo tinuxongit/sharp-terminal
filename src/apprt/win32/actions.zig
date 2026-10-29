@@ -108,6 +108,19 @@ pub fn performAction(
             return true;
         },
 
+        .program_status => {
+            switch (target) {
+                .app => {},
+                .surface => |core_surface| {
+                    const surface = core_surface.rt_surface;
+                    if (surface.program_status == value) return true;
+                    surface.program_status = value;
+                    surface.parent_window.invalidateTabBar();
+                },
+            }
+            return true;
+        },
+
         .ring_bell => {
             // A bell from a tab out of sight marks it in the tab sidebar.
             switch (target) {

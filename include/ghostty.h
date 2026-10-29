@@ -623,6 +623,15 @@ typedef enum {
   GHOSTTY_SHARP_BLOCK_SELECTION,
 } ghostty_action_sharp_e;
 
+// apprt.action.ProgramStatus
+typedef enum {
+  GHOSTTY_PROGRAM_STATUS_IDLE,
+  GHOSTTY_PROGRAM_STATUS_WORKING,
+  GHOSTTY_PROGRAM_STATUS_DONE,
+  GHOSTTY_PROGRAM_STATUS_BLOCKED,
+  GHOSTTY_PROGRAM_STATUS_ERROR,
+} ghostty_action_program_status_e;
+
 // apprt.action.SplitPane
 typedef enum {
   GHOSTTY_SPLIT_PANE_SWAP_NEXT,
@@ -1036,6 +1045,7 @@ typedef enum {
   GHOSTTY_ACTION_RESIZE_WINDOW,
   GHOSTTY_ACTION_SPLIT_PANE,
   GHOSTTY_ACTION_SHARP,
+  GHOSTTY_ACTION_PROGRAM_STATUS,
 } ghostty_action_tag_e;
 
 typedef union {
@@ -1046,6 +1056,7 @@ typedef union {
   ghostty_action_goto_split_e goto_split;
   ghostty_action_split_pane_e split_pane;
   ghostty_action_sharp_e sharp;
+  ghostty_action_program_status_e program_status;
   ghostty_action_goto_window_e goto_window;
   ghostty_action_resize_split_s resize_split;
   ghostty_action_size_limit_s size_limit;

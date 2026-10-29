@@ -344,6 +344,7 @@ pub const StreamHandler = struct {
             .report_pwd => try self.reportPwd(value.url),
             .show_desktop_notification => try self.showDesktopNotification(value.title, value.body),
             .progress_report => self.progressReport(value),
+            .program_status => try self.programStatus(value),
             .start_hyperlink => try self.startHyperlink(value.uri, value.id),
             .clipboard_contents => try self.clipboardContents(value.kind, value.data),
             .semantic_prompt => try self.semanticPrompt(value),
@@ -384,7 +385,6 @@ pub const StreamHandler = struct {
             .title_pop,
             .kitty_dnd,
             .osc_unknown,
-            .program_status,
             => {},
         }
     }
@@ -1976,6 +1976,25 @@ pub const StreamHandler = struct {
     /// Display a GUI progress report.
     fn progressReport(self: *StreamHandler, report: terminal.osc.Command.ProgressReport) void {
         self.surfaceMessageWriter(.{ .progress_report = report });
+    }
+
+    /// OSC 7501. Programs that ask, like Claude Code, report their state
+    /// only once the query is answered, and then leave the status glyph
+    /// out of their title, so the app shows the state instead.
+    fn programStatus(self: *StreamHandler, cmd: terminal.osc.Command.ProgramStatus) !void {
+        switch (cmd) {
+            .query => |terminator| switch (terminator) {
+                inline else => |t| self.messageWriter(try termio.Message.writeReq(
+                    self.alloc,
+                    "\x1b]7501;" ++ terminal.osc.program_status.query_reply ++ comptime t.string(),
+                )),
+            },
+            // Records with ids are a program's subtasks; the app shows
+            // only the program itself.
+            .report => |report| if (report.readOption(.id) == null) {
+                self.surfaceMessageWriter(.{ .program_status = report.state });
+            },
+        }
     }
 };
 

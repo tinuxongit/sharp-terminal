@@ -6,6 +6,7 @@ const std = @import("std");
 const w32 = @import("win32.zig");
 const canvas_mod = @import("canvas.zig");
 const tab_strip = @import("tab_strip.zig");
+const tab_status = @import("tab_status.zig");
 const profiles = @import("profiles.zig");
 const SearchField = @import("SearchField.zig");
 const ai_usage = @import("ai_usage.zig");
@@ -59,6 +60,7 @@ pub const Item = struct {
     group_label: []const u8,
     age_ms: u64,
     attention: bool,
+    status: tab_status.Status,
 };
 
 pub const Target = union(enum) {
@@ -392,13 +394,15 @@ fn paintItem(p: *Painter, item: Item, y: i32) i32 {
     const active = item.tab == p.state.active;
     const dragged = p.state.dragging == item.tab;
     const hovered = !dragged and (p.state.hover.eql(.{ .tab = item.tab }) or p.state.hover.eql(.{ .close = item.tab }));
-    if (dragged) {
-        p.c.fillRounded(row, p.px(corner), p.palette.hover.mix(p.palette.contrast, 0.08));
-    } else if (active) {
-        p.c.fillRounded(row, p.px(corner), p.palette.active_tab);
-    } else if (hovered) {
-        p.c.fillRounded(row, p.px(corner), p.palette.hover);
-    }
+    const background = if (dragged)
+        p.palette.hover.mix(p.palette.contrast, 0.08)
+    else if (active)
+        p.palette.active_tab
+    else if (hovered)
+        p.palette.hover
+    else
+        p.palette.strip;
+    if (dragged or active or hovered) p.c.fillRounded(row, p.px(corner), background);
 
     const icon_left = row.left + p.px(item_indent);
     const size = p.px(icon_size);
@@ -411,7 +415,8 @@ fn paintItem(p: *Painter, item: Item, y: i32) i32 {
     p.c.text(.{ .left = icon_left + size + p.px(10), .top = y, .right = side.left - p.px(4), .bottom = y + h }, item.title, p.fonts.item, title_color, .left);
 
     // The right column shows, in order of priority: close on hover, the
-    // bell dot, or how long ago the tab opened.
+    // bell dot, what its program says it is doing, or how long ago the
+    // tab opened.
     const button = p.px(button_size);
     const close: w32.RECT = .{ .left = side.right - button, .top = y + @divTrunc(h - button, 2), .right = side.right, .bottom = y + @divTrunc(h - button, 2) + button };
     if (hovered) {
@@ -421,6 +426,10 @@ fn paintItem(p: *Painter, item: Item, y: i32) i32 {
         const d = p.px(dot_size);
         const dot: w32.RECT = .{ .left = side.right - p.px(10) - d, .top = y + @divTrunc(h - d, 2), .right = side.right - p.px(10), .bottom = y + @divTrunc(h - d, 2) + d };
         p.c.fillRounded(dot, @divTrunc(d, 2), attention_red);
+    } else if (item.status != .idle) {
+        const d = p.px(dot_size);
+        const mark: w32.RECT = .{ .left = side.right - p.px(10) - d, .top = y, .right = side.right - p.px(10), .bottom = y + h };
+        tab_status.paint(p.c, mark, item.status, d, title_color, background);
     } else {
         var buf: [8]u8 = undefined;
         p.c.text(side, age(&buf, item.age_ms), p.fonts.small, p.palette.text_dim, .right);

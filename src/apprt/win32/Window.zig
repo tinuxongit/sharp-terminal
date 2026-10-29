@@ -16,6 +16,7 @@ const w32 = @import("win32.zig");
 const brand = @import("brand.zig");
 const wide_string = @import("wide_string.zig");
 const tab_strip = @import("tab_strip.zig");
+const tab_status = @import("tab_status.zig");
 const SettingsPanel = @import("SettingsPanel.zig");
 const BrowserPanel = @import("BrowserPanel.zig");
 const browser_dock = @import("browser_dock.zig");
@@ -1428,6 +1429,11 @@ pub fn paintTabBar(self: *Window) void {
                 var on: [MAX_TABS]bool = undefined;
                 for (0..self.tab_count) |i| on[i] = self.tab_active_surface[i].broadcast;
                 break :broadcast on[0..self.tab_count];
+            },
+            .status = status: {
+                var status: [MAX_TABS]tab_status.Status = undefined;
+                for (0..self.tab_count) |i| status[i] = tab_status.ofTab(&self.tab_trees[i]);
+                break :status status[0..self.tab_count];
             },
         },
         .{

@@ -371,6 +371,10 @@ pub const Action = union(Key) {
     /// An action of Sharp's Windows app (input.Binding.Action sharp).
     sharp: Sharp,
 
+    /// What the program running in the target says it is doing, through
+    /// the Program Status Protocol (OSC 7501).
+    program_status: ProgramStatus,
+
     /// Sync with: ghostty_action_tag_e
     pub const Key = enum(c_int) {
         quit,
@@ -445,6 +449,7 @@ pub const Action = union(Key) {
         resize_window,
         split_pane,
         sharp,
+        program_status,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_ACTION_");
@@ -540,6 +545,32 @@ pub const Sharp = enum(c_int) {
 
     test "ghostty.h Sharp" {
         try lib.checkGhosttyHEnum(Sharp, "GHOSTTY_SHARP_");
+    }
+};
+
+/// The state of the program's own record (the one without an id). Records
+/// with ids, such as a program's subtasks, aren't passed on.
+pub const ProgramStatus = enum(c_int) {
+    idle,
+    working,
+    done,
+    blocked,
+    @"error",
+
+    /// A cleared record means the program reports nothing, which shows
+    /// as idle.
+    pub fn init(state: terminal.osc.Command.ProgramStatus.State) ProgramStatus {
+        return switch (state) {
+            .idle, .clear => .idle,
+            .working => .working,
+            .done => .done,
+            .blocked => .blocked,
+            .@"error" => .@"error",
+        };
+    }
+
+    test "ghostty.h ProgramStatus" {
+        try lib.checkGhosttyHEnum(ProgramStatus, "GHOSTTY_PROGRAM_STATUS_");
     }
 };
 

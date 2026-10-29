@@ -9,6 +9,7 @@
 const std = @import("std");
 const w32 = @import("win32.zig");
 const canvas_mod = @import("canvas.zig");
+const tab_status = @import("tab_status.zig");
 const Canvas = canvas_mod.Canvas;
 pub const Rgb = canvas_mod.Rgb;
 
@@ -71,6 +72,8 @@ const new_tab_menu_width = 22.0;
 const new_tab_gap = 4.0;
 const tab_icon_size = 16.0;
 const tab_icon_gap = 8.0;
+/// The status mark before a tab's title (`tab_status.zig`).
+const status_size = 8.0;
 const caption_button_width = 46.0;
 /// Space kept free between the buttons and the caption buttons so the
 /// window can always be dragged, however many tabs are open.
@@ -390,6 +393,8 @@ pub const Titles = struct {
     colors: []const ?Rgb,
     /// Whether typing in each tab goes to all its panes.
     broadcast: []const bool,
+    /// What each tab's programs say they are doing.
+    status: []const tab_status.Status,
 };
 
 /// Paint the whole strip. Shapes go straight into the pixels and text
@@ -501,6 +506,12 @@ fn paintTab(canvas: Canvas, layout: Layout, palette: Palette, fonts: Fonts, titl
         const mark: w32.RECT = .{ .left = text_rect.left, .top = text_rect.top, .right = text_rect.left + size, .bottom = text_rect.bottom };
         canvas.glyph(mark, @backingInt(Glyph.broadcast), fonts.icons_small, text_color);
         text_rect.left += size + layout.px(4);
+    }
+    if (titles.status[i] != .idle) {
+        const size = layout.px(status_size);
+        const mark: w32.RECT = .{ .left = text_rect.left, .top = text_rect.top, .right = text_rect.left + size, .bottom = text_rect.bottom };
+        tab_status.paint(canvas, mark, titles.status[i], size, text_color, background);
+        text_rect.left += size + layout.px(6);
     }
     const len = titles.lens[i];
     if (len > 0 and text_rect.right > text_rect.left) {
