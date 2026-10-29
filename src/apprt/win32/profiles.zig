@@ -66,9 +66,17 @@ pub const Sidebar = struct {
     ai: AiUsage,
 };
 
+/// cmd.exe's command history across tabs (command_history.zig).
+pub const History = struct {
+    shells: []const []const u8,
+    size: u16,
+    private: []const []const u8,
+};
+
 pub const Data = struct {
     hidden_wsl_prefixes: []const []const u8,
     profiles: []const Template,
+    history: History,
     sidebar: Sidebar,
     menu: Menu,
 };
@@ -88,6 +96,7 @@ comptime {
             @compileError("profiles.zon: '" ++ t.name ++ "' repeats per " ++ @tagName(t.source) ++ " but its command never uses " ++ placeholder);
     }
     if (defaults != 1) @compileError("profiles.zon: exactly one profile must be .default");
+    if (data.history.size == 0) @compileError("profiles.zon: .history.size must keep at least one command");
 }
 
 pub const Profile = struct {

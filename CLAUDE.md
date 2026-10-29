@@ -131,12 +131,15 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/folder_picker.zig`: Windows' folder picker, behind the
   buttons on a sidebar section's title.
 - `src/termio/cmd_prompt.zig`: makes cmd.exe report its folder (OSC 7)
-  through its PROMPT.
+  and mark its prompt (OSC 133) through its PROMPT.
+- `src/apprt/win32/command_history.zig`: cmd.exe's commands kept across
+  tabs, for Up and Down (`.history` in `profiles.zon`).
 - `src/apprt/win32/SearchField.zig`: the search box shared by the settings
   panel and the tab sidebar.
 - `src/apprt/win32/spots.zig`: clickable regions recorded while painting.
 - `src/apprt/win32/config_file.zig`: reads and changes one key of the
-  user's Ghostty config file, leaving the rest of it untouched.
+  user's Ghostty config file, leaving the rest of it untouched, and says
+  where Sharp's own files beside it go.
 - `src/apprt/win32/default_terminal.zig`: makes Sharp Windows' default
   terminal and gives the previous choice back (the registry side).
   `terminal_handoff.zig` is the COM class Windows Terminal's console hands
@@ -239,9 +242,22 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   width until the pointer leaves them. Numbers come from Chromium's
   `tab_style.cc` and `tab.cc`.
 - **Closing asks only when a command is running.** Shells with prompt
-  marks (PowerShell with Sharp's integration) answer through the prompt
-  test. `cmd.exe` sends none, so on Windows a command counts as running
-  when closing would end a program (`Subprocess.commandRunning`).
+  marks answer through the prompt test, but a program that closing would
+  end (`Subprocess.commandRunning`) asks even at a prompt: cmd.exe's marks
+  come from its PROMPT and never say that a command started.
+- **cmd.exe's commands are kept across tabs, as PSReadLine keeps
+  PowerShell's.** cmd forgets its history when its tab closes, so every new
+  or restored tab started empty. Its console can't be given one, so Sharp
+  keeps its own: cmd's PROMPT gains `133;A` and `133;B` marks (the ones
+  Microsoft documents for cmd; `133;I` would make ConPTY ask for the cursor
+  on every prompt), Enter at the prompt reads the typed line off the
+  screen, and Up or Down sends Escape (which clears cmd's line) and types
+  the recalled command. Only while the cursor is on the prompt's row and
+  no program runs in the tab's job, so programs keep their own arrows.
+  Saved in `sharp-cmd-history` beside the config file; commands with
+  words like "password" or "token" stay in memory only, as in PSReadLine.
+  Checked 2026-10-29 through the bundled ConPTY that the marks pass
+  through and that Escape clears the line; not yet tried in the app.
 - **A tab's programs end with it.** Each shell starts inside its own Job
   Object (`PROC_THREAD_ATTRIBUTE_JOB_LIST`, so nothing escapes before it
   is assigned), which catches every program it launches even after the

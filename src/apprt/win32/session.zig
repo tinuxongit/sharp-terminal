@@ -16,7 +16,7 @@
 //! conversation it was running, since no Windows path may contain it.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const configpkg = @import("../../config.zig");
+const config_file = @import("config_file.zig");
 const global = @import("../../global.zig");
 
 const file_name = "sharp-session";
@@ -56,10 +56,7 @@ pub const Loaded = struct {
 };
 
 fn path(alloc: Allocator) ![]u8 {
-    const config_path = try configpkg.edit.openPath(alloc);
-    defer alloc.free(config_path);
-    const dir = std.fs.path.dirname(config_path) orelse return error.NoConfigFolder;
-    return std.fs.path.join(alloc, &.{ dir, file_name });
+    return config_file.besideConfig(alloc, file_name);
 }
 
 /// The saved session, or null when there is none. A malformed line is

@@ -5,6 +5,7 @@ const Surface = @This();
 const std = @import("std");
 const profile_config = @import("profile_config.zig");
 const mark_mode = @import("mark_mode.zig");
+const command_history = @import("command_history.zig");
 const canvas = @import("canvas.zig");
 const Allocator = std.mem.Allocator;
 const apprt = @import("../../apprt.zig");
@@ -65,6 +66,11 @@ tab_color: ?canvas.Rgb = null,
 broadcast: bool = false,
 /// Keys select text instead of reaching the program (mark_mode.zig).
 marking: bool = false,
+/// Whether Sharp keeps this pane's shell's commands (command_history.zig),
+/// once its process is known.
+history_shell: ?bool = null,
+/// How many commands back Up has gone since the last Enter.
+history_back: usize = 0,
 
 /// What the tab sidebar shows about this surface: where its shell runs,
 /// its folder (from OSC 7, when the shell reports it), when it opened and
@@ -1076,6 +1082,8 @@ pub fn handleKeyEvent(self: *Surface, wparam: usize, lparam: isize, action: inpu
             // If a keybinding consumed the event, don't send Win32 input.
             if (effect == .consumed or effect == .closed) return;
         }
+
+        if (action != .release and command_history.key(self, vk, mods)) return;
 
         // No binding matched — send as Win32 input sequence.
         win32_input.sendWin32InputEvent(self, vk, lparam, action);

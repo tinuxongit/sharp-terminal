@@ -8,6 +8,7 @@ const configpkg = @import("../../config.zig");
 const Config = configpkg.Config;
 const background_style = @import("background_style.zig");
 const clipboard_keys = @import("clipboard_keys.zig");
+const config_file = @import("config_file.zig");
 
 const log = std.log.scoped(.profile_config);
 
@@ -16,10 +17,7 @@ const extension = ".ghostty";
 
 /// The folder of the shells' files, beside the config file.
 pub fn folder(alloc: std.mem.Allocator) ![]u8 {
-    const config_path = try configpkg.edit.openPath(alloc);
-    defer alloc.free(config_path);
-    const dir = std.fs.path.dirname(config_path) orelse return error.NoConfigFolder;
-    return std.fs.path.join(alloc, &.{ dir, folder_name });
+    return config_file.besideConfig(alloc, folder_name);
 }
 
 /// The config of shell `name`'s tabs when it has a file of its own: the

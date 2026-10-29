@@ -1023,7 +1023,10 @@ pub fn needsConfirmQuit(self: *Surface) bool {
                     t.screens.active_key == .alternate or t.screens.active.semantic_prompt.seen,
                 };
             };
-            if (at_prompt) break :true false;
+            // cmd.exe's marks come from its PROMPT and never say that a
+            // command started, so where the OS can tell, a program still
+            // running outweighs a cursor left on a prompt row.
+            if (at_prompt) break :true self.io.commandRunning() orelse false;
 
             // Shells without prompt marks (cmd.exe) can't say whether they
             // are at a prompt. Where the OS can tell whether the shell is

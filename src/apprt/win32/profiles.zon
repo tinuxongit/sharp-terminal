@@ -47,6 +47,18 @@
         },
         .{ .name = "{distro}", .source = .wsl, .command = "wsl.exe -d {distro}", .icon = "wsl.exe", .paths = .wsl },
     },
+    // Up and Down recall commands typed in any tab of these shells, kept
+    // in `sharp-cmd-history` beside the config file. cmd.exe forgets its
+    // own when its tab closes; PowerShell and bash keep theirs.
+    .history = .{
+        .shells = .{"cmd.exe"},
+        // How many commands are kept; older ones are dropped.
+        .size = 1000,
+        // A command containing one of these, in any case, is recalled
+        // until Sharp quits but never written to the file, as PSReadLine
+        // does.
+        .private = .{ "password", "asplaintext", "token", "apikey", "secret" },
+    },
     // The tab sidebar's text. Tabs are listed by where their shell runs.
     .sidebar = .{
         .search_placeholder = "Search",

@@ -8,6 +8,14 @@ const global = @import("../../global.zig");
 /// Larger files are not something a person keeps by hand.
 const max_size = 1024 * 1024;
 
+/// The path of Sharp's file `name` in the config file's folder.
+pub fn besideConfig(alloc: Allocator, name: []const u8) ![]u8 {
+    const config_path = try configpkg.edit.openPath(alloc);
+    defer alloc.free(config_path);
+    const dir = std.fs.path.dirname(config_path) orelse return error.NoConfigFolder;
+    return std.fs.path.join(alloc, &.{ dir, name });
+}
+
 /// The config file's contents, created empty if it doesn't exist yet.
 pub fn read(alloc: Allocator) ![]u8 {
     const path = try configpkg.edit.openPath(alloc);
