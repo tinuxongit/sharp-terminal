@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const oni = @import("oniguruma");
 
 /// Default URL/path regex. This is used to detect URLs and file paths in
@@ -106,12 +107,39 @@ const bare_relative_path_branch =
     path_chars ++ "+" ++
     no_trailing_colon;
 
+const windows_path_segment =
+    \\[\w\-.~$&+=%@#!]
+;
+
+// Branch 4, on Windows only: drive paths such as C:\Users\me\shot.png,
+// which programs there print with backslashes. Spaces end the path, since
+// a sentence may follow it. Segments are separated unambiguously so a
+// failed match can't backtrack through every way of splitting a name.
+const windows_path_branch =
+    \\(?<![\w\\\/])[A-Za-z]:[\\\/]
+++
+    windows_path_segment ++ "*" ++
+    "(?:[\\\\\\/]" ++ windows_path_segment ++ "+)*" ++
+    "[\\\\\\/]?" ++
+    no_trailing_punctuation;
+
+// Branch 5, on Windows only: relative paths with backslashes, such as
+// src\main.zig:12:5 from a compiler. A dot must follow, as in branch 3, so
+// DOMAIN\user isn't a link.
+const windows_relative_path_branch =
+    \\(?<![\w\\\/:.$-])(?=[\w\-.~$&+=%@#!\\]*\.)
+++
+    windows_path_segment ++ "+" ++
+    "(?:\\\\" ++ windows_path_segment ++ "+)+" ++
+    no_trailing_punctuation;
+
 pub const regex =
     scheme_url_branch ++
     "|" ++
     rooted_or_relative_path_branch ++
     "|" ++
-    bare_relative_path_branch;
+    bare_relative_path_branch ++
+    (if (builtin.target.os.tag == .windows) "|" ++ windows_path_branch ++ "|" ++ windows_relative_path_branch else "");
 
 test "url regex" {
     const testing = std.testing;
