@@ -11,6 +11,11 @@ const browser_page = @import("browser_page.zig");
 const locator = @import("browser_locator.zig");
 const browser_frames = @import("browser_frames.zig");
 const claude_session = @import("claude_session.zig");
+const pointer = @import("browser_pointer.zig");
+const gestures = @import("browser_gestures.zig");
+const screenshots = @import("browser_screenshot.zig");
+const browser_settings = @import("browser_settings.zig");
+const BrowserTab = @import("BrowserTab.zig");
 const json_read = @import("json_read.zig");
 const Page = browser_page.Page;
 const Point = browser_page.Point;
@@ -45,7 +50,7 @@ comptime {
     }
 }
 
-const Action = enum { navigate, back, forward, reload, click, hover, type, press, scroll, select, upload, wait, evaluate, dialog };
+const Action = enum { navigate, back, forward, reload, click, hover, type, press, scroll, swipe, select, upload, wait, evaluate, dialog, emulate, resize };
 
 /// What a tool answers: text, and a JPEG (base64) when it took a picture.
 pub const Output = struct {
@@ -115,8 +120,14 @@ fn snapshot(page: *Page, args: Value) !Output {
             try out.writer.print("{s}\n… truncated. Snapshot a ref or selector to see the rest.", .{text[0..cut]});
         }
     }
-    const image = if (boolean(args, "screenshot") orelse false) try page.screenshot() else null;
+    const image = if (boolean(args, "screenshot") orelse false) try screenshots.take(page, try scopeNode(page, args), boolean(args, "fullPage") orelse false) else null;
     return .{ .text = out.written(), .image = image };
+}
+
+fn scopeNode(page: *Page, args: Value) !?locator.Node {
+    if (string(args, "ref")) |ref| return try locator.fromRef(page, ref);
+    if (string(args, "selector") == null) return null;
+    return locator.find(page, args);
 }
 
 fn scopeRef(page: *Page, args: Value) !?[]const u8 {
@@ -178,17 +189,26 @@ fn perform(page: *Page, args: Value, act: Action) !?[]const u8 {
             page.settle(false);
         },
         .click => {
-            const point = try locator.target(page, args, "click");
+            const aim = try locator.aim(page, args, "click");
+            try showPress(page, aim);
             if (page.devtools("Page.setInterceptFileChooserDialog", .{ .enabled = true })) |_| {} else |err| if (err == error.Dialog) return err;
             defer _ = page.devtools("Page.setInterceptFileChooserDialog", .{ .enabled = false }) catch null;
-            try page.click(point);
+            try page.click(aim.at);
+            pointer.rest(page);
             page.settle(false);
         },
-        .hover => try page.mouse("mouseMoved", try locator.target(page, args, "hover"), "none"),
+        .hover => {
+            const aim = try locator.aim(page, args, "hover");
+            try pointer.moveTo(page, aim.at);
+            try page.mouse("mouseMoved", aim.at, "none");
+        },
         .type => {
             const text = string(args, "text") orelse return page.fail("type needs text.", .{});
             if (try locator.find(page, args)) |node| {
-                try page.click(locator.center(try locator.elementBox(page, node, .content)));
+                const b = try locator.elementBox(page, node, .content);
+                try showPress(page, .{ .at = locator.center(b), .box = b });
+                try page.click(locator.center(b));
+                pointer.rest(page);
                 _ = try locator.call(page, node, locator.select_contents, null);
             }
             _ = try page.devtools("Input.insertText", .{ .text = text });
@@ -207,9 +227,15 @@ fn perform(page: *Page, args: Value, act: Action) !?[]const u8 {
             };
             _ = try page.devtools("Input.dispatchMouseEvent", .{ .type = "mouseWheel", .x = point.x, .y = point.y, .deltaX = dx, .deltaY = dy });
         },
+        .swipe => {
+            const result = try gestures.swipe(page, args);
+            page.settle(false);
+            return result;
+        },
         .select => {
             const option = string(args, "option") orelse return page.fail("select needs the option's value or visible text.", .{});
             const node = (try locator.find(page, args)) orelse return page.fail("Choose the dropdown by ref, selector or role.", .{});
+            try showNodePress(page, node);
             const chosen = try locator.call(page, node, locator.choose_option, option);
             page.settle(false);
             return try std.fmt.allocPrint(page.arena, "Selected {s}", .{if (chosen == .string) chosen.string else option});
@@ -217,6 +243,7 @@ fn perform(page: *Page, args: Value, act: Action) !?[]const u8 {
         .upload => {
             const node = (try locator.find(page, args)) orelse return page.fail("Choose the file input by ref, selector or role.", .{});
             const files = try uploadPaths(page, args);
+            try showNodePress(page, node);
             _ = try page.devtoolsIn(node.session, "DOM.setFileInputFiles", .{ .files = files, .backendNodeId = node.backend, .objectId = node.object });
             page.settle(false);
             return try std.fmt.allocPrint(page.arena, "Chose {d} file{s}", .{ files.len, if (files.len == 1) "" else "s" });
@@ -230,8 +257,38 @@ fn perform(page: *Page, args: Value, act: Action) !?[]const u8 {
             _ = try page.remoteCall(.{ .answer = .{ .tab = page.tab, .accept = boolean(args, "accept") orelse true, .text = string(args, "text") orelse "" } }, 5_000);
             page.settle(false);
         },
+        .emulate => {
+            const color = if (string(args, "colorScheme")) |c| std.meta.stringToEnum(BrowserTab.ColorScheme, c) orelse
+                return page.fail("colorScheme is light, dark or none.", .{}) else null;
+            const motion = if (string(args, "reducedMotion")) |m| std.meta.stringToEnum(BrowserTab.Motion, m) orelse
+                return page.fail("reducedMotion is reduce, no-preference or none.", .{}) else null;
+            if (color == null and motion == null) return page.fail("emulate needs colorScheme or reducedMotion.", .{});
+            _ = try page.remoteCall(.{ .media = .{ .tab = page.tab, .color = color, .motion = motion } }, 5_000);
+        },
+        .resize => {
+            const limits = browser_settings.data.viewport_limits;
+            const width = number(args, "width") orelse return page.fail("resize needs width and height.", .{});
+            const height = number(args, "height") orelse return page.fail("resize needs width and height.", .{});
+            if (width < @as(f64, @floatFromInt(limits.min_width)) or width > @as(f64, @floatFromInt(limits.max_width)) or
+                height < @as(f64, @floatFromInt(limits.min_height)) or height > @as(f64, @floatFromInt(limits.max_height)))
+                return page.fail("Use a width from {d} to {d} and a height from {d} to {d}.", .{ limits.min_width, limits.max_width, limits.min_height, limits.max_height });
+            const mobile = boolean(args, "mobile");
+            _ = try page.remoteCall(.{ .viewport = .{ .tab = page.tab, .width = @intFromFloat(width), .height = @intFromFloat(height), .mobile = mobile } }, 5_000);
+            page.settle(false);
+        },
     }
     return null;
+}
+
+fn showPress(page: *Page, aim: locator.Aim) !void {
+    try pointer.moveTo(page, aim.at);
+    try pointer.press(page, aim.at, aim.box);
+}
+
+fn showNodePress(page: *Page, node: locator.Node) !void {
+    const b = try locator.elementBox(page, node, .content);
+    try showPress(page, .{ .at = locator.center(b), .box = b });
+    pointer.rest(page);
 }
 
 fn uploadPaths(page: *Page, args: Value) ![]const []const u8 {

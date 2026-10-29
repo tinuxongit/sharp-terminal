@@ -32,7 +32,18 @@ const PageInfo = struct {
 
 /// One tool call's view of the page, with why it failed in words for
 /// Claude.
-pub const TabInfo = struct { id: u32, title: []const u8, url: []const u8, active: bool };
+pub const TabInfo = struct {
+    id: u32,
+    title: []const u8,
+    url: []const u8,
+    active: bool,
+    width: u32 = 0,
+    height: u32 = 0,
+    mobile: bool = false,
+    in_sight: bool = false,
+    scale: f64 = 1,
+    pointer: ?[2]f64 = null,
+};
 
 pub const Frame = struct { key: u32, session: []const u8, target: []const u8, parent: []const u8 };
 
@@ -128,6 +139,11 @@ pub const Page = struct {
         self.tab = try self.parseId(try self.remoteCall(.{ .select = .{ .tab = @intFromFloat(wanted) } }, 5_000));
     }
 
+    pub fn own(self: *Page) !TabInfo {
+        for (try self.tabs()) |t| if (t.id == self.tab) return t;
+        return self.fail("That tab was closed. browser_tabs lists the open ones.", .{});
+    }
+
     pub fn tabs(self: *Page) ![]const TabInfo {
         const json = try self.remoteCall(.tabs, 5_000);
         return std.json.parseFromSliceLeaky([]const TabInfo, self.arena, json, .{ .allocate = .alloc_always }) catch
@@ -208,22 +224,11 @@ pub const Page = struct {
     /// Title, address and viewport, which every snapshot starts with.
     pub fn header(self: *Page, w: *std.Io.Writer) !void {
         const i = try self.info();
-        try w.print("{s}\n{s}\nViewport: {d} × {d}. Screenshot coordinates use these dimensions. Use [ref=N] values with browser_action ref.", .{ i.title, i.url, i.width, i.height });
+        const mobile = (try self.own()).mobile;
+        try w.print("{s}\n{s}\nViewport: {d} × {d} ({s}). Screenshot coordinates use these dimensions. Use [ref=N] values with browser_action ref.", .{ i.title, i.url, i.width, i.height, if (mobile) "mobile" else "desktop" });
         const unread = try self.remoteCall(.{ .logs = .{ .tab = self.tab, .since_ms = 0, .clear = false } }, 5_000);
         const errors = std.mem.count(u8, unread, "[error]");
         if (errors > 0) try w.print(" {d} unread error{s} in browser_logs.", .{ errors, if (errors == 1) "" else "s" });
-    }
-
-    /// The viewport as a JPEG, in CSS pixels so its coordinates are the
-    /// ones click takes.
-    pub fn screenshot(self: *Page) ![]const u8 {
-        const i = try self.info();
-        const answer = try self.devtools("Page.captureScreenshot", .{
-            .format = "jpeg",
-            .quality = 80,
-            .clip = .{ .x = i.scroll_x, .y = i.scroll_y, .width = i.width, .height = i.height, .scale = 1 / @max(i.pixel_ratio, 0.1) },
-        });
-        return string(answer, "data") orelse self.fail("The page gave no picture.", .{});
     }
 
     pub fn mouse(self: *Page, kind: []const u8, p: Point, button: []const u8) !void {

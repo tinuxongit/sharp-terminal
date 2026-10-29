@@ -20,6 +20,7 @@ const browser_settings = @import("browser_settings.zig");
 const browser_messages = @import("browser_messages.zig");
 const browser_chats = @import("browser_chats.zig");
 const dialog_bar = @import("browser_dialog_bar.zig");
+const browser_cover = @import("browser_cover.zig");
 
 const Owner = browser_chats.Owner;
 
@@ -43,6 +44,7 @@ var class_atom: u16 = 0;
 const Target = toolbar.Target;
 
 hwnd: w32.HWND,
+instance: w32.HINSTANCE,
 scale: f32,
 palette: tab_strip.Palette,
 fonts: tab_strip.Fonts = .{},
@@ -59,6 +61,7 @@ shown: bool = true,
 /// Shows the active page's address, or what is being typed.
 address: SearchField = .{},
 dialog_field: SearchField = .{},
+cover: browser_cover.Cover = .{},
 hover: Target = .none,
 pressed: Target = .none,
 tracking_mouse: bool = false,
@@ -100,7 +103,7 @@ pub fn create(instance: w32.HINSTANCE, parent: w32.HWND, rect: w32.RECT, scale: 
         _ = w32.DestroyWindow(hwnd);
         return err;
     };
-    self.* = .{ .hwnd = hwnd, .scale = scale, .palette = palette, .engine = engine, .owner = owner, .shown = shown };
+    self.* = .{ .hwnd = hwnd, .instance = instance, .scale = scale, .palette = palette, .engine = engine, .owner = owner, .shown = shown };
     _ = w32.SetWindowLongPtrW(hwnd, w32.GWLP_USERDATA, @bitCast(@intFromPtr(self)));
     self.initFonts();
     browser_engine.start(self);
@@ -113,6 +116,7 @@ pub fn destroy(self: *BrowserPanel) void {
         alloc.destroy(tab);
     }
     self.tab_count = 0;
+    self.cover.hide();
     if (self.environment) |e| e.release();
     _ = w32.SetWindowLongPtrW(self.hwnd, w32.GWLP_USERDATA, 0);
     _ = w32.DestroyWindow(self.hwnd);
@@ -268,7 +272,7 @@ pub fn park(self: *BrowserPanel, tab: *BrowserTab, parked: bool) void {
     self.refresh();
 }
 
-fn inSight(self: *BrowserPanel, tab: *const BrowserTab) bool {
+pub fn inSight(self: *BrowserPanel, tab: *const BrowserTab) bool {
     return self.shown and tab.owner == self.owner and self.activeTab() == tab;
 }
 
@@ -351,7 +355,7 @@ pub fn place(self: *BrowserPanel, rect: w32.RECT, scale: f32, palette: tab_strip
 
 /// Where pages show: the fixed layout size scaled to fit below the
 /// toolbar, centered both ways.
-fn pageRect(self: *BrowserPanel) struct { w32.RECT, f64 } {
+fn pageRect(self: *BrowserPanel, tab: *const BrowserTab) struct { w32.RECT, f64 } {
     var client: w32.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
     _ = w32.GetClientRect(self.hwnd, &client);
     const bar = self.toolbarLayout();
@@ -359,8 +363,8 @@ fn pageRect(self: *BrowserPanel) struct { w32.RECT, f64 } {
     const top = bar.height() + self.dialogHeight();
     const width: f64 = @floatFromInt(@max(1, client.right - left));
     const height: f64 = @floatFromInt(@max(1, client.bottom - top));
-    const vw: f64 = @floatFromInt(data.viewport_width);
-    const vh: f64 = @floatFromInt(data.viewport_height);
+    const vw: f64 = @floatFromInt(tab.viewport[0]);
+    const vh: f64 = @floatFromInt(tab.viewport[1]);
     const fit = @min(width / vw, height / vh);
     const w: i32 = @intFromFloat(@max(1, @round(vw * fit)));
     const h: i32 = @intFromFloat(@max(1, @round(vh * fit)));
@@ -371,7 +375,7 @@ fn pageRect(self: *BrowserPanel) struct { w32.RECT, f64 } {
 }
 
 pub fn placeTab(self: *BrowserPanel, tab: *BrowserTab) void {
-    var rect, const zoom = self.pageRect();
+    var rect, const zoom = self.pageRect(tab);
     tab.on_screen = self.inSight(tab);
     if (!tab.on_screen) {
         const width = rect.right - rect.left;
@@ -380,7 +384,28 @@ pub fn placeTab(self: *BrowserPanel, tab: *BrowserTab) void {
     }
     const handler = browser_engine.Ignore.create(0) orelse return;
     defer _ = handler.release();
-    tab.place(rect, zoom, .{ data.viewport_width, data.viewport_height }, handler);
+    tab.place(rect, zoom, handler);
+}
+
+pub fn shownScale(self: *BrowserPanel, tab: *const BrowserTab) f64 {
+    const rect, _ = self.pageRect(tab);
+    return @as(f64, @floatFromInt(rect.right - rect.left)) / @as(f64, @floatFromInt(@max(1, tab.viewport[0])));
+}
+
+pub fn setViewport(self: *BrowserPanel, tab: *BrowserTab, width: u32, height: u32, mobile: ?bool) void {
+    tab.viewport = .{ width, height };
+    const switching = mobile != null and mobile.? != tab.mobile;
+    if (mobile) |m| tab.mobile = m;
+    self.placeTab(tab);
+    if (switching) browser_engine.setMobile(tab);
+    _ = w32.InvalidateRect(self.hwnd, null, 0);
+}
+
+pub fn coverPage(self: *BrowserPanel, tab: *BrowserTab, on: bool) void {
+    if (!on) return self.cover.hide();
+    if (!self.inSight(tab)) return;
+    const rect, _ = self.pageRect(tab);
+    self.cover.show(self.instance, self.hwnd, rect);
 }
 
 /// Hidden panels keep their pages but tell WebView2, which then stops

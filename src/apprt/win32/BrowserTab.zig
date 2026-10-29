@@ -9,6 +9,7 @@ const webview2 = @import("webview2.zig");
 const wide_string = @import("wide_string.zig");
 const browser_log = @import("browser_log.zig");
 const browser_chats = @import("browser_chats.zig");
+const browser_settings = @import("browser_settings.zig");
 
 /// Stable for the panel's life, so Claude can name the tab.
 id: u32,
@@ -19,6 +20,12 @@ on_screen: bool = false,
 dialog: ?Dialog = null,
 frames: Frames = .{},
 requests: Requests = .{},
+viewport: [2]u32 = .{ browser_settings.data.viewport_width, browser_settings.data.viewport_height },
+mobile: bool = false,
+color_scheme: ColorScheme = .none,
+motion: Motion = .none,
+pointer: ?[2]f64 = null,
+drag_data: ?[]u8 = null,
 controller: ?*webview2.Controller = null,
 webview: ?*webview2.WebView = null,
 /// The page has its identity and size and has started loading; until
@@ -42,6 +49,18 @@ pub const First = union(enum) {
 };
 
 pub const DialogKind = enum(c_int) { alert = 0, confirm = 1, prompt = 2, beforeunload = 3 };
+
+pub const ColorScheme = enum { none, light, dark };
+pub const Motion = enum { none, reduce, @"no-preference" };
+
+pub fn emulateMedia(self: *const BrowserTab, handler: *anyopaque) void {
+    var buf: [300]u8 = undefined;
+    const params = std.fmt.bufPrint(&buf, "{{\"features\":[{{\"name\":\"prefers-color-scheme\",\"value\":\"{s}\"}},{{\"name\":\"prefers-reduced-motion\",\"value\":\"{s}\"}}]}}", .{
+        if (self.color_scheme == .none) "" else @tagName(self.color_scheme),
+        if (self.motion == .none) "" else @tagName(self.motion),
+    }) catch return;
+    _ = self.devtools("Emulation.setEmulatedMedia", params, handler);
+}
 
 pub const Dialog = struct {
     args: *webview2.ScriptDialogArgs,
@@ -216,20 +235,28 @@ pub fn show(self: *const BrowserTab, shown: bool) void {
 /// Place the page in the panel at `bounds` and fit the fixed layout size
 /// into it: `scale` is how much smaller (or larger) than its CSS pixels
 /// the page shows.
-pub fn place(self: *const BrowserTab, bounds: w32.RECT, scale: f64, viewport: [2]u32, handler: *anyopaque) void {
+pub fn place(self: *const BrowserTab, bounds: w32.RECT, scale: f64, handler: *anyopaque) void {
     const c = self.controller orelse return;
     _ = c.vtable.put_Bounds(c, bounds);
-    var buf: [256]u8 = undefined;
-    const params = std.fmt.bufPrint(&buf, "{{\"width\":{d},\"height\":{d},\"screenWidth\":{d},\"screenHeight\":{d},\"deviceScaleFactor\":1,\"mobile\":false,\"scale\":{d:.6}}}", .{
-        viewport[0], viewport[1], viewport[0], viewport[1], scale,
+    var buf: [400]u8 = undefined;
+    const landscape = self.viewport[0] > self.viewport[1];
+    const params = std.fmt.bufPrint(&buf, "{{\"width\":{d},\"height\":{d},\"screenWidth\":{d},\"screenHeight\":{d},\"deviceScaleFactor\":1,\"mobile\":{},\"scale\":{d:.6},\"screenOrientation\":{{\"type\":\"{s}\",\"angle\":{d}}}}}", .{
+        self.viewport[0], self.viewport[1], self.viewport[0], self.viewport[1], self.mobile, scale,
+        if (landscape) "landscapePrimary" else "portraitPrimary", @as(u32, if (landscape) 90 else 0),
     }) catch return;
     _ = self.devtools("Emulation.setDeviceMetricsOverride", params, handler);
 }
 
 /// Let go of the page. A popup still waiting for its page is turned down,
 /// so WebView2 doesn't open it in a window of its own.
+pub fn setDragData(self: *BrowserTab, json: ?[]const u8) void {
+    if (self.drag_data) |old| std.heap.smp_allocator.free(old);
+    self.drag_data = if (json) |j| std.heap.smp_allocator.dupe(u8, j) catch null else null;
+}
+
 pub fn deinit(self: *BrowserTab) void {
     self.answerDialog(false, "");
+    self.setDragData(null);
     switch (self.first) {
         .url => |url| std.heap.smp_allocator.free(url),
         .popup => |p| {

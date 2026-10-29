@@ -158,11 +158,16 @@ pub fn objectId(page: *Page, node: Node) ![]const u8 {
     return string(object, "objectId") orelse page.fail("That element is no longer on the page.", .{});
 }
 
-pub fn target(page: *Page, args: Value, verb: []const u8) !Point {
-    if (try find(page, args)) |node| return center(try elementBox(page, node, .content));
+pub const Aim = struct { at: Point, box: ?Box = null };
+
+pub fn aim(page: *Page, args: Value, verb: []const u8) !Aim {
+    if (try find(page, args)) |node| {
+        const b = try elementBox(page, node, .content);
+        return .{ .at = center(b), .box = b };
+    }
     const x = number(args, "x") orelse return page.fail("Choose an element by ref, selector or role, or x/y coordinates to {s}.", .{verb});
     const y = number(args, "y") orelse return page.fail("Choose an element by ref, selector or role, or x/y coordinates to {s}.", .{verb});
-    return .{ .x = x, .y = y };
+    return .{ .at = .{ .x = x, .y = y } };
 }
 
 pub fn call(page: *Page, node: Node, function: []const u8, argument: ?[]const u8) !Value {

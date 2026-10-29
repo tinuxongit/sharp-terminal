@@ -40,6 +40,11 @@ pub const Op = union(enum) {
     dialog: struct { tab: u32 },
     answer: struct { tab: u32, accept: bool, text: []const u8 },
     frames: struct { tab: u32 },
+    viewport: struct { tab: u32, width: u32, height: u32, mobile: ?bool },
+    cover: struct { tab: u32, on: bool },
+    pointer: struct { tab: u32, x: f64, y: f64 },
+    drag: struct { tab: u32 },
+    media: struct { tab: u32, color: ?BrowserTab.ColorScheme, motion: ?BrowserTab.Motion },
 };
 
 /// One call, shared by the waiting thread and the UI thread; the last of
@@ -170,6 +175,7 @@ fn dialogShown(chat: *const Chat, tab: u32) bool {
     return answer.ok and answer.text.len > 0;
 }
 
+const Ignore = @import("browser_engine.zig").Ignore;
 const DevtoolsDone = webview2.Handler(webview2.iid_cdp_completed, usize, w32.HRESULT, ?[*:0]const u16, onDevtools);
 
 fn onDevtools(context: usize, result: w32.HRESULT, json: ?[*:0]const u16) void {
@@ -219,7 +225,18 @@ pub fn serve(app: *App, request: *Request) void {
                 var own: BrowserPanel.OwnTabs = undefined;
                 for (panel.ownTabs(owner, &own)) |tab| {
                     var buf: [2048]u8 = undefined;
-                    json.write(.{ .id = tab.id, .title = tab.title(), .url = tab.source(&buf) orelse "", .active = tab == active }) catch {};
+                    json.write(.{
+                        .id = tab.id,
+                        .title = tab.title(),
+                        .url = tab.source(&buf) orelse "",
+                        .active = tab == active,
+                        .width = tab.viewport[0],
+                        .height = tab.viewport[1],
+                        .mobile = tab.mobile,
+                        .in_sight = panel.inSight(tab),
+                        .scale = panel.shownScale(tab),
+                        .pointer = tab.pointer,
+                    }) catch {};
                 }
             }
             json.endArray() catch {};
@@ -232,7 +249,7 @@ pub fn serve(app: *App, request: *Request) void {
             }
             request.finish(true, "");
         },
-        inline .ready, .devtools, .history, .logs, .close, .dialog, .answer, .frames => |op, tag| {
+        inline .ready, .devtools, .history, .logs, .close, .dialog, .answer, .frames, .viewport, .cover, .pointer, .drag, .media => |op, tag| {
             const panel = window.browser orelse return request.finish(false, not_open);
             const tab = panel.ownTab(owner, op.tab) orelse return request.finish(false, "That tab was closed. browser_tabs lists the open ones.");
             serveTab(panel, tab, request, @unionInit(Op, @tagName(tag), op));
@@ -286,6 +303,31 @@ fn serveTab(panel: *BrowserPanel, tab: *BrowserTab, request: *Request, op: Op) v
             if (tab.dialog == null) return request.finish(false, "No dialog is open on this page.");
             panel.answerDialog(tab, a.accept, a.text);
             request.finish(true, "");
+        },
+        .viewport => |v| {
+            panel.setViewport(tab, v.width, v.height, v.mobile);
+            request.finish(true, "");
+        },
+        .cover => |c| {
+            panel.coverPage(tab, c.on);
+            request.finish(true, "");
+        },
+        .pointer => |p| {
+            tab.pointer = .{ p.x, p.y };
+            request.finish(true, "");
+        },
+        .media => |m| {
+            if (m.color) |c| tab.color_scheme = c;
+            if (m.motion) |motion| tab.motion = motion;
+            const handler = Ignore.create(0) orelse return request.finish(false, "Out of memory");
+            defer _ = handler.release();
+            tab.emulateMedia(handler);
+            request.finish(true, "");
+        },
+        .drag => {
+            const dragged = tab.drag_data orelse return request.finish(true, "");
+            request.finish(true, dragged);
+            tab.setDragData(null);
         },
         .frames => {
             var out: std.Io.Writer.Allocating = .init(alloc);

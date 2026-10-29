@@ -11,6 +11,7 @@ const BrowserPanel = @import("BrowserPanel.zig");
 const browser_settings = @import("browser_settings.zig");
 const BrowserTab = @import("BrowserTab.zig");
 const browser_events = @import("browser_events.zig");
+const json_read = @import("json_read.zig");
 
 const log = std.log.scoped(.win32);
 const alloc = std.heap.smp_allocator;
@@ -179,6 +180,44 @@ const identity_script =
     \\  };
     \\})()
 ;
+
+var mobile_identity: ?[]u8 = null;
+
+pub fn setMobile(tab: *BrowserTab) void {
+    const params = (if (tab.mobile) mobileIdentity() else identity) orelse return;
+    send(tab, "Emulation.setUserAgentOverride", params);
+    var buf: [80]u8 = undefined;
+    send(tab, "Emulation.setTouchEmulationEnabled", std.fmt.bufPrint(&buf, "{{\"enabled\":{},\"maxTouchPoints\":5}}", .{tab.mobile}) catch return);
+    if (tab.webview) |v| _ = v.vtable.Reload(v);
+}
+
+fn mobileIdentity() ?[]u8 {
+    if (mobile_identity) |m| return m;
+    const desktop = identity orelse return null;
+    const parsed = std.json.parseFromSlice(std.json.Value, alloc, desktop, .{}) catch return null;
+    defer parsed.deinit();
+    const arena = parsed.arena.allocator();
+    var root = parsed.value;
+    if (root != .object) return null;
+    const ua = json_read.string(root, "userAgent") orelse return null;
+    const open = std.mem.indexOfScalar(u8, ua, '(') orelse return null;
+    const close = std.mem.indexOfScalarPos(u8, ua, open, ')') orelse return null;
+    const phone = std.fmt.allocPrint(arena, "{s}(Linux; Android 10; K){s}", .{ ua[0..open], ua[close + 1 ..] }) catch return null;
+    const mobile_ua = std.mem.replaceOwned(u8, arena, phone, " Safari/", " Mobile Safari/") catch return null;
+    root.object.put(arena, "userAgent", .{ .string = mobile_ua }) catch return null;
+    const metadata = root.object.getPtr("userAgentMetadata") orelse return null;
+    if (metadata.* != .object) return null;
+    for ([_]struct { []const u8, std.json.Value }{
+        .{ "platform", .{ .string = "Android" } },
+        .{ "platformVersion", .{ .string = "10.0.0" } },
+        .{ "architecture", .{ .string = "" } },
+        .{ "bitness", .{ .string = "" } },
+        .{ "model", .{ .string = "K" } },
+        .{ "mobile", .{ .bool = true } },
+    }) |entry| metadata.object.put(arena, entry[0], entry[1]) catch return null;
+    mobile_identity = std.json.Stringify.valueAlloc(alloc, root, .{}) catch return null;
+    return mobile_identity;
+}
 
 fn prepare(ref: TabRef, tab: *BrowserTab) void {
     if (identity) |params| return setIdentity(ref, tab, params);

@@ -131,7 +131,10 @@ commands and conventions; this file covers what is specific to Sharp.
   `browser_snapshot.zig` turns the accessibility tree into Claude's text,
   `browser_frames.zig` adds each iframe's tree to it,
   `browser_locator.zig` finds the element a tool names (ref, selector, or
-  role and name) and its box,
+  role and name) and its box, `browser_pointer.zig` draws where Claude
+  points, `browser_gestures.zig` swipes and drags,
+  `browser_screenshot.zig` takes the viewport, the whole page or one
+  element (behind `browser_cover.zig`'s still of the page),
   `browser_remote.zig` carries their calls to the UI thread, and
   `json_read.zig` reads the JSON that comes back.
 - `src/apprt/win32/mcp_server.zig`: Sharp's MCP server (JSON-RPC over a
@@ -488,7 +491,15 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   page into a 16:9 box centered below the toolbar, and the user's own clicks are
   mapped back into the page (checked 2026-10-28: the middle of the shown
   page lands at 960 × 540). The cost is small text in a narrow panel; the
-  size is in `browser.zon`.
+  size is in `browser.zon`. Claude can resize a tab (320 × 240 to
+  3840 × 2160) or switch it to a phone (Android Chrome's user agent and
+  client hints, touch, `mobile` metrics; it reloads), and emulate dark
+  mode or reduced motion. A whole-page or element screenshot makes the
+  page lay out beyond its viewport for a moment, so a still of it,
+  copied from the screen, covers the page meanwhile. While the user can
+  see the tab, a pointer (`Overlay.highlightQuad`, an arrow, or a dot on
+  a phone) glides to what Claude clicks and flashes its box, as in
+  Citropy; it is hidden for screenshots.
 - **Sites see Chrome, not WebView2.** WebView2 says "Edg/" and "Microsoft
   Edge WebView2" in its user agent and client hints, and some sites
   refuse embedded browsers. Before a page loads anything, it gets the

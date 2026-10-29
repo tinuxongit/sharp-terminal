@@ -11,11 +11,15 @@ pub const Engine = struct {
     search: []const u8,
 };
 
+pub const Viewport = struct { name: []const u8, width: u32, height: u32, mobile: bool };
+
 pub const Data = struct {
     width_percent: u8,
     min_width: f32,
     viewport_width: u32,
     viewport_height: u32,
+    viewport_limits: struct { min_width: u32, max_width: u32, min_height: u32, max_height: u32 },
+    viewports: []const Viewport,
     max_tabs: u8,
     max_total_tabs: u8,
     engines: []const Engine,
@@ -37,6 +41,11 @@ comptime {
         @compileError("browser.zon: the viewport must be at least 320 × 240");
     if (data.max_tabs < 1 or data.engines.len < 1)
         @compileError("browser.zon: needs at least one tab and one engine");
+    for (data.viewports) |v| {
+        if (v.width < data.viewport_limits.min_width or v.width > data.viewport_limits.max_width or
+            v.height < data.viewport_limits.min_height or v.height > data.viewport_limits.max_height)
+            @compileError("browser.zon: a page size is outside viewport_limits: " ++ v.name);
+    }
     if (data.max_total_tabs < data.max_tabs)
         @compileError("browser.zon: max_total_tabs must be at least max_tabs");
     // Settings > AI > Tools offers only engines browser.zon has; "" is

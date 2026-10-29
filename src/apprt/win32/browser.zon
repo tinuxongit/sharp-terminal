@@ -13,6 +13,18 @@
     .viewport_height = 1080,
     // Each chat, or terminal pane, has its own tabs: up to max_tabs each,
     // and max_total_tabs in one panel.
+    // What browser_action resize accepts, in CSS pixels.
+    .viewport_limits = .{ .min_width = 320, .max_width = 3840, .min_height = 240, .max_height = 2160 },
+    // The sizes the toolbar's page size menu offers. mobile switches to a
+    // phone's identity and touch, and reloads the page.
+    .viewports = .{
+        .{ .name = "Desktop 1920 × 1080", .width = 1920, .height = 1080, .mobile = false },
+        .{ .name = "Laptop 1440 × 900", .width = 1440, .height = 900, .mobile = false },
+        .{ .name = "Small laptop 1280 × 800", .width = 1280, .height = 800, .mobile = false },
+        .{ .name = "Tablet 820 × 1180", .width = 820, .height = 1180, .mobile = true },
+        .{ .name = "Phone 390 × 844", .width = 390, .height = 844, .mobile = true },
+        .{ .name = "Small phone 360 × 640", .width = 360, .height = 640, .mobile = true },
+    },
     .max_tabs = 12,
     .max_total_tabs = 48,
     // Settings > AI > Tools > Search engine (`browser-search-engine`).

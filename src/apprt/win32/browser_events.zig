@@ -75,7 +75,11 @@ pub fn enableDomains(tab: *const BrowserTab, session: []const u8) void {
     sendIn(tab, session, "Runtime.enable", "{}");
     sendIn(tab, session, "Log.enable", "{}");
     sendIn(tab, session, "Network.enable", "{\"maxTotalBufferSize\":0,\"maxResourceBufferSize\":0,\"maxPostDataSize\":0}");
-    if (session.len == 0) sendIn(tab, session, "Page.enable", "{}");
+    if (session.len == 0) {
+        sendIn(tab, session, "Page.enable", "{}");
+        sendIn(tab, session, "DOM.enable", "{}");
+        sendIn(tab, session, "Overlay.enable", "{}");
+    }
     sendIn(tab, session, "Target.setAutoAttach", "{\"autoAttach\":true,\"waitForDebuggerOnStart\":false,\"flatten\":true}");
 }
 
@@ -216,7 +220,7 @@ fn describeDownload(d: *webview2.Download, verb: []const u8, buf: []u8) []const 
     return std.fmt.bufPrint(buf, "{s} {s} to {s} ({d} bytes)", .{ verb, uri_text, path_text, bytes }) catch verb;
 }
 
-const Devtools = enum { console, exception, browser, request, response, failed, attached, detached, file_chooser };
+const Devtools = enum { console, exception, browser, request, response, failed, attached, detached, file_chooser, drag };
 
 fn eventName(comptime event: Devtools) [:0]const u16 {
     @setEvalBranchQuota(20_000);
@@ -230,6 +234,7 @@ fn eventName(comptime event: Devtools) [:0]const u16 {
         .attached => "Target.attachedToTarget",
         .detached => "Target.detachedFromTarget",
         .file_chooser => "Page.fileChooserOpened",
+        .drag => "Input.dragIntercepted",
     });
 }
 
@@ -296,6 +301,12 @@ fn onDevtools(tab: *BrowserTab, event: Devtools, params: std.json.Value, session
             const node = json_read.number(params, "backendNodeId") orelse return;
             const line = std.fmt.bufPrint(&buf, "A file chooser opened for [ref={d}]. Pick files with browser_action upload on that ref.", .{@as(i64, @intFromFloat(node))}) catch return;
             tab.page_log.add(now, .info, line);
+        },
+        .drag => {
+            const dragged = field(params, "data") orelse return;
+            const json = std.json.Stringify.valueAlloc(alloc, dragged, .{}) catch return;
+            defer alloc.free(json);
+            tab.setDragData(json);
         },
         .console, .exception, .browser => {},
     }
