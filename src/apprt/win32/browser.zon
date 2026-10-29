@@ -25,6 +25,8 @@
         .{ .name = "Phone 390 × 844", .width = 390, .height = 844, .mobile = true },
         .{ .name = "Small phone 360 × 640", .width = 360, .height = 640, .mobile = true },
     },
+    // The page size menu's own items.
+    .page_size = .{ .rotate = "Rotate", .mobile = "Phone (touch and mobile sites)" },
     .max_tabs = 12,
     .max_total_tabs = 48,
     // Settings > AI > Tools > Search engine (`browser-search-engine`).

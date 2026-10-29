@@ -50,7 +50,7 @@ comptime {
     }
 }
 
-const Action = enum { navigate, back, forward, reload, click, hover, type, press, scroll, swipe, select, upload, wait, evaluate, dialog, emulate, resize };
+const Action = enum { navigate, back, forward, reload, stop, expand, click, hover, type, press, scroll, swipe, select, upload, wait, evaluate, dialog, emulate, resize };
 
 /// What a tool answers: text, and a JPEG (base64) when it took a picture.
 pub const Output = struct {
@@ -180,14 +180,16 @@ fn action(page: *Page, args: Value) !Output {
 fn perform(page: *Page, args: Value, act: Action) !?[]const u8 {
     switch (act) {
         .navigate => try page.navigate(string(args, "url") orelse return page.fail("navigate needs a url.", .{})),
-        .back, .forward, .reload => {
+        .back, .forward, .reload, .stop => {
             _ = try page.remoteCall(.{ .history = .{ .tab = page.tab, .step = switch (act) {
                 .back => .back,
                 .forward => .forward,
+                .stop => .stop,
                 else => .reload,
             } } }, 5_000);
-            page.settle(false);
+            if (act != .stop) page.settle(false);
         },
+        .expand => _ = try page.remoteCall(.{ .expand = .{ .on = boolean(args, "expanded") orelse true } }, 5_000),
         .click => {
             const aim = try locator.aim(page, args, "click");
             try showPress(page, aim);

@@ -118,7 +118,8 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/browser_dialog_bar.zig`: the bar a page's alert,
   confirm, prompt or leave-page dialog shows in, above the page.
 - `src/apprt/win32/browser_toolbar.zig`: the panel's toolbar (tabs, back,
-  forward, reload, address box), its layout and painting.
+  forward, reload or stop, address box, page size, open in the default
+  browser, expand), its layout and painting.
 - `src/apprt/win32/browser_log.zig`: what a page logged (console,
   uncaught errors, failed loads) for Claude.
 - `src/apprt/win32/browser_dock.zig`: a window's side of the panel: the
@@ -453,7 +454,12 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   popups keep their `opener`. New tabs open the search engine chosen in
   Settings > AI > Tools (`browser-search-engine`: Google or DuckDuckGo).
   The panel's edge drags. The design follows Citropy's browser rather
-  than T3 Code's, which is a preview of a dev server.
+  than T3 Code's, which is a preview of a dev server. Right of the
+  address box: the page size menu (`viewports` in `browser.zon`, rotate,
+  phone mode), open the page in the default browser (http and https
+  only), and expand, which widens the panel as far as the terminal's
+  fifth allows rather than covering it, since a pane can't shrink to
+  nothing; Claude expands it before asking the user to sign in.
 - **Each chat has its own browser tabs.** A tab belongs to a terminal
   pane, and the panel shows the tabs of the pane in front, so switching
   terminal tabs or panes switches the pages; tabs the user opens go to

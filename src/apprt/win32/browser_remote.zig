@@ -17,7 +17,7 @@ const Chat = browser_chats.Chat;
 
 const alloc = std.heap.smp_allocator;
 
-pub const History = enum { back, forward, reload };
+pub const History = enum { back, forward, reload, stop };
 
 pub const Op = union(enum) {
     /// Show the panel, creating it if needed; with a url, open it in a new
@@ -45,6 +45,7 @@ pub const Op = union(enum) {
     pointer: struct { tab: u32, x: f64, y: f64 },
     drag: struct { tab: u32 },
     media: struct { tab: u32, color: ?BrowserTab.ColorScheme, motion: ?BrowserTab.Motion },
+    expand: struct { on: bool },
 };
 
 /// One call, shared by the waiting thread and the UI thread; the last of
@@ -242,6 +243,10 @@ pub fn serve(app: *App, request: *Request) void {
             json.endArray() catch {};
             request.finish(true, out.written());
         },
+        .expand => |e| {
+            if (placed.in_sight) browser_dock.setExpanded(window, e.on);
+            request.finish(true, "");
+        },
         .idle => {
             if (window.browser) |panel| {
                 var own: BrowserPanel.OwnTabs = undefined;
@@ -272,6 +277,7 @@ fn serveTab(panel: *BrowserPanel, tab: *BrowserTab, request: *Request, op: Op) v
                 .back => webview.vtable.GoBack(webview),
                 .forward => webview.vtable.GoForward(webview),
                 .reload => webview.vtable.Reload(webview),
+                .stop => webview.vtable.Stop(webview),
             };
             request.finish(true, "");
         },

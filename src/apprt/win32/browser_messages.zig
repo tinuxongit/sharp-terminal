@@ -8,6 +8,9 @@ const SearchField = @import("SearchField.zig");
 const BrowserPanel = @import("BrowserPanel.zig");
 const BrowserTab = @import("BrowserTab.zig");
 const toolbar = @import("browser_toolbar.zig");
+const menu_theme = @import("menu_theme.zig");
+const wide_string = @import("wide_string.zig");
+const browser_settings = @import("browser_settings.zig");
 
 const Target = toolbar.Target;
 
@@ -29,18 +32,70 @@ fn act(self: *BrowserPanel, target: Target) void {
         .tab => |i| if (shownAt(self, i)) |tab| self.select(tab),
         .tab_close => |i| if (shownAt(self, i)) |tab| self.closeTab(tab),
         .back, .forward, .reload => {
-            const webview = (self.activeTab() orelse return).webview orelse return;
+            const tab = self.activeTab() orelse return;
+            const webview = tab.webview orelse return;
             _ = switch (target) {
                 .back => webview.vtable.GoBack(webview),
                 .forward => webview.vtable.GoForward(webview),
-                else => webview.vtable.Reload(webview),
+                else => if (tab.loading) webview.vtable.Stop(webview) else webview.vtable.Reload(webview),
             };
+        },
+        .page_size => pageSizeMenu(self),
+        .outside => openOutside(self),
+        .expand => if (w32.GetParent(self.hwnd)) |parent| {
+            _ = w32.PostMessageW(parent, BrowserPanel.message_expand, @intFromBool(!self.expanded), 0);
         },
         .dialog_ok, .dialog_cancel => {
             const tab = self.activeTab() orelse return;
             self.answerDialog(tab, target == .dialog_ok, self.dialog_field.text());
         },
         .address, .grip, .none, .dialog_field => {},
+    }
+}
+
+fn openOutside(self: *BrowserPanel) void {
+    const tab = self.activeTab() orelse return;
+    var buf: [2048]u8 = undefined;
+    const url = tab.source(&buf) orelse return;
+    if (!std.ascii.startsWithIgnoreCase(url, "https://") and !std.ascii.startsWithIgnoreCase(url, "http://")) return;
+    var wide: [2048]u16 = undefined;
+    _ = wide_string.fromUtf8(&wide, url);
+    _ = w32.ShellExecuteW(null, std.unicode.utf8ToUtf16LeStringLiteral("open"), @ptrCast(&wide), null, null, w32.SW_SHOW);
+}
+
+const id_size_base: u32 = 1;
+const id_rotate: u32 = 100;
+const id_mobile: u32 = 101;
+
+fn pageSizeMenu(self: *BrowserPanel) void {
+    const tab = self.activeTab() orelse return;
+    const menu = w32.CreatePopupMenu() orelse return;
+    defer _ = w32.DestroyMenu(menu);
+    const data = browser_settings.data;
+    var label: [160]u16 = undefined;
+    for (data.viewports, 0..) |v, i| {
+        const current = v.width == tab.viewport[0] and v.height == tab.viewport[1] and v.mobile == tab.mobile;
+        _ = wide_string.fromUtf8(&label, v.name);
+        _ = w32.AppendMenuW(menu, if (current) w32.MF_CHECKED else 0, id_size_base + @as(u32, @intCast(i)), @ptrCast(&label));
+    }
+    _ = w32.AppendMenuW(menu, w32.MF_SEPARATOR, 0, null);
+    _ = wide_string.fromUtf8(&label, data.page_size.rotate);
+    _ = w32.AppendMenuW(menu, 0, id_rotate, @ptrCast(&label));
+    _ = wide_string.fromUtf8(&label, data.page_size.mobile);
+    _ = w32.AppendMenuW(menu, if (tab.mobile) w32.MF_CHECKED else 0, id_mobile, @ptrCast(&label));
+    const button = self.toolbarLayout().rect(.page_size);
+    var point: w32.POINT = .{ .x = button.left, .y = button.bottom };
+    _ = w32.ClientToScreen(self.hwnd, &point);
+    menu_theme.apply(self.palette.strip.isDark());
+    const picked: u32 = @intCast(@max(0, w32.TrackPopupMenuEx(menu, w32.TPM_LEFTALIGN | w32.TPM_TOPALIGN | w32.TPM_RETURNCMD, point.x, point.y, self.hwnd, null)));
+    switch (picked) {
+        0 => {},
+        id_rotate => self.setViewport(tab, tab.viewport[1], tab.viewport[0], null),
+        id_mobile => self.setViewport(tab, tab.viewport[0], tab.viewport[1], !tab.mobile),
+        else => if (picked - id_size_base < data.viewports.len) {
+            const v = data.viewports[picked - id_size_base];
+            self.setViewport(tab, v.width, v.height, v.mobile);
+        },
     }
 }
 

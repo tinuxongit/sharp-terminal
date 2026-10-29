@@ -161,6 +161,10 @@ pub fn windowWndProc(
             browser_dock.emptied(window);
             return 0;
         },
+        BrowserPanel.message_expand => {
+            browser_dock.setExpanded(window, wparam != 0);
+            return 0;
+        },
         w32.WM_MOVE => {
             if (window.settings_panel) |panel| panel.place(window.settingsArea());
             if (window.browser) |panel| panel.parentMoved();

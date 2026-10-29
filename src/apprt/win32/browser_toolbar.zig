@@ -26,6 +26,12 @@ const glyph_reload = 0xE72C;
 const glyph_globe = 0xE774;
 const glyph_add = 0xE710;
 const glyph_close = 0xE8BB;
+const glyph_stop = 0xE711;
+const glyph_desktop = 0xE7F4;
+const glyph_phone = 0xE8EA;
+const glyph_outside = 0xE8A7;
+const glyph_expand = 0xE740;
+const glyph_shrink = 0xE73F;
 
 pub const Target = union(enum) {
     none,
@@ -37,6 +43,9 @@ pub const Target = union(enum) {
     forward,
     reload,
     address,
+    page_size,
+    outside,
+    expand,
     dialog_ok,
     dialog_cancel,
     dialog_field,
@@ -104,7 +113,17 @@ pub const Layout = struct {
             .reload => 2,
             .address => {
                 const left = self.gripWidth() + self.px(gap) + 3 * self.px(button_width) + self.px(gap);
-                return .{ .left = left, .top = top, .right = @max(left, self.width - self.px(gap)), .bottom = bottom };
+                const right = self.width - self.px(gap) - 3 * self.px(button_width) - self.px(gap);
+                return .{ .left = left, .top = top, .right = @max(left, right), .bottom = bottom };
+            },
+            .page_size, .outside, .expand => {
+                const from_right: i32 = switch (target) {
+                    .page_size => 3,
+                    .outside => 2,
+                    else => 1,
+                };
+                const left = self.width - self.px(gap) - from_right * self.px(button_width);
+                return .{ .left = left, .top = top, .right = left + self.px(button_width), .bottom = bottom };
             },
             .new_tab => {
                 var last: usize = 0;
@@ -129,7 +148,7 @@ pub const Layout = struct {
             if (contains(self.tabCloseRect(i), x, y)) return .{ .tab_close = i };
             if (contains(self.tabRect(i), x, y)) return .{ .tab = i };
         }
-        for ([_]Target{ .new_tab, .back, .forward, .reload, .address }) |t| {
+        for ([_]Target{ .new_tab, .back, .forward, .reload, .address, .page_size, .outside, .expand }) |t| {
             if (contains(self.rect(t), x, y)) return t;
         }
         return .none;
@@ -155,12 +174,16 @@ pub const View = struct {
     can_forward: bool,
     ready: bool,
     can_add: bool,
+    loading: bool,
+    mobile: bool,
+    expanded: bool,
 
     pub fn enabled(self: View, target: Target) bool {
         return switch (target) {
             .back => self.can_back,
             .forward => self.can_forward,
-            .reload, .address => self.ready,
+            .reload, .address, .page_size, .outside => self.ready,
+            .expand => true,
             .new_tab => self.can_add,
             .tab, .tab_close, .grip, .dialog_ok, .dialog_cancel, .dialog_field => true,
             .none => false,
@@ -195,7 +218,10 @@ pub fn paint(c: canvas_mod.Canvas, layout: Layout, view: View) void {
     paintButton(c, layout, view, .new_tab, glyph_add);
     paintButton(c, layout, view, .back, glyph_back);
     paintButton(c, layout, view, .forward, glyph_forward);
-    paintButton(c, layout, view, .reload, glyph_reload);
+    paintButton(c, layout, view, .reload, if (view.loading) glyph_stop else glyph_reload);
+    paintButton(c, layout, view, .page_size, if (view.mobile) glyph_phone else glyph_desktop);
+    paintButton(c, layout, view, .outside, glyph_outside);
+    paintButton(c, layout, view, .expand, if (view.expanded) glyph_shrink else glyph_expand);
     c.sync();
     view.address.paint(c, layout.rect(.address), layout.scale, .{
         .fill = pal.strip.mix(pal.contrast, 0.06),

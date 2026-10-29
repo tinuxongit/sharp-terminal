@@ -26,6 +26,7 @@ pub fn width(self: *const Window) i32 {
     const hwnd = self.hwnd orelse return 0;
     var client: w32.RECT = undefined;
     if (w32.GetClientRect(hwnd, &client) == 0) return 0;
+    if (self.browser_expanded) return @divTrunc(client.right * 4, 5);
     const wanted: i32 = if (self.browser_width) |w|
         @intFromFloat(@round(w * self.scale))
     else
@@ -55,6 +56,7 @@ pub fn panelOf(self: *Window) ?*BrowserPanel {
         log.err("failed to open the browser panel: {}", .{err});
         return null;
     };
+    self.browser.?.expanded = self.browser_expanded;
     return self.browser;
 }
 
@@ -64,6 +66,12 @@ pub fn open(self: *Window) bool {
     panel.show(true);
     self.handleResize();
     return true;
+}
+
+pub fn setExpanded(self: *Window, expanded: bool) void {
+    self.browser_expanded = expanded;
+    if (self.browser) |panel| panel.expanded = expanded;
+    self.handleResize();
 }
 
 pub fn follow(self: *Window) void {

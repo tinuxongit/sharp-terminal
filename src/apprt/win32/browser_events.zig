@@ -23,6 +23,8 @@ const KeyPressed = webview2.Handler(webview2.iid_accelerator_key, TabRef, *webvi
 const ScriptDialog = webview2.Handler(webview2.iid_script_dialog, TabRef, *webview2.WebView, *webview2.ScriptDialogArgs, onScriptDialog);
 const DownloadStarting = webview2.Handler(webview2.iid_download_starting, TabRef, *webview2.WebView, *webview2.DownloadStartingArgs, onDownloadStarting);
 const DownloadState = webview2.Handler(webview2.iid_download_state, TabRef, *webview2.Download, ?*anyopaque, onDownloadState);
+const NavigationStarting = webview2.Handler(webview2.iid_navigation_starting, TabRef, *webview2.WebView, ?*anyopaque, onNavigationStarting);
+const NavigationCompleted = webview2.Handler(webview2.iid_navigation_completed, TabRef, *webview2.WebView, ?*anyopaque, onNavigationCompleted);
 
 pub fn listen(ref: TabRef, controller: *webview2.Controller, webview: *webview2.WebView) void {
     var token: webview2.Token = undefined;
@@ -44,6 +46,14 @@ pub fn listen(ref: TabRef, controller: *webview2.Controller, webview: *webview2.
     }
     if (KeyPressed.create(ref)) |h| {
         _ = controller.vtable.add_AcceleratorKeyPressed(controller, h, &token);
+        _ = h.release();
+    }
+    if (NavigationStarting.create(ref)) |h| {
+        _ = webview.vtable.add_NavigationStarting(webview, h, &token);
+        _ = h.release();
+    }
+    if (NavigationCompleted.create(ref)) |h| {
+        _ = webview.vtable.add_NavigationCompleted(webview, h, &token);
         _ = h.release();
     }
     if (ScriptDialog.create(ref)) |h| {
@@ -87,6 +97,18 @@ fn sendIn(tab: *const BrowserTab, session: []const u8, method: []const u8, param
     const handler = browser_engine.Ignore.create(0) orelse return;
     defer _ = handler.release();
     _ = tab.devtoolsIn(session, method, params, handler);
+}
+
+fn onNavigationStarting(ref: TabRef, _: *webview2.WebView, _: ?*anyopaque) void {
+    const panel, const tab = find(ref) orelse return;
+    tab.loading = true;
+    panel.tabChanged(tab);
+}
+
+fn onNavigationCompleted(ref: TabRef, _: *webview2.WebView, _: ?*anyopaque) void {
+    const panel, const tab = find(ref) orelse return;
+    tab.loading = false;
+    panel.tabChanged(tab);
 }
 
 fn onSourceChanged(ref: TabRef, _: *webview2.WebView, _: ?*anyopaque) void {

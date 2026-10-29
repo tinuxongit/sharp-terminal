@@ -20,6 +20,7 @@ pub const Data = struct {
     viewport_height: u32,
     viewport_limits: struct { min_width: u32, max_width: u32, min_height: u32, max_height: u32 },
     viewports: []const Viewport,
+    page_size: struct { rotate: []const u8, mobile: []const u8 },
     max_tabs: u8,
     max_total_tabs: u8,
     engines: []const Engine,

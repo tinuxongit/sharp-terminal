@@ -37,6 +37,7 @@ pub const message_empty: u32 = w32.WM_APP + 21;
 /// Posted to itself, so a shortcut pressed in a page runs after the page's
 /// own event is over (it may close that page).
 pub const message_shortcut: u32 = w32.WM_APP + 22;
+pub const message_expand: u32 = w32.WM_APP + 23;
 
 const class_name = std.unicode.utf8ToUtf16LeStringLiteral(brand.name ++ "Browser");
 var class_atom: u16 = 0;
@@ -62,6 +63,7 @@ shown: bool = true,
 address: SearchField = .{},
 dialog_field: SearchField = .{},
 cover: browser_cover.Cover = .{},
+expanded: bool = false,
 hover: Target = .none,
 pressed: Target = .none,
 tracking_mouse: bool = false,
@@ -468,6 +470,9 @@ fn toolbarView(self: *BrowserPanel, titles: *[data.max_tabs][]const u8) toolbar.
         .can_forward = if (active) |t| t.can_forward else false,
         .ready = if (active) |t| t.ready else false,
         .can_add = self.hasRoom(self.owner),
+        .loading = if (active) |t| t.loading else false,
+        .mobile = if (active) |t| t.mobile else false,
+        .expanded = self.expanded,
     };
 }
 
