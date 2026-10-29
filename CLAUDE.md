@@ -507,7 +507,9 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   WebView2 runtimes lack. Each terminal tab's pages are saved with it in
   `sharp-session` (`page` lines, the active one last) and reopen when the
   panel is first used, so a restored session still loads no browser
-  until then. Not for SSH tabs, which reopen through `openServer`.
+  until then. A terminal tab dragged to another window takes its pages
+  along, reloaded at the same addresses. A popup opens at its opener's
+  page size and phone mode.
 - **Every page is 1920 × 1080, scaled to fit, as in Citropy.** Claude
   always sees the same desktop layout and coordinates however wide the
   panel is. `Emulation.setDeviceMetricsOverride` with its `scale` fits the

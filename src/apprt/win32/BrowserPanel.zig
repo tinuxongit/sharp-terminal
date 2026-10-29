@@ -214,8 +214,11 @@ pub fn openTab(self: *BrowserPanel, owner: Owner, url: []const u8) ?u32 {
 
 /// A page opened a window: make it a tab. False when no more tabs fit,
 /// and then the caller keeps what it passed.
-pub fn openPopup(self: *BrowserPanel, owner: Owner, args: *webview2.NewWindowArgs, deferral: *webview2.Deferral) bool {
-    _ = self.addTab(owner, .{ .popup = .{ .args = args, .deferral = deferral } }) catch return false;
+pub fn openPopup(self: *BrowserPanel, opener: *const BrowserTab, args: *webview2.NewWindowArgs, deferral: *webview2.Deferral) bool {
+    const id = self.addTab(opener.owner, .{ .popup = .{ .args = args, .deferral = deferral } }) catch return false;
+    const tab = self.tabById(id) orelse return true;
+    tab.viewport = opener.viewport;
+    tab.mobile = opener.mobile;
     return true;
 }
 

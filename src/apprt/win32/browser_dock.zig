@@ -85,6 +85,20 @@ fn openPending(self: *Window, panel: *BrowserPanel) void {
     self.browser_pending.clearRetainingCapacity();
 }
 
+pub fn movePages(from: *Window, to: *Window, owner: browser_chats.Owner) void {
+    var arena: std.heap.ArenaAllocator = .init(alloc);
+    defer arena.deinit();
+    const pages = pagesOf(from, owner, arena.allocator());
+    var i = from.browser_pending.items.len;
+    while (i > 0) {
+        i -= 1;
+        if (from.browser_pending.items[i].owner != owner) continue;
+        alloc.free(from.browser_pending.orderedRemove(i).url);
+    }
+    if (from.browser) |panel| panel.closeOwner(owner);
+    rememberPages(to, owner, pages);
+}
+
 fn forgetPending(self: *Window) void {
     for (self.browser_pending.items) |page| alloc.free(page.url);
     self.browser_pending.deinit(alloc);

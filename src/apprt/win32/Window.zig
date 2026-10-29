@@ -1205,7 +1205,10 @@ pub fn moveTabInto(self: *Window, tab_idx: usize, destination: *Window, pos: usi
 
     const moved = self.takeTab(tab_idx);
     var it = moved.tree.iterator();
-    while (it.next()) |entry| entry.view.parent_window = destination;
+    while (it.next()) |entry| {
+        entry.view.parent_window = destination;
+        browser_dock.movePages(self, destination, entry.view.pane_id);
+    }
     if (self.active_tab > tab_idx) {
         self.active_tab -= 1;
     } else if (self.tab_count > 0 and self.active_tab >= self.tab_count) {

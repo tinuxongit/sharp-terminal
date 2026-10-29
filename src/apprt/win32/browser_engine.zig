@@ -255,7 +255,7 @@ fn mobileIdentity() ?[]u8 {
 }
 
 fn prepare(ref: TabRef, tab: *BrowserTab) void {
-    if (identity) |params| return setIdentity(ref, tab, params);
+    if (identity) |params| return setIdentity(ref, tab, if (tab.mobile) mobileIdentity() orelse params else params);
     const params = identityProbe() orelse return finish(ref);
     defer alloc.free(params);
     const handler = IdentityRead.create(ref) orelse return finish(ref);
@@ -336,6 +336,7 @@ fn onIdentitySet(ref: TabRef, _: w32.HRESULT, _: ?[*:0]const u16) void {
 fn finish(ref: TabRef) void {
     const panel, const tab = find(ref) orelse return;
     browser_events.enableDomains(tab, "");
+    if (tab.mobile) send(tab, "Emulation.setTouchEmulationEnabled", "{\"enabled\":true,\"maxTouchPoints\":5}");
     switch (tab.first) {
         .url => |url| {
             if (url.len > 0) tab.navigate(url);

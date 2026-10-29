@@ -204,7 +204,7 @@ pub fn sidebarClick(self: *Window, x: i32, y: i32) void {
         .section_menu => |section| switch (section) {
             .servers => {
                 const destination = sidebarServerMenu(self, target) orelse return;
-                openServer(self, destination.text(), null);
+                _ = openServer(self, destination.text(), null);
             },
             else => {
                 const list = profiles.detect();
@@ -262,7 +262,7 @@ pub fn serverFieldKey(self: *Window, vk: u16) void {
         w32.VK_RETURN => {
             const typed = servers.Name.init(std.mem.trim(u8, self.server_field.text(), " "));
             focusServerField(self, false);
-            if (typed.len > 0) openServer(self, typed.text(), null);
+            if (typed.len > 0) _ = openServer(self, typed.text(), null);
         },
         else => if (self.server_field.key(hwnd, vk)) self.invalidateTabBar(),
     }
@@ -373,7 +373,10 @@ pub fn sessionTab(surface: *const Surface, arena: ?std.mem.Allocator) session.Ta
 /// gone).
 pub fn openSavedTab(self: *Window, tab: session.Tab) void {
     const folder = if (profiles.programExists(tab.folder)) tab.folder else null;
-    if (tab.server.len > 0) return openServer(self, tab.server, folder);
+    if (tab.server.len > 0) {
+        const surface = openServer(self, tab.server, folder) orelse return;
+        return browser_dock.rememberPages(self, surface.pane_id, tab.pages);
+    }
     const list = profiles.detect();
     const index = for (0..list.len) |i| {
         if (std.mem.eql(u8, list.name(i), tab.profile)) break i;
@@ -392,15 +395,15 @@ pub fn openSavedTab(self: *Window, tab: session.Tab) void {
 }
 
 /// A new tab running ssh to `destination`, from `folder` when given.
-pub fn openServer(self: *Window, destination: []const u8, folder: ?[]const u8) void {
+pub fn openServer(self: *Window, destination: []const u8, folder: ?[]const u8) ?*Surface {
     // The address may come from a file or a process, and must not be
     // read by ssh as an option.
     if (!servers.valid(destination)) {
         log.warn("not an ssh destination: {s}", .{destination});
-        return;
+        return null;
     }
     var buf: [servers.max_len + 16]u8 = undefined;
-    const text = std.fmt.bufPrintSentinel(&buf, "ssh.exe {s}", .{destination}, 0) catch return;
+    const text = std.fmt.bufPrintSentinel(&buf, "ssh.exe {s}", .{destination}, 0) catch return null;
     const command: configpkg.Command = .{ .shell = text };
     const surface = self.addTabWithOptions(.{
         .context = .tab,
@@ -410,12 +413,13 @@ pub fn openServer(self: *Window, destination: []const u8, folder: ?[]const u8) v
         .profile_name = "SSH",
     }) catch |err| {
         log.err("failed to open ssh to {s}: {}", .{ destination, err });
-        return;
+        return null;
     };
     // File it under Servers now, not at the next poll.
     _ = surface.setSshHost(destination);
     if (self.app.recent_servers.add(destination)) self.app.saveSession();
     self.invalidateTabBar();
+    return surface;
 }
 
 /// Poll each tab for an SSH session, so the sidebar can file it under

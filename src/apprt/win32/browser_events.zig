@@ -198,7 +198,7 @@ fn onNewWindow(ref: TabRef, webview: *webview2.WebView, args: *webview2.NewWindo
     if (args.vtable.GetDeferral(args, &deferral) >= 0) {
         if (deferral) |d| {
             args.addRef();
-            if (panel.openPopup(opener.owner, args, d)) return;
+            if (panel.openPopup(opener, args, d)) return;
             args.release();
             d.release();
         }
