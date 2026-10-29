@@ -994,8 +994,7 @@ pub fn selectTabIndex(self: *Window, idx: usize) void {
     self.active_tab = idx;
     self.recent_tabs.used(self.tabKey(idx));
     const surface = self.tab_active_surface[idx];
-    var panes = self.tab_trees[idx].iterator();
-    while (panes.next()) |entry| entry.view.attention = false;
+    self.markActiveTabSeen();
     self.layoutSplits();
     // An inactive child can exit while the user is searching. Keep focus
     // in the overview; explicit activation hides it before selecting.
@@ -1324,6 +1323,26 @@ pub fn setWindowTitle(self: *Window, title: [:0]const u8) void {
 
 /// Called when a tab's title changes. Updates the stored title
 /// and refreshes the window title bar / tab bar if needed.
+/// Whether the user is looking at `surface`: it is the active pane of the
+/// tab shown, in the window in front. Bells, notifications and finished
+/// work from a pane in sight aren't marked or announced.
+pub fn paneInSight(self: *const Window, surface: *const Surface) bool {
+    return self.tab_count > self.active_tab and
+        self.tab_active_surface[self.active_tab] == surface and
+        self.hwnd != null and w32.GetForegroundWindow() == self.hwnd.?;
+}
+
+/// The user now sees the active tab, so its bell dot and finished-work
+/// mark go away.
+pub fn markActiveTabSeen(self: *Window) void {
+    if (self.active_tab >= self.tab_count) return;
+    var panes = self.tab_trees[self.active_tab].iterator();
+    while (panes.next()) |entry| {
+        entry.view.attention = false;
+        entry.view.status_seen = true;
+    }
+}
+
 pub fn onTabTitleChanged(self: *Window, surface: *Surface, title: [:0]const u8) void {
     const tab_idx = self.findTabIndex(surface) orelse return;
     var wbuf: [256]u16 = undefined;

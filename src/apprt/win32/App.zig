@@ -1142,6 +1142,15 @@ pub fn showDesktopNotification(
     target: apprt.Target,
     value: apprt.Action.Value(.desktop_notification),
 ) void {
+    // A program announcing something in the pane the user is looking at
+    // would only interrupt them, as Ghostty on macOS treats it.
+    switch (target) {
+        .app => {},
+        .surface => |core_surface| {
+            const surface = core_surface.rt_surface;
+            if (surface.parent_window.paneInSight(surface)) return;
+        },
+    }
     // Remember the originating surface so a balloon click can focus it.
     self.notif_desktop_surface_id = switch (target) {
         .app => 0,

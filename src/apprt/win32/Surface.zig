@@ -92,6 +92,9 @@ attention: bool = false,
 /// What the program here says it is doing (OSC 7501), for the strip and
 /// the sidebar.
 program_status: apprt.action.ProgramStatus = .idle,
+/// Whether the user has seen this pane since it last reported, so finished
+/// work it was watching isn't marked.
+status_seen: bool = false,
 
 /// Last title reported by the core for getTitle/copy-title consumers.
 title_len: usize = 0,

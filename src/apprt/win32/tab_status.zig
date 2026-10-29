@@ -26,9 +26,19 @@ pub fn ofTab(tree: *const SplitTree(Surface)) Status {
     var result: Status = .idle;
     var it = tree.iterator();
     while (it.next()) |entry| {
-        if (urgency(entry.view.program_status) > urgency(result)) result = entry.view.program_status;
+        const status = shown(entry.view);
+        if (urgency(status) > urgency(result)) result = status;
     }
     return result;
+}
+
+/// Work that finished or failed while the user watched, or that they have
+/// looked at since, needs no mark. Working and waiting stay shown.
+fn shown(pane: *const Surface) Status {
+    return switch (pane.program_status) {
+        .done, .@"error" => if (pane.status_seen) .idle else pane.program_status,
+        else => pane.program_status,
+    };
 }
 
 fn urgency(status: Status) u8 {

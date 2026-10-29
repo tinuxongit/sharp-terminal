@@ -374,7 +374,15 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   Each tab shows its most urgent pane: a ring while working, then a green
   (done), amber (waiting) or red (failed) dot, before the title in the
   strip and in the sidebar's right column, below close on hover and the
-  bell dot. The program decides when done becomes idle again. Claude
+  bell dot. Done and failed show only until the user sees the pane: work
+  that ends in the pane in sight (its tab shown, its window in front,
+  `Window.paneInSight`) gets no mark, and showing the tab or bringing the
+  window to the front clears it, as with the bell. The same rule keeps a
+  program's desktop notification from popping up over the pane it came
+  from, as Ghostty on macOS does; Claude Code can't tell through ConPTY
+  whether it is being watched, so it notified anyway. Checked 2026-10-29
+  that activating the window clears the dot; the in-sight case needs the
+  window in front, so it wasn't tried. Claude
   sessions started before this build asked once at start and got no
   answer, so they keep their glyph until restarted. Checked 2026-10-29
   in a Sharp with its own config: the reply passes through the bundled

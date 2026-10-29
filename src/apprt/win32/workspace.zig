@@ -116,10 +116,7 @@ pub fn tabNeedsAttention(self: *Window, index: usize) bool {
 /// A bell from a tab the user can't see marks it in the sidebar until
 /// it is selected.
 pub fn noteBell(self: *Window, surface: *Surface) void {
-    const visible = self.tab_count > self.active_tab and
-        self.tab_active_surface[self.active_tab] == surface and
-        self.hwnd != null and w32.GetForegroundWindow() == self.hwnd.?;
-    if (visible) return;
+    if (self.paneInSight(surface)) return;
     surface.attention = true;
     self.invalidateTabBar();
 }

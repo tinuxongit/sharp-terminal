@@ -115,6 +115,7 @@ pub fn performAction(
                     const surface = core_surface.rt_surface;
                     if (surface.program_status == value) return true;
                     surface.program_status = value;
+                    surface.status_seen = surface.parent_window.paneInSight(surface);
                     surface.parent_window.invalidateTabBar();
                 },
             }

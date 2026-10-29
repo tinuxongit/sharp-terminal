@@ -530,6 +530,7 @@ pub fn windowWndProc(
         w32.WM_ACTIVATE => {
             const activated = @as(u16, @truncate(wparam & 0xFFFF));
             window.window_active = activated != w32.WA_INACTIVE;
+            if (window.window_active) window.markActiveTabSeen();
             window.invalidateTabBar();
             if (activated == w32.WA_INACTIVE and window.is_quick_terminal) {
                 if (window.app.quick_terminal) |qt| {
