@@ -85,6 +85,7 @@ pub fn windowWndProc(
                 return 0;
             }
             if (wparam == Window.SIDEBAR_TIMER_ID) {
+                browser_dock.prune(window);
                 if (window.sidebarMode()) {
                     workspace.pollTabs(window);
                     window.sidebar_ticks +%= 1;

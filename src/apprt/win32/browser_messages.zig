@@ -1,10 +1,12 @@
 //! Where each Windows message to the browser panel goes: the toolbar's
 //! pointer and keys, the address box, the shortcuts, and dragging the
 //! panel's edge.
+const std = @import("std");
 const w32 = @import("win32.zig");
 const webview2 = @import("webview2.zig");
 const SearchField = @import("SearchField.zig");
 const BrowserPanel = @import("BrowserPanel.zig");
+const BrowserTab = @import("BrowserTab.zig");
 const toolbar = @import("browser_toolbar.zig");
 
 const Target = toolbar.Target;
@@ -15,11 +17,17 @@ fn setHover(self: *BrowserPanel, target: Target) void {
     self.invalidateToolbar();
 }
 
+fn shownAt(self: *BrowserPanel, i: usize) ?*BrowserTab {
+    var own: BrowserPanel.OwnTabs = undefined;
+    const shown = self.shownTabs(&own);
+    return if (i < shown.len) shown[i] else null;
+}
+
 fn act(self: *BrowserPanel, target: Target) void {
     switch (target) {
-        .new_tab => _ = self.openTab(self.engine.home),
-        .tab => |i| self.select(i),
-        .tab_close => |i| if (i < self.tab_count) self.closeTab(self.tab_slots[i]),
+        .new_tab => _ = self.openTab(self.owner, self.engine.home),
+        .tab => |i| if (shownAt(self, i)) |tab| self.select(tab),
+        .tab_close => |i| if (shownAt(self, i)) |tab| self.closeTab(tab),
         .back, .forward, .reload => {
             const webview = (self.activeTab() orelse return).webview orelse return;
             _ = switch (target) {
@@ -48,12 +56,17 @@ pub fn shortcut(self: *BrowserPanel, vk: u16) bool {
 
 fn runShortcut(self: *BrowserPanel, vk: u16, shift: bool) void {
     switch (vk) {
-        'T' => _ = self.openTab(self.engine.home),
+        'T' => _ = self.openTab(self.owner, self.engine.home),
         'W' => if (self.activeTab()) |tab| self.closeTab(tab),
         'L' => editAddress(self),
-        w32.VK_TAB => if (self.tab_count > 1) {
-            const n = self.tab_count;
-            self.select(if (shift) (self.active + n - 1) % n else (self.active + 1) % n);
+        w32.VK_TAB => {
+            var own: BrowserPanel.OwnTabs = undefined;
+            const shown = self.shownTabs(&own);
+            const active = self.activeTab() orelse return;
+            if (shown.len < 2) return;
+            const at = std.mem.indexOfScalar(*BrowserTab, shown, active) orelse 0;
+            const n = shown.len;
+            self.select(shown[if (shift) (at + n - 1) % n else (at + 1) % n]);
         },
         else => {},
     }

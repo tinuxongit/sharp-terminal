@@ -46,3 +46,4 @@ dist/windows/_stage/
 dist/windows/_release/
 zig-out-arm64/
 zig-out-safe/
+zig-out-check/

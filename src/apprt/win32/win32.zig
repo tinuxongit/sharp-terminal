@@ -1917,6 +1917,9 @@ pub extern "advapi32" fn EqualSid(pSid1: *anyopaque, pSid2: *anyopaque) callconv
 pub extern "kernel32" fn LocalFree(hMem: ?*anyopaque) callconv(.winapi) ?*anyopaque;
 pub extern "kernel32" fn GetCurrentProcess() callconv(.winapi) HANDLE;
 pub extern "kernel32" fn GetNamedPipeServerProcessId(Pipe: HANDLE, ServerProcessId: *u32) callconv(.winapi) i32;
+pub extern "kernel32" fn GetNamedPipeClientProcessId(Pipe: HANDLE, ClientProcessId: *u32) callconv(.winapi) i32;
+pub extern "kernel32" fn GetExitCodeProcess(hProcess: HANDLE, lpExitCode: *u32) callconv(.winapi) i32;
+pub const STILL_ACTIVE: u32 = 259;
 pub extern "kernel32" fn GetUserDefaultLocaleName(lpLocaleName: [*]u16, cchLocaleName: c_int) callconv(.winapi) c_int;
 
 // Calendar time, for dates shown in the user's time zone.

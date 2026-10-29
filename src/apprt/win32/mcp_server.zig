@@ -5,6 +5,7 @@ const std = @import("std");
 const w32 = @import("win32.zig");
 const mcp_pipe = @import("mcp_pipe.zig");
 const browser_tools = @import("browser_tools.zig");
+const Chat = @import("browser_chats.zig").Chat;
 
 const log = std.log.scoped(.win32);
 
@@ -98,6 +99,7 @@ fn serve(pipe: w32.HANDLE) void {
         _ = w32.CloseHandle(pipe);
     }
     const gpa = std.heap.smp_allocator;
+    const chat = Chat.ofClient(pipe);
     var pending: std.ArrayList(u8) = .empty;
     defer pending.deinit(gpa);
     var chunk: [16 * 1024]u8 = undefined;
@@ -109,7 +111,7 @@ fn serve(pipe: w32.HANDLE) void {
         while (std.mem.indexOfScalar(u8, pending.items, '\n')) |nl| {
             var arena: std.heap.ArenaAllocator = .init(gpa);
             defer arena.deinit();
-            const reply = answer(arena.allocator(), pending.items[0..nl]) catch null;
+            const reply = answer(arena.allocator(), &chat, pending.items[0..nl]) catch null;
             const rest = pending.items.len - nl - 1;
             std.mem.copyForwards(u8, pending.items[0..rest], pending.items[nl + 1 ..]);
             pending.shrinkRetainingCapacity(rest);
@@ -129,7 +131,7 @@ fn writeAll(pipe: w32.HANDLE, bytes: []const u8) bool {
 }
 
 /// The reply line to one JSON-RPC message, or null for notifications.
-fn answer(arena: std.mem.Allocator, line: []const u8) !?[]const u8 {
+fn answer(arena: std.mem.Allocator, chat: *const Chat, line: []const u8) !?[]const u8 {
     const message = std.json.parseFromSliceLeaky(std.json.Value, arena, line, .{}) catch return null;
     if (message != .object) return null;
     const id = message.object.get("id") orelse return null;
@@ -188,7 +190,7 @@ fn answer(arena: std.mem.Allocator, line: []const u8) !?[]const u8 {
         const result: browser_tools.Output = if (!running.load(.acquire))
             .{ .is_error = true, .text = "The browser is off in Sharp's Settings > AI > Tools." }
         else if (name != null and name.? == .string)
-            browser_tools.run(arena, name.?.string, args)
+            browser_tools.run(arena, chat, name.?.string, args)
         else
             .{ .is_error = true, .text = "Name a tool to call." };
         try json.objectField("result");

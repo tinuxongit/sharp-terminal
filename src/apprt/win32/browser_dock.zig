@@ -7,6 +7,7 @@ const w32 = @import("win32.zig");
 const Window = @import("Window.zig");
 const BrowserPanel = @import("BrowserPanel.zig");
 const browser_settings = @import("browser_settings.zig");
+const browser_chats = @import("browser_chats.zig");
 
 const log = std.log.scoped(.win32);
 
@@ -43,26 +44,41 @@ fn rect(self: *const Window) w32.RECT {
 /// The globe: show the panel, creating it the first time, or hide it.
 /// A hidden panel keeps its pages.
 pub fn toggle(self: *Window) void {
-    if (self.browser_shown) hide(self) else _ = open(self, null);
+    if (self.browser_shown) hide(self) else _ = open(self);
 }
 
-/// Show the panel, creating it on `first_url` (or the home page) if it
-/// doesn't exist yet. False when it can't be created.
-pub fn open(self: *Window, first_url: ?[]const u8) bool {
-    if (!enabled(self)) return false;
-    const hwnd = self.hwnd orelse return false;
+pub fn panelOf(self: *Window) ?*BrowserPanel {
+    if (!enabled(self)) return null;
+    if (self.browser) |panel| return panel;
+    const hwnd = self.hwnd orelse return null;
+    self.browser = BrowserPanel.create(self.app.hinstance, hwnd, rect(self), self.scale, self.stripPalette(), engine(self), browser_chats.paneOwner(self), self.browser_shown) catch |err| {
+        log.err("failed to open the browser panel: {}", .{err});
+        return null;
+    };
+    return self.browser;
+}
+
+pub fn open(self: *Window) bool {
+    const panel = panelOf(self) orelse return false;
     self.browser_shown = true;
-    if (self.browser) |panel| {
-        panel.show(true);
-    } else {
-        self.browser = BrowserPanel.create(self.app.hinstance, hwnd, rect(self), self.scale, self.stripPalette(), engine(self), first_url) catch |err| {
-            log.err("failed to open the browser panel: {}", .{err});
-            self.browser_shown = false;
-            return false;
-        };
-    }
+    panel.show(true);
     self.handleResize();
     return true;
+}
+
+pub fn follow(self: *Window) void {
+    const panel = self.browser orelse return;
+    panel.showOwner(browser_chats.paneOwner(self));
+}
+
+pub fn prune(self: *Window) void {
+    const panel = self.browser orelse return;
+    var i = panel.tab_count;
+    while (i > 0) {
+        i -= 1;
+        const tab = panel.tab_slots[i];
+        if (!browser_chats.alive(self.app, tab.owner)) panel.closeTab(tab);
+    }
 }
 
 fn hide(self: *Window) void {

@@ -17,9 +17,11 @@ pub const Data = struct {
     viewport_width: u32,
     viewport_height: u32,
     max_tabs: u8,
+    max_total_tabs: u8,
     engines: []const Engine,
     address_placeholder: []const u8,
     untitled: []const u8,
+    empty: []const u8,
     unavailable: []const u8,
 };
 
@@ -34,6 +36,8 @@ comptime {
         @compileError("browser.zon: the viewport must be at least 320 × 240");
     if (data.max_tabs < 1 or data.engines.len < 1)
         @compileError("browser.zon: needs at least one tab and one engine");
+    if (data.max_total_tabs < data.max_tabs)
+        @compileError("browser.zon: max_total_tabs must be at least max_tabs");
     // Settings > AI > Tools offers only engines browser.zon has; "" is
     // the default, the first.
     @setEvalBranchQuota(10_000);

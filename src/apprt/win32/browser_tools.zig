@@ -10,6 +10,8 @@ const snapshot_tree = @import("browser_snapshot.zig");
 const browser_page = @import("browser_page.zig");
 const json_read = @import("json_read.zig");
 const Page = browser_page.Page;
+const Chat = @import("browser_chats.zig").Chat;
+const remote = @import("browser_remote.zig");
 const Point = browser_page.Point;
 const no_params = browser_page.no_params;
 const field = json_read.field;
@@ -51,9 +53,10 @@ pub const Output = struct {
 };
 
 /// Run tool `name`. The output lives in `arena`.
-pub fn run(arena: Allocator, name: []const u8, args: Value) Output {
+pub fn run(arena: Allocator, chat: *const Chat, name: []const u8, args: Value) Output {
     const tool = std.meta.stringToEnum(Name, name) orelse return .{ .is_error = true, .text = "Unknown tool" };
-    var page: Page = .{ .arena = arena };
+    var page: Page = .{ .arena = arena, .chat = chat };
+    defer if (remote.call(chat, .idle, 5_000)) |answer| answer.free() else |_| {};
     return switch (tool) {
         .browser_open => open(&page, args),
         .browser_tabs => listTabs(&page),

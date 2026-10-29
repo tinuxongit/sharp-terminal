@@ -2,6 +2,7 @@
 //! mouse, size, focus, painting, its popups' controls) and where each goes.
 const Surface = @import("Surface.zig");
 const Window = @import("Window.zig");
+const browser_dock = @import("browser_dock.zig");
 const w32 = @import("win32.zig");
 const input = @import("../../input.zig");
 const find_bar = @import("find_bar.zig");
@@ -389,6 +390,7 @@ pub fn surfaceWndProc(
             // Update the active surface for this tab when a split pane gains focus.
             const tab = surface.parent_window.active_tab;
             surface.parent_window.tab_active_surface[tab] = surface;
+            browser_dock.follow(surface.parent_window);
             surface.handleFocus(true);
             return 0;
         },

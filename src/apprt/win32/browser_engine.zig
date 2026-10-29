@@ -347,12 +347,12 @@ fn onTitleChanged(ref: TabRef, webview: *webview2.WebView, _: ?*anyopaque) void 
 
 /// A page opening a window gets a new tab for it, as in Chrome.
 fn onNewWindow(ref: TabRef, webview: *webview2.WebView, args: *webview2.NewWindowArgs) void {
-    const panel, _ = find(ref) orelse return;
+    const panel, const opener = find(ref) orelse return;
     var deferral: ?*webview2.Deferral = null;
     if (args.vtable.GetDeferral(args, &deferral) >= 0) {
         if (deferral) |d| {
             args.addRef();
-            if (panel.openPopup(args, d)) return;
+            if (panel.openPopup(opener.owner, args, d)) return;
             args.release();
             d.release();
         }

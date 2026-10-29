@@ -106,6 +106,9 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/browser_settings.zig`: reads `browser.zon` (sizes,
   fixed page size, tab limit, search engines, text) and says what a typed
   address means.
+- `src/apprt/win32/browser_chats.zig`: which chat a browser tool call
+  comes from (the processes above `sharp-mcp.exe`) and which terminal
+  pane, and so which tabs, it belongs to.
 - `src/apprt/win32/BrowserTab.zig`: one tab's page, title, history and
   log. `browser_engine.zig` is the WebView2 side: the browser process,
   each tab's page and its preparation (Chrome identity, fixed size), and
@@ -441,6 +444,18 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   Settings > AI > Tools (`browser-search-engine`: Google or DuckDuckGo).
   The panel's edge drags. The design follows Citropy's browser rather
   than T3 Code's, which is a preview of a dev server.
+- **Each chat has its own browser tabs.** A tab belongs to a terminal
+  pane, and the panel shows the tabs of the pane in front, so switching
+  terminal tabs or panes switches the pages; tabs the user opens go to
+  that pane too. A tool call finds its pane by walking up from the
+  `sharp-mcp.exe` that Claude Code started (`GetNamedPipeClientProcessId`,
+  then each parent) to a pane's shell. A chat outside Sharp gets tabs of
+  its own, keyed by its claude.exe, and the panel shows them while it
+  works. A chat in a pane out of sight works on its tabs without showing
+  them: they draw off screen (`parked`) for the length of the call, since
+  WebView2 stops drawing hidden pages. Sign-ins stay shared, one profile
+  for every chat. A pane's tabs close when the pane does, checked every
+  3 seconds. Up to 12 tabs per chat and 48 per panel (`browser.zon`).
 - **Every page is 1920 × 1080, scaled to fit, as in Citropy.** Claude
   always sees the same desktop layout and coordinates however wide the
   panel is. `Emulation.setDeviceMetricsOverride` with its `scale` fits the

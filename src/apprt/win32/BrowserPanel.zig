@@ -18,6 +18,9 @@ const browser_engine = @import("browser_engine.zig");
 const toolbar = @import("browser_toolbar.zig");
 const browser_settings = @import("browser_settings.zig");
 const browser_messages = @import("browser_messages.zig");
+const browser_chats = @import("browser_chats.zig");
+
+const Owner = browser_chats.Owner;
 
 const data = browser_settings.data;
 const Engine = browser_settings.Engine;
@@ -44,9 +47,10 @@ palette: tab_strip.Palette,
 fonts: tab_strip.Fonts = .{},
 engine: *const Engine,
 environment: ?*webview2.Environment = null,
-tab_slots: [data.max_tabs]*BrowserTab = undefined,
+tab_slots: [data.max_total_tabs]*BrowserTab = undefined,
 tab_count: usize = 0,
-active: usize = 0,
+owner: Owner,
+stamp: u64 = 0,
 next_id: u32 = 1,
 /// WebView2 could not start, so the panel says why instead.
 failed: bool = false,
@@ -58,9 +62,7 @@ pressed: Target = .none,
 tracking_mouse: bool = false,
 resizing: bool = false,
 
-/// Create the panel over `rect` (the parent's client pixels) with one tab
-/// on `first_url`, or the engine's home page.
-pub fn create(instance: w32.HINSTANCE, parent: w32.HWND, rect: w32.RECT, scale: f32, palette: tab_strip.Palette, engine: *const Engine, first_url: ?[]const u8) !*BrowserPanel {
+pub fn create(instance: w32.HINSTANCE, parent: w32.HWND, rect: w32.RECT, scale: f32, palette: tab_strip.Palette, engine: *const Engine, owner: Owner, shown: bool) !*BrowserPanel {
     if (class_atom == 0) {
         class_atom = w32.RegisterClassExW(&.{
             .cbSize = @sizeOf(w32.WNDCLASSEXW),
@@ -82,7 +84,7 @@ pub fn create(instance: w32.HINSTANCE, parent: w32.HWND, rect: w32.RECT, scale: 
         0,
         class_name,
         std.unicode.utf8ToUtf16LeStringLiteral(""),
-        w32.WS_CHILD | w32.WS_CLIPCHILDREN | w32.WS_VISIBLE_STYLE,
+        w32.WS_CHILD | w32.WS_CLIPCHILDREN | if (shown) w32.WS_VISIBLE_STYLE else 0,
         rect.left,
         rect.top,
         rect.right - rect.left,
@@ -96,10 +98,9 @@ pub fn create(instance: w32.HINSTANCE, parent: w32.HWND, rect: w32.RECT, scale: 
         _ = w32.DestroyWindow(hwnd);
         return err;
     };
-    self.* = .{ .hwnd = hwnd, .scale = scale, .palette = palette, .engine = engine };
+    self.* = .{ .hwnd = hwnd, .scale = scale, .palette = palette, .engine = engine, .owner = owner, .shown = shown };
     _ = w32.SetWindowLongPtrW(hwnd, w32.GWLP_USERDATA, @bitCast(@intFromPtr(self)));
     self.initFonts();
-    _ = self.openTab(first_url orelse engine.home);
     browser_engine.start(self);
     return self;
 }
@@ -148,13 +149,43 @@ pub fn tabs(self: *BrowserPanel) []*BrowserTab {
     return self.tab_slots[0..self.tab_count];
 }
 
+pub const OwnTabs = [data.max_tabs]*BrowserTab;
+
+pub fn ownTabs(self: *BrowserPanel, owner: Owner, out: *OwnTabs) []*BrowserTab {
+    var n: usize = 0;
+    for (self.tabs()) |tab| {
+        if (tab.owner != owner or n == out.len) continue;
+        out[n] = tab;
+        n += 1;
+    }
+    return out[0..n];
+}
+
+pub fn shownTabs(self: *BrowserPanel, out: *OwnTabs) []*BrowserTab {
+    return self.ownTabs(self.owner, out);
+}
+
 pub fn tabById(self: *BrowserPanel, id: u32) ?*BrowserTab {
     for (self.tabs()) |tab| if (tab.id == id) return tab;
     return null;
 }
 
+pub fn ownTab(self: *BrowserPanel, owner: Owner, id: u32) ?*BrowserTab {
+    const tab = self.tabById(id) orelse return null;
+    return if (tab.owner == owner) tab else null;
+}
+
+pub fn activeOf(self: *BrowserPanel, owner: Owner) ?*BrowserTab {
+    var best: ?*BrowserTab = null;
+    for (self.tabs()) |tab| {
+        if (tab.owner != owner) continue;
+        if (best == null or tab.selected_at > best.?.selected_at) best = tab;
+    }
+    return best;
+}
+
 pub fn activeTab(self: *BrowserPanel) ?*BrowserTab {
-    return if (self.active < self.tab_count) self.tab_slots[self.active] else null;
+    return self.activeOf(self.owner);
 }
 
 fn indexOf(self: *BrowserPanel, tab: *const BrowserTab) ?usize {
@@ -162,10 +193,9 @@ fn indexOf(self: *BrowserPanel, tab: *const BrowserTab) ?usize {
     return null;
 }
 
-/// Open `url` in a new tab and show it. Null when no more tabs fit.
-pub fn openTab(self: *BrowserPanel, url: []const u8) ?u32 {
+pub fn openTab(self: *BrowserPanel, owner: Owner, url: []const u8) ?u32 {
     const owned = alloc.dupe(u8, url) catch return null;
-    return self.addTab(.{ .url = owned }) catch {
+    return self.addTab(owner, .{ .url = owned }) catch {
         alloc.free(owned);
         return null;
     };
@@ -173,53 +203,89 @@ pub fn openTab(self: *BrowserPanel, url: []const u8) ?u32 {
 
 /// A page opened a window: make it a tab. False when no more tabs fit,
 /// and then the caller keeps what it passed.
-pub fn openPopup(self: *BrowserPanel, args: *webview2.NewWindowArgs, deferral: *webview2.Deferral) bool {
-    _ = self.addTab(.{ .popup = .{ .args = args, .deferral = deferral } }) catch return false;
+pub fn openPopup(self: *BrowserPanel, owner: Owner, args: *webview2.NewWindowArgs, deferral: *webview2.Deferral) bool {
+    _ = self.addTab(owner, .{ .popup = .{ .args = args, .deferral = deferral } }) catch return false;
     return true;
 }
 
+pub fn hasRoom(self: *BrowserPanel, owner: Owner) bool {
+    var own: OwnTabs = undefined;
+    return self.tab_count < data.max_total_tabs and self.ownTabs(owner, &own).len < data.max_tabs;
+}
+
 /// On an error the caller still owns `first`; after that the tab does.
-fn addTab(self: *BrowserPanel, first: BrowserTab.First) error{ Full, OutOfMemory }!u32 {
-    if (self.tab_count == data.max_tabs) return error.Full;
+fn addTab(self: *BrowserPanel, owner: Owner, first: BrowserTab.First) error{ Full, OutOfMemory }!u32 {
+    if (!self.hasRoom(owner)) return error.Full;
     const tab = try alloc.create(BrowserTab);
-    tab.* = .{ .id = self.next_id, .first = first };
+    tab.* = .{ .id = self.next_id, .owner = owner, .first = first };
     self.next_id += 1;
     self.tab_slots[self.tab_count] = tab;
     self.tab_count += 1;
-    self.select(self.tab_count - 1);
+    self.select(tab);
     if (self.environment != null and !browser_engine.createPage(self, tab)) self.closeTab(tab);
     return tab.id;
 }
 
 pub fn closeTab(self: *BrowserPanel, tab: *BrowserTab) void {
     const index = self.indexOf(tab) orelse return;
+    const owner = tab.owner;
     tab.deinit();
     alloc.destroy(tab);
     std.mem.copyForwards(*BrowserTab, self.tab_slots[index .. self.tab_count - 1], self.tab_slots[index + 1 .. self.tab_count]);
     self.tab_count -= 1;
-    if (self.tab_count == 0) {
-        self.active = 0;
+    if (owner == self.owner and self.activeTab() == null) {
         if (w32.GetParent(self.hwnd)) |parent| _ = w32.PostMessageW(parent, message_empty, 0, 0);
-    } else {
-        if (index < self.active or self.active == self.tab_count) self.active -= 1;
-        self.select(self.active);
     }
-    self.invalidateToolbar();
+    self.refresh();
+    if (owner == self.owner) self.frontChanged();
 }
 
-/// Show tab `index`, hiding the others.
-pub fn select(self: *BrowserPanel, index: usize) void {
-    if (index >= self.tab_count) return;
-    self.active = index;
-    for (self.tabs(), 0..) |tab, i| tab.show(i == index and self.shown and tab.ready);
+pub fn closeOwner(self: *BrowserPanel, owner: Owner) void {
+    var own: OwnTabs = undefined;
+    for (self.ownTabs(owner, &own)) |tab| self.closeTab(tab);
+}
+
+pub fn select(self: *BrowserPanel, tab: *BrowserTab) void {
+    self.stamp += 1;
+    tab.selected_at = self.stamp;
+    if (tab.owner != self.owner) return;
+    self.refresh();
+    self.frontChanged();
+}
+
+pub fn showOwner(self: *BrowserPanel, owner: Owner) void {
+    if (owner == self.owner) return;
+    self.owner = owner;
+    self.refresh();
+    self.frontChanged();
+}
+
+pub fn park(self: *BrowserPanel, tab: *BrowserTab, parked: bool) void {
+    if (tab.parked == parked) return;
+    tab.parked = parked;
+    self.refresh();
+}
+
+fn inSight(self: *BrowserPanel, tab: *const BrowserTab) bool {
+    return self.shown and tab.owner == self.owner and self.activeTab() == tab;
+}
+
+pub fn refresh(self: *BrowserPanel) void {
+    for (self.tabs()) |tab| {
+        if (self.inSight(tab) != tab.on_screen) self.placeTab(tab);
+        tab.show(tab.ready and (tab.on_screen or tab.parked));
+    }
+    _ = w32.InvalidateRect(self.hwnd, null, 0);
+}
+
+fn frontChanged(self: *BrowserPanel) void {
     if (self.address.focused) self.address.focus(self.hwnd, false);
     self.showSource();
-    self.invalidateToolbar();
 }
 
 /// A tab finished preparing its page and may show.
 pub fn tabReady(self: *BrowserPanel, tab: *BrowserTab) void {
-    if (self.activeTab() == tab) tab.show(self.shown);
+    tab.show(self.inSight(tab) or tab.parked);
     self.tabChanged(tab);
 }
 
@@ -272,7 +338,13 @@ fn pageRect(self: *const BrowserPanel) struct { w32.RECT, f64 } {
 }
 
 pub fn placeTab(self: *BrowserPanel, tab: *BrowserTab) void {
-    const rect, const zoom = self.pageRect();
+    var rect, const zoom = self.pageRect();
+    tab.on_screen = self.inSight(tab);
+    if (!tab.on_screen) {
+        const width = rect.right - rect.left;
+        rect.left = -100_000;
+        rect.right = rect.left + width;
+    }
     const handler = browser_engine.Ignore.create(0) orelse return;
     defer _ = handler.release();
     tab.place(rect, zoom, .{ data.viewport_width, data.viewport_height }, handler);
@@ -283,11 +355,11 @@ pub fn placeTab(self: *BrowserPanel, tab: *BrowserTab) void {
 pub fn show(self: *BrowserPanel, shown: bool) void {
     self.shown = shown;
     _ = w32.ShowWindow(self.hwnd, if (shown) w32.SW_SHOW else w32.SW_HIDE);
-    if (shown and self.tab_count == 0) {
-        _ = self.openTab(self.engine.home);
+    if (shown and self.activeTab() == null) {
+        _ = self.openTab(self.owner, self.engine.home);
         return;
     }
-    self.select(self.active);
+    self.refresh();
 }
 
 /// The parent window moved, which WebView2 needs to place its popups.
@@ -309,17 +381,27 @@ pub fn navigate(self: *BrowserPanel, typed: []const u8) void {
 pub fn toolbarLayout(self: *const BrowserPanel) toolbar.Layout {
     var client: w32.RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
     _ = w32.GetClientRect(self.hwnd, &client);
-    return .{ .scale = self.scale, .width = client.right, .tab_count = self.tab_count };
+    var count: usize = 0;
+    for (self.tab_slots[0..self.tab_count]) |tab| {
+        if (tab.owner == self.owner) count += 1;
+    }
+    return .{ .scale = self.scale, .width = client.right, .tab_count = @min(count, data.max_tabs) };
 }
 
 fn toolbarView(self: *BrowserPanel, titles: *[data.max_tabs][]const u8) toolbar.View {
-    for (self.tabs(), 0..) |tab, i| titles[i] = if (tab.title_len > 0) tab.title() else data.untitled;
+    var own: OwnTabs = undefined;
+    const shown = self.shownTabs(&own);
     const active = self.activeTab();
+    var active_index: usize = shown.len;
+    for (shown, 0..) |tab, i| {
+        titles[i] = if (tab.title_len > 0) tab.title() else data.untitled;
+        if (tab == active) active_index = i;
+    }
     return .{
         .palette = self.palette,
         .fonts = self.fonts,
-        .titles = titles[0..self.tab_count],
-        .active = self.active,
+        .titles = titles[0..shown.len],
+        .active = active_index,
         .address = &self.address,
         .placeholder = data.address_placeholder,
         .hover = self.hover,
@@ -327,7 +409,7 @@ fn toolbarView(self: *BrowserPanel, titles: *[data.max_tabs][]const u8) toolbar.
         .can_back = if (active) |t| t.can_back else false,
         .can_forward = if (active) |t| t.can_forward else false,
         .ready = if (active) |t| t.ready else false,
-        .can_add = self.tab_count < data.max_tabs,
+        .can_add = self.hasRoom(self.owner),
     };
 }
 
@@ -381,13 +463,14 @@ pub fn paint(self: *BrowserPanel) void {
     toolbar.paint(c, bar, self.toolbarView(&titles));
     _ = w32.BitBlt(hdc, 0, 0, width, height, mem_dc, 0, 0, w32.SRCCOPY);
 
-    if (self.failed) {
+    const notice: ?[]const u8 = if (self.failed) data.unavailable else if (self.activeTab() == null) data.empty else null;
+    if (notice) |text| {
         _ = w32.SetBkMode(hdc, w32.TRANSPARENT);
         const old_font = w32.SelectObject(hdc, self.fonts.title);
         defer _ = w32.SelectObject(hdc, old_font);
         _ = w32.SetTextColor(hdc, self.palette.text_dim.ref());
         var wide: [256]u16 = undefined;
-        const len = wide_string.fromUtf8(&wide, data.unavailable);
+        const len = wide_string.fromUtf8(&wide, text);
         _ = w32.DrawTextW(hdc, @ptrCast(&wide), @intCast(len), &below, w32.DT_CENTER | w32.DT_VCENTER | w32.DT_SINGLELINE);
     }
 }

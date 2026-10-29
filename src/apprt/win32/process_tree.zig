@@ -51,6 +51,11 @@ pub const Processes = struct {
         }
         return out[0..n];
     }
+
+    pub fn find(self: *const Processes, pid: u32) ?Process {
+        for (self.items[0..self.len]) |p| if (p.pid == pid) return p;
+        return null;
+    }
 };
 
 fn programOf(exe: []const u16) Program {

@@ -8,9 +8,14 @@ const w32 = @import("win32.zig");
 const webview2 = @import("webview2.zig");
 const wide_string = @import("wide_string.zig");
 const browser_log = @import("browser_log.zig");
+const browser_chats = @import("browser_chats.zig");
 
 /// Stable for the panel's life, so Claude can name the tab.
 id: u32,
+owner: browser_chats.Owner,
+selected_at: u64 = 0,
+parked: bool = false,
+on_screen: bool = false,
 controller: ?*webview2.Controller = null,
 webview: ?*webview2.WebView = null,
 /// The page has its identity and size and has started loading; until

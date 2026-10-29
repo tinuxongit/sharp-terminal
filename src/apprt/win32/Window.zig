@@ -1003,6 +1003,7 @@ pub fn selectTabIndex(self: *Window, idx: usize) void {
     }
     self.updateWindowTitle();
     self.invalidateTabBar();
+    browser_dock.follow(self);
 }
 
 /// Layout split panes for the active tab.

@@ -88,6 +88,7 @@ ssh_host_len: u8 = 0,
 /// The Claude Code conversation running here, found the same way.
 claude: ?claude_session.Session = null,
 opened_ms: u64 = 0,
+pane_id: u64 = 0,
 attention: bool = false,
 /// What the program here says it is doing (OSC 7501), for the strip and
 /// the sidebar.
@@ -274,6 +275,8 @@ pub const InitOptions = struct {
 /// Initialize a surface with optional per-surface config overrides. The
 /// overrides are cloned into the surface config arena before this function
 /// returns, so callers only need to keep them alive for the duration of init.
+var next_pane_id: std.atomic.Value(u64) = .init(1);
+
 pub fn initWithOptions(
     self: *Surface,
     app: *App,
@@ -287,6 +290,7 @@ pub fn initWithOptions(
         .wsl = options.wsl,
         .paths = options.paths,
         .opened_ms = w32.GetTickCount64(),
+        .pane_id = next_pane_id.fetchAdd(1, .monotonic),
     };
     self.profile_name_len = @intCast(@min(options.profile_name.len, self.profile_name.len));
     @memcpy(self.profile_name[0..self.profile_name_len], options.profile_name[0..self.profile_name_len]);

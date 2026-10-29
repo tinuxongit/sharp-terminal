@@ -11,7 +11,10 @@
     // panel is.
     .viewport_width = 1920,
     .viewport_height = 1080,
+    // Each chat, or terminal pane, has its own tabs: up to max_tabs each,
+    // and max_total_tabs in one panel.
     .max_tabs = 12,
+    .max_total_tabs = 48,
     // Settings > AI > Tools > Search engine (`browser-search-engine`).
     // .id is the config value; the first is the default. New tabs open
     // .home, and words typed in the address box go to .search.
@@ -22,6 +25,8 @@
     .address_placeholder = "Search or enter address",
     // A tab's name until its page has a title.
     .untitled = "New tab",
+    // Shown in the panel while the terminal pane in front has no pages.
+    .empty = "No pages for this terminal yet. + opens one.",
     // Shown in the panel when Windows has no WebView2 runtime.
     .unavailable = "The browser needs Microsoft Edge WebView2 Runtime.",
 }

@@ -9,6 +9,7 @@ const w32 = @import("win32.zig");
 const remote = @import("browser_remote.zig");
 const browser_settings = @import("browser_settings.zig");
 const json_read = @import("json_read.zig");
+const Chat = @import("browser_chats.zig").Chat;
 const field = json_read.field;
 const string = json_read.string;
 const number = json_read.number;
@@ -35,6 +36,7 @@ pub const TabInfo = struct { id: u32, title: []const u8, url: []const u8, active
 
 pub const Page = struct {
     arena: Allocator,
+    chat: *const Chat,
     failure: ?[]const u8 = null,
     /// The tab the call acts on, once chosen.
     tab: u32 = 0,
@@ -45,7 +47,7 @@ pub const Page = struct {
     }
 
     pub fn remoteCall(self: *Page, op: remote.Op, timeout_ms: u32) ![]const u8 {
-        const answer = remote.call(op, timeout_ms) catch |err| return switch (err) {
+        const answer = remote.call(self.chat, op, timeout_ms) catch |err| return switch (err) {
             error.Unavailable => self.fail("Sharp couldn't reach its browser.", .{}),
             error.TimedOut => self.fail("The browser didn't answer in time.", .{}),
         };
@@ -58,7 +60,7 @@ pub const Page = struct {
     /// Call a DevTools method; its error message becomes the failure.
     pub fn devtools(self: *Page, method: []const u8, params: anytype) !Value {
         const json = try std.json.Stringify.valueAlloc(self.arena, params, .{});
-        const answer = remote.call(.{ .devtools = .{ .tab = self.tab, .method = method, .params = json } }, 30_000) catch |err| return switch (err) {
+        const answer = remote.call(self.chat, .{ .devtools = .{ .tab = self.tab, .method = method, .params = json } }, 30_000) catch |err| return switch (err) {
             error.Unavailable => self.fail("Sharp couldn't reach its browser.", .{}),
             error.TimedOut => self.fail("The page didn't answer {s} in time.", .{method}),
         };
@@ -105,7 +107,7 @@ pub const Page = struct {
     pub fn waitReady(self: *Page) !void {
         var waited: u32 = 0;
         while (waited < 20_000) : (waited += 200) {
-            const answer = remote.call(.{ .ready = .{ .tab = self.tab } }, 5_000) catch return self.fail("Sharp couldn't reach its browser.", .{});
+            const answer = remote.call(self.chat, .{ .ready = .{ .tab = self.tab } }, 5_000) catch return self.fail("Sharp couldn't reach its browser.", .{});
             defer answer.free();
             if (answer.ok) return;
             if (answer.text.len > 0) return self.fail("{s}", .{try self.arena.dupe(u8, answer.text)});

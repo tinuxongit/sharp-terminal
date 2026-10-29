@@ -11,6 +11,9 @@ const browser_settings = @import("browser_settings.zig");
 const BrowserTab = @import("BrowserTab.zig");
 const browser_dock = @import("browser_dock.zig");
 const webview2 = @import("webview2.zig");
+const browser_chats = @import("browser_chats.zig");
+
+const Chat = browser_chats.Chat;
 
 const alloc = std.heap.smp_allocator;
 
@@ -32,12 +35,14 @@ pub const Op = union(enum) {
     /// Every tab as JSON: id, title, url and whether it is active.
     tabs,
     close: struct { tab: u32 },
+    idle,
 };
 
 /// One call, shared by the waiting thread and the UI thread; the last of
 /// the two to let go frees it, so a caller that gave up never leaves the
 /// UI thread holding freed memory.
 pub const Request = struct {
+    chat: Chat,
     op: Op,
     refs: std.atomic.Value(u32) = .init(2),
     done: w32.HANDLE,
@@ -45,7 +50,7 @@ pub const Request = struct {
     /// DevTools' JSON answer, or text; owned.
     result: []u8 = &.{},
 
-    fn create(op: Op) ?*Request {
+    fn create(chat: *const Chat, op: Op) ?*Request {
         const self = alloc.create(Request) catch return null;
         const event = w32.CreateEventW(null, 1, 0, null) orelse {
             alloc.destroy(self);
@@ -64,7 +69,7 @@ pub const Request = struct {
             .open => |o| .{ .open = .{ .url = alloc.dupe(u8, o.url) catch return self.fail(event) } },
             else => op,
         };
-        self.* = .{ .op = owned, .done = event };
+        self.* = .{ .chat = chat.*, .op = owned, .done = event };
         return self;
     }
 
@@ -120,9 +125,9 @@ pub const Answer = struct {
 };
 
 /// Run `op` on the UI thread and wait up to `timeout_ms` for its answer.
-pub fn call(op: Op, timeout_ms: u32) error{ Unavailable, TimedOut }!Answer {
+pub fn call(chat: *const Chat, op: Op, timeout_ms: u32) error{ Unavailable, TimedOut }!Answer {
     const hwnd = target orelse return error.Unavailable;
-    const request = Request.create(op) orelse return error.Unavailable;
+    const request = Request.create(chat, op) orelse return error.Unavailable;
     defer request.release();
     if (w32.PostMessageW(hwnd, message, @intFromPtr(request), 0) == 0) {
         // The UI thread never gets its reference, so drop it here.
@@ -143,61 +148,70 @@ fn onDevtools(context: usize, result: w32.HRESULT, json: ?[*:0]const u16) void {
     request.finish(result >= 0, utf8);
 }
 
-/// The window whose panel Claude uses: the first with the panel showing,
-/// else the first with a panel, else (for open) the first that may have one.
-fn windowFor(app: *App, opening: bool) ?*Window {
-    for (app.windows.items) |w| if (w.browser != null and w.browser_shown) return w;
-    for (app.windows.items) |w| if (w.browser != null) return w;
-    if (opening) for (app.windows.items) |w| if (browser_dock.enabled(w)) return w;
-    return null;
-}
+const not_open = "This chat has no browser tab. Call browser_open first.";
 
-const not_open = "The browser isn't open. Call browser_open first.";
-
-/// Answer a posted request on the UI thread.
+/// Answer a posted request on the UI thread. Each chat sees and drives
+/// only its own tabs.
 pub fn serve(app: *App, request: *Request) void {
     if (!app.config.@"ai-tools-browser") return request.finish(false, "The browser is off in Sharp's Settings > AI > Tools.");
-    const window = windowFor(app, request.op == .open or request.op == .select) orelse return request.finish(false, not_open);
+    const placed = browser_chats.place(app, &request.chat) orelse return request.finish(false, "Sharp has no window that can show the browser.");
+    const window = placed.window;
+    const owner = placed.owner;
     switch (request.op) {
         .open => |o| {
-            const existed = window.browser != null;
-            const url: ?[]const u8 = if (o.url.len > 0) o.url else null;
-            if (!browser_dock.open(window, if (existed) null else url)) return request.finish(false, "Sharp couldn't open its browser.");
-            const panel = window.browser orelse return request.finish(false, not_open);
-            if (existed and url != null) {
-                const id = panel.openTab(url.?) orelse return request.finish(false, "Every tab is in use. Close one with browser_close.");
-                return request.finishId(id);
-            }
-            const tab = panel.activeTab() orelse return request.finish(false, not_open);
+            const panel = browser_dock.panelOf(window) orelse return request.finish(false, "Sharp couldn't open its browser.");
+            const existing = panel.activeOf(owner);
+            const tab = if (o.url.len == 0 and existing != null) existing.? else blk: {
+                const id = panel.openTab(owner, if (o.url.len > 0) o.url else panel.engine.home) orelse
+                    return request.finish(false, "Every tab is in use. Close one with browser_close.");
+                break :blk panel.tabById(id) orelse return request.finish(false, not_open);
+            };
+            bringIn(window, panel, placed, tab);
             request.finishId(tab.id);
         },
         .select => |s| {
-            if (!window.browser_shown and !browser_dock.open(window, null)) return request.finish(false, not_open);
             const panel = window.browser orelse return request.finish(false, not_open);
-            const tab = (if (s.tab == 0) panel.activeTab() else panel.tabById(s.tab)) orelse
-                return request.finish(false, "There is no such tab. browser_tabs lists them.");
-            for (panel.tabs(), 0..) |t, i| if (t == tab and i != panel.active) panel.select(i);
+            const tab = (if (s.tab == 0) panel.activeOf(owner) else panel.ownTab(owner, s.tab)) orelse
+                return request.finish(false, if (s.tab == 0) not_open else "There is no such tab. browser_tabs lists them.");
+            panel.select(tab);
+            bringIn(window, panel, placed, tab);
             request.finishId(tab.id);
         },
         .tabs => {
-            const panel = window.browser orelse return request.finish(true, "[]");
             var out: std.Io.Writer.Allocating = .init(alloc);
             defer out.deinit();
             var json: std.json.Stringify = .{ .writer = &out.writer };
             json.beginArray() catch {};
-            for (panel.tabs(), 0..) |tab, i| {
-                var buf: [2048]u8 = undefined;
-                json.write(.{ .id = tab.id, .title = tab.title(), .url = tab.source(&buf) orelse "", .active = i == panel.active }) catch {};
+            if (window.browser) |panel| {
+                const active = panel.activeOf(owner);
+                var own: BrowserPanel.OwnTabs = undefined;
+                for (panel.ownTabs(owner, &own)) |tab| {
+                    var buf: [2048]u8 = undefined;
+                    json.write(.{ .id = tab.id, .title = tab.title(), .url = tab.source(&buf) orelse "", .active = tab == active }) catch {};
+                }
             }
             json.endArray() catch {};
             request.finish(true, out.written());
         },
+        .idle => {
+            if (window.browser) |panel| {
+                var own: BrowserPanel.OwnTabs = undefined;
+                for (panel.ownTabs(owner, &own)) |tab| panel.park(tab, false);
+            }
+            request.finish(true, "");
+        },
         inline .ready, .devtools, .history, .logs, .close => |op, tag| {
             const panel = window.browser orelse return request.finish(false, not_open);
-            const tab = panel.tabById(op.tab) orelse return request.finish(false, "That tab was closed. browser_tabs lists the open ones.");
+            const tab = panel.ownTab(owner, op.tab) orelse return request.finish(false, "That tab was closed. browser_tabs lists the open ones.");
             serveTab(panel, tab, request, @unionInit(Op, @tagName(tag), op));
         },
     }
+}
+
+fn bringIn(window: *Window, panel: *BrowserPanel, placed: browser_chats.Placement, tab: *BrowserTab) void {
+    if (!placed.in_sight) return panel.park(tab, true);
+    panel.showOwner(placed.owner);
+    if (!window.browser_shown) _ = browser_dock.open(window);
 }
 
 fn serveTab(panel: *BrowserPanel, tab: *BrowserTab, request: *Request, op: Op) void {
