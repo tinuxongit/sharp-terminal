@@ -438,6 +438,11 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   headless script to check web UI and signed-in sites, the snapshot,
   ref and action loop, and asking before submitting or buying. Since the
   server runs only while the switch is on, they describe only what is on.
+  Claude Code hides MCP tools behind its tool search, showing only their
+  names, so each tool asks to load upfront (`_meta` `anthropic/alwaysLoad`,
+  `.load_upfront` in `browser_tools.zon`): about 1,000 tokens a session.
+  Citropy's `tool_help` and `run_tool` indirection was left out; it pays
+  off for dozens of tools, not six.
   Claude Code runs `sharp-mcp.exe`, which relays its stdio to a named pipe
   named after the Windows user, so the tools act on the panel the user
   sees. The pipe

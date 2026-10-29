@@ -26,6 +26,7 @@ pub const Tool = struct {
 pub const Data = struct {
     server_name: []const u8,
     instructions: []const u8,
+    load_upfront: bool,
     tools: []const Tool,
 };
 

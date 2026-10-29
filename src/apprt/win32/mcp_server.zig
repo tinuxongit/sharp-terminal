@@ -174,6 +174,10 @@ fn answer(arena: std.mem.Allocator, line: []const u8) !?[]const u8 {
             try json.beginWriteRaw();
             try out.writer.writeAll(tool.schema);
             json.endWriteRaw();
+            if (browser_tools.data.load_upfront) {
+                try json.objectField("_meta");
+                try json.write(.{ .@"anthropic/alwaysLoad" = true });
+            }
             try json.endObject();
         }
         try json.endArray();
