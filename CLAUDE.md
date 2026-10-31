@@ -594,6 +594,16 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   printed one. Paths in OSC 8 links are percent-decoded (`%20`), printed
   ones are not; before 2026-10-31 both were refused, so a clicked image
   path from Git Bash or a Markdown link did nothing.
+- **Ctrl+click on a link is Sharp's even when a program captures the
+  mouse.** Ghostty gives links up to a program with mouse reporting on
+  (only Shift takes them back), and Claude Code's fullscreen view captures
+  the mouse and opens clicked links itself, but its handler reads
+  `C:\...` as a URL with the scheme `c:` and refuses it, so Ctrl+click on
+  a `Read(C:\...\shot.png)` path did nothing. With Ctrl held, links
+  highlight under capture too (`linkHoverAllowed` in
+  `src/surface_mouse.zig`), and a left press or release on one is not
+  reported to the program (`mouseButtonCallback`), so the click opens it
+  through `shell_open.zig` exactly once.
 - **Copy and paste use Windows' keys.** `clipboard-keys = windows`, the
   default, binds `performable:ctrl+c=copy_to_clipboard` and
   `performable:ctrl+v=paste_from_clipboard` on the loaded config, unless

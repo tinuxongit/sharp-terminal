@@ -4159,6 +4159,7 @@ pub fn mouseButtonCallback(
             // If we have shift-pressed and we aren't allowed to capture it,
             // then we do not do a mouse report.
             if (mods.shift and !shift_capture) break :report;
+            if (button == .left and self.mouse.over_link) break :report;
 
             // In any other mouse button scenario without shift pressed we
             // clear the selection since the underlying application can handle

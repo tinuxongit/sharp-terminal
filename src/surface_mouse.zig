@@ -90,10 +90,11 @@ pub fn modifiersToMouseShape(self: SurfaceMouse) ?MouseShape {
     return self.mouse_shape;
 }
 
-/// Links belong to the terminal UI only when the application is not capturing
-/// the mouse, or when Shift releases that capture.
+/// Links belong to the terminal UI when the application is not capturing the
+/// mouse, when Shift releases that capture, or, in Sharp, while Ctrl is held,
+/// so Ctrl+click opens links in programs that capture the mouse.
 pub fn linkHoverAllowed(mouse_event: terminal.MouseEvent, mods: input.Mods, shift_capture: bool) bool {
-    return mouse_event == .none or (mods.shift and !shift_capture);
+    return mouse_event == .none or (mods.ctrlOrSuper() and !mods.shift) or (mods.shift and !shift_capture);
 }
 
 fn eligibleMouseShapeKeyEvent(physical_key: input.Key) bool {
@@ -314,7 +315,7 @@ test "link hover follows mouse capture override" {
     try testing.expect(linkHoverAllowed(.none, .{}, false));
     try testing.expect(linkHoverAllowed(.none, .{ .ctrl = true }, true));
     try testing.expect(!linkHoverAllowed(.any, .{}, false));
-    try testing.expect(!linkHoverAllowed(.any, .{ .ctrl = true }, false));
+    try testing.expect(linkHoverAllowed(.any, .{ .ctrl = true }, false));
     try testing.expect(linkHoverAllowed(.any, .{ .ctrl = true, .shift = true }, false));
     try testing.expect(!linkHoverAllowed(.any, .{ .ctrl = true, .shift = true }, true));
 }
