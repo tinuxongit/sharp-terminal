@@ -1963,3 +1963,67 @@ pub extern "winhttp" fn WinHttpQueryHeaders(hRequest: HINTERNET, dwInfoLevel: u3
 pub extern "winhttp" fn WinHttpReadData(hRequest: HINTERNET, lpBuffer: [*]u8, dwNumberOfBytesToRead: u32, lpdwNumberOfBytesRead: *u32) callconv(.winapi) i32;
 pub extern "winhttp" fn WinHttpCloseHandle(hInternet: HINTERNET) callconv(.winapi) i32;
 pub extern "kernel32" fn DeleteFileW(lpFileName: [*:0]const u16) callconv(.winapi) i32;
+
+pub const SOCKET = usize;
+pub const INVALID_SOCKET: SOCKET = ~@as(SOCKET, 0);
+pub const AF_INET: i32 = 2;
+pub const SOCK_STREAM: i32 = 1;
+pub const IPPROTO_TCP: i32 = 6;
+pub const FIONBIO: i32 = @bitCast(@as(u32, 0x8004667e));
+pub const POLLRDNORM: i16 = 0x0100;
+pub const POLLWRNORM: i16 = 0x0010;
+pub const SOL_SOCKET: i32 = 0xffff;
+pub const SO_ERROR: i32 = 0x1007;
+pub const NI_NAMEREQD: i32 = 0x04;
+pub const WSADATA = extern struct {
+    wVersion: u16,
+    wHighVersion: u16,
+    iMaxSockets: u16,
+    iMaxUdpDg: u16,
+    lpVendorInfo: ?[*]u8,
+    szDescription: [257]u8,
+    szSystemStatus: [129]u8,
+};
+pub const sockaddr_in = extern struct {
+    family: u16 = @intCast(AF_INET),
+    port: u16,
+    addr: u32,
+    zero: [8]u8 = @splat(0),
+};
+pub const WSAPOLLFD = extern struct {
+    fd: SOCKET,
+    events: i16,
+    revents: i16 = 0,
+};
+pub const ADDRINFOW = extern struct {
+    ai_flags: i32,
+    ai_family: i32,
+    ai_socktype: i32,
+    ai_protocol: i32,
+    ai_addrlen: usize,
+    ai_canonname: ?[*:0]u16,
+    ai_addr: ?*sockaddr_in,
+    ai_next: ?*ADDRINFOW,
+};
+pub const MIB_IPADDRROW = extern struct {
+    dwAddr: u32,
+    dwIndex: u32,
+    dwMask: u32,
+    dwBCastAddr: u32,
+    dwReasmSize: u32,
+    unused1: u16,
+    wType: u16,
+};
+pub extern "ws2_32" fn WSAStartup(wVersionRequested: u16, lpWSAData: *WSADATA) callconv(.winapi) i32;
+pub extern "ws2_32" fn socket(af: i32, kind: i32, protocol: i32) callconv(.winapi) SOCKET;
+pub extern "ws2_32" fn closesocket(s: SOCKET) callconv(.winapi) i32;
+pub extern "ws2_32" fn ioctlsocket(s: SOCKET, cmd: i32, argp: *u32) callconv(.winapi) i32;
+pub extern "ws2_32" fn connect(s: SOCKET, name: *const sockaddr_in, namelen: i32) callconv(.winapi) i32;
+pub extern "ws2_32" fn recv(s: SOCKET, buf: [*]u8, len: i32, flags: i32) callconv(.winapi) i32;
+pub extern "ws2_32" fn getsockopt(s: SOCKET, level: i32, optname: i32, optval: [*]u8, optlen: *i32) callconv(.winapi) i32;
+pub extern "ws2_32" fn WSAPoll(fdArray: [*]WSAPOLLFD, fds: u32, timeout: i32) callconv(.winapi) i32;
+pub extern "ws2_32" fn GetAddrInfoW(pNodeName: [*:0]const u16, pServiceName: ?[*:0]const u16, pHints: ?*const ADDRINFOW, ppResult: *?*ADDRINFOW) callconv(.winapi) i32;
+pub extern "ws2_32" fn FreeAddrInfoW(pAddrInfo: *ADDRINFOW) callconv(.winapi) void;
+pub extern "ws2_32" fn GetNameInfoW(pSockaddr: *const sockaddr_in, SockaddrLength: i32, pNodeBuffer: [*]u16, NodeBufferSize: u32, pServiceBuffer: ?[*]u16, ServiceBufferSize: u32, Flags: i32) callconv(.winapi) i32;
+pub extern "iphlpapi" fn GetIpAddrTable(pIpAddrTable: ?*anyopaque, pdwSize: *u32, bOrder: i32) callconv(.winapi) u32;
+pub extern "kernel32" fn GetSystemDirectoryW(lpBuffer: [*]u16, uSize: u32) callconv(.winapi) u32;

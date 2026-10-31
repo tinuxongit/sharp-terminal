@@ -83,8 +83,16 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/tab_sidebar.zig`: tabs as a list beside the terminal,
   grouped by where the shell runs and by folder; layout and painting.
 - `src/apprt/win32/sidebar_group_menu.zig`: the right-click menu on a
-  sidebar folder or server (new tab there, open in Explorer, remove,
-  which closes its tabs); its text is in `profiles.zon`.
+  sidebar folder (new tab there, open in Explorer, remove, which closes
+  its tabs), handing servers to `server_menu.zig`: new tab, a folder on
+  the server (`server_folder_picker.zig`), remote desktop
+  (`remote_desktop.zig`), signing in without a password
+  (`server_sign_in.zig`) and remove. Their text is in `profiles.zon`.
+- `src/apprt/win32/nearby_servers.zig`: SSH servers on this PC's local
+  networks, found on a background thread; `tcp_probe.zig` connects to
+  many addresses at once and reads what they answer.
+- `src/apprt/win32/ssh_settings.zig`: what ssh would use for a
+  destination (`ssh -G`): its host name, user and key files.
 - `src/apprt/win32/sidebar_usage.zig`: the sidebar's AI section, a card
   per tool with its plan windows or spending.
 - `src/apprt/win32/logos.zon`: the tools' logos as outlines, made by
@@ -441,6 +449,34 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   opened on a server keeps its server (`opened_on_server`). Session
   lines keep the server folder in `folder`. Checked 2026-10-31 against
   Debian 13. An ssh typed in a local shell still sends `xterm-ghostty`.
+- **A server works like a folder in the sidebar.** Its title has "+" (a
+  new tab on it, in the first tab's server folder) and an arrow, which
+  like a right-click opens its menu. Open Folder on Server lists folders
+  through `ssh -o BatchMode=yes` and `ls -1Ap`, one native menu per level
+  (Open Here, `..`, subfolders without dotted ones), so it needs a
+  sign-in without a password; without one it offers to set it up. Sign
+  In Without Password takes the first key file `ssh -G` names that has a
+  `.pub`, or makes an ed25519 key with no passphrase where ssh would look
+  for one, and opens a server tab that appends it to
+  `authorized_keys` (once) before the shell: the password is typed once,
+  in the tab, and Sharp never sees it. Remote Desktop opens Windows' own
+  client (`mstsc /v:<host>`) when the host answers on 3389, else offers
+  a tab that installs xrdp with apt and sudo; RDP was chosen over a VNC
+  page in the browser panel because Windows ships the client and xrdp is
+  packaged everywhere. Listing a server's folders blocks the UI thread
+  for the ssh round trip (a wait cursor shows). Checked 2026-10-31
+  against Debian 13 that the listing, banner and 3389 checks answer; the
+  menus haven't been clicked in the app yet.
+- **Servers on the local network are found when the Servers menu
+  opens, never on their own.** Opening it starts a scan (at most once a
+  minute) of every address of each private IPv4 network this PC is on,
+  as a /24 at most and four networks at most: a non-blocking connect to
+  port 22 on all of them, waited on with `WSAPoll` for 0.8 s, kept only
+  if the answer starts with `SSH-`. Hosts in `~/.ssh/config` are left
+  out, since the menu lists them already. The menu waits up to 2 s for a
+  first answer. Picking a found server asks only for the user, in the
+  address box ("user for 192.168.1.185"). Scanning only on request keeps
+  Sharp from sweeping a work network unasked.
 - **The sidebar shows AI usage, read through each tool's CLI.** An AI
   section pinned at its foot shows a card per tool, with its logo: Claude's and Codex's plan windows ("5-hour
   limit", "71% left", a bar that empties, "Resets in 1h 18m" or "Resets

@@ -143,6 +143,7 @@ pub const State = struct {
     has_wsl: bool = false,
     /// The address box under Servers, while open.
     server_field: ?*const SearchField = null,
+    server_field_hint: []const u8 = profiles.data.sidebar.server_placeholder,
     /// Claude's, Codex's and OpenCode's usage, shown at the foot.
     usage: ai_usage.Snapshot = .{},
     /// Whether the AI section is folded to its title.
@@ -329,7 +330,7 @@ fn paintServerField(p: *Painter, field: *const SearchField, y: i32) i32 {
         .text_dim = p.palette.text_dim,
         .font = p.fonts.item,
         .icon_font = p.fonts.icons_small,
-        .placeholder = profiles.data.sidebar.server_placeholder,
+        .placeholder = p.state.server_field_hint,
         .icon = icon_server,
     }, false, p.state.window_focused);
     p.spots.add(clip(rect, p), .server_field);
@@ -353,8 +354,7 @@ fn paintGroup(p: *Painter, first: Item, folded: bool, y: i32) i32 {
     p.c.text(.{ .left = left + p.px(icon_size + 8), .top = y, .right = label_right, .bottom = y + h }, first.group_label, if (active) p.fonts.item_strong else p.fonts.item, color, .left);
 
     p.spots.add(clip(row, p), .{ .group = first.tab });
-    // New tabs open in a folder; a server's tabs come from SSH itself.
-    if (hovered and first.section != .servers) paintNewTabButtons(p, row, buttons, p.palette.hover);
+    if (hovered) paintNewTabButtons(p, row, buttons, p.palette.hover);
     return y + h;
 }
 

@@ -23,6 +23,8 @@ const claude_session = @import("claude_session.zig");
 const session = @import("session.zig");
 const servers = @import("servers.zig");
 const server_shell = @import("server_shell.zig");
+const server_menu = @import("server_menu.zig");
+const nearby_servers = @import("nearby_servers.zig");
 const configpkg = @import("../../config.zig");
 const log = std.log.scoped(.win32);
 const Window = @import("Window.zig");
@@ -68,6 +70,11 @@ pub fn paintSidebar(self: *Window, hdc_screen: w32.HDC, palette: tab_strip.Palet
         };
     }
     var collapsed: [Window.max_collapsed][]const u8 = undefined;
+    var hint_buf: [servers.max_len + 64]u8 = undefined;
+    const server_hint = if (self.server_field_address.len > 0)
+        std.fmt.bufPrint(&hint_buf, profiles.data.sidebar.server_menu.user_for, .{self.server_field_address.text()}) catch profiles.data.sidebar.server_placeholder
+    else
+        profiles.data.sidebar.server_placeholder;
 
     const canvas: canvas_mod.Canvas = .{ .hdc = mem_dc, .pixels = @ptrCast(@alignCast(bits orelse return)), .width = width, .height = height };
     self.sidebar_max_scroll = tab_sidebar.paint(canvas, self.scale, palette, self.sidebar_fonts, .{
@@ -82,6 +89,7 @@ pub fn paintSidebar(self: *Window, hdc_screen: w32.HDC, palette: tab_strip.Palet
         .pressed = self.sidebar_pressed,
         .has_wsl = self.has_wsl,
         .server_field = if (self.server_field.focused) &self.server_field else null,
+        .server_field_hint = server_hint,
         .usage = usage: {
             const config = &self.app.config;
             ai_usage.setEnabled(.{
@@ -149,7 +157,10 @@ pub fn focusSidebarSearch(self: *Window, focused: bool) void {
 
 /// Open or close the server address box; it shows only while focused.
 pub fn focusServerField(self: *Window, focused: bool) void {
-    if (!focused) self.server_field.clear();
+    if (!focused) {
+        self.server_field.clear();
+        self.server_field_address = .{};
+    }
     focusSidebarField(self, &self.server_field, focused);
 }
 
@@ -190,8 +201,15 @@ pub fn sidebarClick(self: *Window, x: i32, y: i32) void {
             var buf: [300]u8 = undefined;
             toggleCollapsed(self, tab_sidebar.collapseKey(&buf, tabSection(self, i), groupKey(self, i)));
         },
-        .group_new => |i| openInSection(self, tabSection(self, i), null, self.tab_active_surface[i].folderPath()),
-        .group_menu => |i| {
+        .group_new => |i| switch (tabSection(self, i)) {
+            .servers => _ = openServer(self, groupKey(self, i), self.tab_active_surface[i].serverFolder()),
+            else => |section| openInSection(self, section, null, self.tab_active_surface[i].folderPath()),
+        },
+        .group_menu => |i| if (tabSection(self, i) == .servers) {
+            const corner = pressSidebarArrow(self, target) orelse return;
+            defer releaseSidebarArrow(self);
+            _ = server_menu.show(self, i, corner, false);
+        } else {
             const list = profiles.detect();
             const index = sidebarProfileMenu(self, target, &list) orelse return;
             self.openPicked(&list, index, self.tab_active_surface[i].folderPath(), false);
@@ -204,8 +222,9 @@ pub fn sidebarClick(self: *Window, x: i32, y: i32) void {
         },
         .section_menu => |section| switch (section) {
             .servers => {
-                const destination = sidebarServerMenu(self, target) orelse return;
-                _ = openServer(self, destination.text(), null);
+                const picked = sidebarServerMenu(self, target) orelse return;
+                if (picked.nearby) return askUserFor(self, picked.name.text());
+                _ = openServer(self, picked.name.text(), null);
             },
             else => {
                 const list = profiles.detect();
@@ -261,7 +280,13 @@ pub fn serverFieldKey(self: *Window, vk: u16) void {
     switch (vk) {
         w32.VK_ESCAPE => focusServerField(self, false),
         w32.VK_RETURN => {
-            const typed = servers.Name.init(std.mem.trim(u8, self.server_field.text(), " "));
+            const trimmed = std.mem.trim(u8, self.server_field.text(), " ");
+            var joined_buf: [servers.max_len]u8 = undefined;
+            const address = self.server_field_address.text();
+            const destination = if (address.len > 0 and trimmed.len > 0 and std.mem.indexOfScalar(u8, trimmed, '@') == null)
+                std.fmt.bufPrint(&joined_buf, "{s}@{s}", .{ trimmed, address }) catch trimmed
+            else if (trimmed.len == 0) address else trimmed;
+            const typed = servers.Name.init(destination);
             focusServerField(self, false);
             if (typed.len > 0) _ = openServer(self, typed.text(), null);
         },
@@ -483,17 +508,40 @@ pub fn sidebarProfileMenu(self: *Window, arrow: tab_sidebar.Target, list: *const
     return new_tab_menu.show(hwnd, corner, list, list.selected(self.configuredCommand()), &self.app.profile_icons, self.scale, strip_mouse.menusDark(self));
 }
 
+const first_scan_wait_ms = 2_000;
+
+const PickedServer = struct {
+    name: servers.Name,
+    nearby: bool,
+};
+
 /// The server menu dropped below Servers' arrow. Returns the server picked.
-pub fn sidebarServerMenu(self: *Window, arrow: tab_sidebar.Target) ?servers.Name {
+fn sidebarServerMenu(self: *Window, arrow: tab_sidebar.Target) ?PickedServer {
     const hwnd = self.hwnd orelse return null;
     const corner = pressSidebarArrow(self, arrow) orelse return null;
     defer releaseSidebarArrow(self);
+    nearby_servers.refresh();
+    nearby_servers.awaitFirst(first_scan_wait_ms);
     const configured = servers.Configured.read(self.app.core_app.alloc);
     var configured_names: [servers.Configured.capacity][]const u8 = undefined;
     var recent_names: [servers.Recent.capacity][]const u8 = undefined;
-    const picked = new_tab_menu.showServers(hwnd, corner, configured.names(&configured_names), self.app.recent_servers.names(&recent_names), strip_mouse.menusDark(self)) orelse return null;
+    const found = nearby_servers.snapshot();
+    var nearby_names: [nearby_servers.capacity][]const u8 = undefined;
+    var nearby_labels: [nearby_servers.capacity][]const u8 = undefined;
+    var label_bufs: [nearby_servers.capacity][servers.max_len * 2 + 8]u8 = undefined;
+    for (found.list(), 0..) |*server, i| {
+        nearby_names[i] = server.address.text();
+        nearby_labels[i] = server.label(&label_bufs[i]);
+    }
+    const n = found.len;
+    const picked = new_tab_menu.showServers(hwnd, corner, configured.names(&configured_names), self.app.recent_servers.names(&recent_names), nearby_names[0..n], nearby_labels[0..n], found.scanning, strip_mouse.menusDark(self)) orelse return null;
     // The menu's names live in lists that end with this call.
-    return .init(picked);
+    return .{ .name = .init(picked.name), .nearby = picked.nearby };
+}
+
+fn askUserFor(self: *Window, address: []const u8) void {
+    self.server_field_address = .init(address);
+    focusServerField(self, true);
 }
 
 /// Light `arrow` while its menu is open, and return where the menu drops,

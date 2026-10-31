@@ -48,7 +48,12 @@ pub fn show(owner: w32.HWND, point: w32.POINT, list: *const profiles.List, selec
 
 /// Show the servers from the SSH config, then those used recently, with
 /// the top-left corner at `point`. Returns the one picked.
-pub fn showServers(owner: w32.HWND, point: w32.POINT, configured: []const []const u8, recent: []const []const u8, dark: bool) ?[]const u8 {
+pub const PickedServer = struct {
+    name: []const u8,
+    nearby: bool,
+};
+
+pub fn showServers(owner: w32.HWND, point: w32.POINT, configured: []const []const u8, recent: []const []const u8, nearby: []const []const u8, nearby_labels: []const []const u8, searching: bool, dark: bool) ?PickedServer {
     const menu = w32.CreatePopupMenu() orelse return null;
     defer _ = w32.DestroyMenu(menu);
 
@@ -59,6 +64,18 @@ pub fn showServers(owner: w32.HWND, point: w32.POINT, configured: []const []cons
         position += 1;
     }
     for (recent, 0..) |name, i| insert(menu, &position, id_profile_base + @as(u32, @intCast(configured.len + i)), name, null, false);
+    const nearby_base = id_profile_base + @as(u32, @intCast(configured.len + recent.len));
+    if (nearby.len > 0 or searching) {
+        if (position > 0) {
+            _ = w32.AppendMenuW(menu, w32.MF_SEPARATOR, 0, null);
+            position += 1;
+        }
+        var heading: [96]u16 = undefined;
+        _ = wide_string.fromUtf8(&heading, if (nearby.len == 0) profiles.data.sidebar.server_menu.searching else profiles.data.sidebar.server_menu.nearby);
+        _ = w32.AppendMenuW(menu, w32.MF_GRAYED, 0, @ptrCast(&heading));
+        position += 1;
+        for (nearby_labels, 0..) |label, i| insert(menu, &position, nearby_base + @as(u32, @intCast(i)), label, null, false);
+    }
     if (position == 0) {
         var label: [160]u16 = undefined;
         _ = wide_string.fromUtf8(&label, profiles.data.sidebar.no_servers);
@@ -69,8 +86,10 @@ pub fn showServers(owner: w32.HWND, point: w32.POINT, configured: []const []cons
     const picked = w32.TrackPopupMenuEx(menu, w32.TPM_LEFTALIGN | w32.TPM_TOPALIGN | w32.TPM_RETURNCMD, point.x, point.y, owner, null);
     if (picked < id_profile_base) return null;
     const i: usize = @intCast(picked - id_profile_base);
-    if (i < configured.len) return configured[i];
-    if (i - configured.len < recent.len) return recent[i - configured.len];
+    if (i < configured.len) return .{ .name = configured[i], .nearby = false };
+    if (i - configured.len < recent.len) return .{ .name = recent[i - configured.len], .nearby = false };
+    const n = i - configured.len - recent.len;
+    if (n < nearby.len) return .{ .name = nearby[n], .nearby = true };
     return null;
 }
 

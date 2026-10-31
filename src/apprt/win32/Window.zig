@@ -96,6 +96,7 @@ sidebar_fonts: tab_sidebar.Fonts = .{},
 sidebar_search: SearchField = .{},
 /// The address box Servers' "+" opens; shown while it has the keyboard.
 server_field: SearchField = .{},
+server_field_address: servers.Name = .{},
 /// Whether WSL is installed, so the sidebar always shows its section.
 has_wsl: bool = false,
 /// Tabs in the order last used, for Ctrl+Tab (`tab-switch-order`).

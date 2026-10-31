@@ -56,7 +56,28 @@ pub const GroupMenu = struct {
     new_tab: []const u8,
     open_folder: []const u8,
     remove_folder: []const u8,
-    remove_server: []const u8,
+};
+
+pub const ServerMenu = struct {
+    new_tab: []const u8,
+    open_folder: []const u8,
+    sign_in: []const u8,
+    remote_desktop: []const u8,
+    remove: []const u8,
+    open_here: []const u8,
+    parent_folder: []const u8,
+    no_folders: []const u8,
+    signed_in: []const u8,
+    password_needed_title: []const u8,
+    password_needed_text: []const u8,
+    no_desktop_title: []const u8,
+    no_desktop_text: []const u8,
+    install_desktop: []const u8,
+    desktop_port: u16,
+    desktop_timeout_ms: u32,
+    nearby: []const u8,
+    searching: []const u8,
+    user_for: []const u8,
 };
 
 pub const Sidebar = struct {
@@ -71,6 +92,7 @@ pub const Sidebar = struct {
     /// The Servers menu when there is nothing to list.
     no_servers: []const u8,
     group_menu: GroupMenu,
+    server_menu: ServerMenu,
     ai: AiUsage,
 };
 

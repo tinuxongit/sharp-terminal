@@ -70,13 +70,43 @@
         .pick_folder = "Open a tab in folder",
         .server_placeholder = "user@host",
         .no_servers = "No servers in ~/.ssh/config yet",
-        // The menu a right-click on a folder's or server's title opens.
-        // Removing closes every tab in it, asking first if a command runs.
+        // The menu a right-click on a folder's title opens. Removing
+        // closes every tab in it, asking first if a command runs.
         .group_menu = .{
             .new_tab = "New Tab Here",
             .open_folder = "Open in File Explorer",
             .remove_folder = "Remove Folder",
-            .remove_server = "Remove Server",
+        },
+        // A server's menu (right-click on its title, or its arrow), the
+        // folder picker it opens, and the servers found on this network.
+        .server_menu = .{
+            .new_tab = "New Tab on Server",
+            .open_folder = "Open Folder on Server...",
+            .sign_in = "Sign In Without Password",
+            .remote_desktop = "Remote Desktop",
+            .remove = "Remove Server",
+            // The folder picker's first item, followed by the folder.
+            .open_here = "Open Here",
+            .parent_folder = "..",
+            .no_folders = "No folders here",
+            // Printed in the new tab once this PC's key is on the server.
+            .signed_in = "Sharp: this PC now signs in to this server without a password.",
+            .password_needed_title = "Sign in without a password?",
+            .password_needed_text = "Browsing the server's folders needs a sign-in without a password. Set it up now? You type the password once, in a new tab.",
+            .no_desktop_title = "No remote desktop on this server",
+            .no_desktop_text = "Nothing answers on the remote desktop port (3389). Install xrdp on the server? A new tab runs the install with sudo (Debian or Ubuntu).",
+            // The command that tab runs on the server.
+            .install_desktop = "sudo apt install -y xrdp xorgxrdp && sudo systemctl enable --now xrdp; ",
+            // The remote desktop port checked first, and how long to wait.
+            .desktop_port = 3389,
+            .desktop_timeout_ms = 1500,
+            // SSH servers found by trying every address of this PC's
+            // local networks, listed in the Servers menu.
+            .nearby = "On this network",
+            .searching = "Searching this network...",
+            // The address box's hint once a found server is picked: only
+            // the user is missing. {s} is the server's address.
+            .user_for = "user for {s}",
         },
         // The AI section at the foot of the sidebar: Claude Code's plan
         // windows and OpenCode's spending, read through their CLIs.
