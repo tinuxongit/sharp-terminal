@@ -580,7 +580,10 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   gains two branches (`src/config/url.zig`, compiled in only there): drive
   paths like `C:\Users\me\shot.png`, and relative ones like
   `src\main.zig:12:5` that contain a dot, so `DOMAIN\user` isn't a link.
-  A space ends a path. Checked 2026-10-29 in a Sharp with its own config
+  In a drive path a space stays only when the name goes on to a separator
+  (`C:\New folder\shot.png`) or ends in an extension (`C:\shots\my
+  shot.png`), so a sentence after a path isn't swallowed; elsewhere a
+  space ends a path. Checked 2026-10-29 in a Sharp with its own config
   (Ctrl held only in its input state, the pointer on the link, since
   Ghostty reads the real pointer on press): a printed folder and an OSC 8
   `file://` folder opened in Explorer, a PNG in Photos, and a `.cmd`
@@ -588,7 +591,8 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   (`/c/Users/...`) or the WSL way (`/mnt/c/...`) count as drive paths, and
   an OSC 8 link with a relative path (Claude Code's Markdown links, such
   as `[shot](img/shot.png)`) is resolved against the tab's folder like a
-  printed one; before 2026-10-31 both were refused, so a clicked image
+  printed one. Paths in OSC 8 links are percent-decoded (`%20`), printed
+  ones are not; before 2026-10-31 both were refused, so a clicked image
   path from Git Bash or a Markdown link did nothing.
 - **Copy and paste use Windows' keys.** `clipboard-keys = windows`, the
   default, binds `performable:ctrl+c=copy_to_clipboard` and

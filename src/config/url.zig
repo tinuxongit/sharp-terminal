@@ -111,15 +111,24 @@ const windows_path_segment =
     \\[\w\-.~$&+=%@#!]
 ;
 
+const windows_path_space =
+    \\ (?=[\w\-.~$&+=%@#! ]*[\\\/]|[\w\-.~$&+=%@#!]*\.\w+(?!\w))
+;
+
+const windows_path_name =
+    windows_path_segment ++ "+(?:" ++ windows_path_space ++ windows_path_segment ++ "+)*";
+
 // Branch 4, on Windows only: drive paths such as C:\Users\me\shot.png,
-// which programs there print with backslashes. Spaces end the path, since
-// a sentence may follow it. Segments are separated unambiguously so a
-// failed match can't backtrack through every way of splitting a name.
+// which programs there print with backslashes. A space stays in the path
+// only when the name goes on to a separator (C:\New folder\shot.png) or
+// ends in an extension (C:\shots\my shot.png), since a sentence may follow
+// it. Segments are separated unambiguously so a failed match can't
+// backtrack through every way of splitting a name.
 const windows_path_branch =
     \\(?<![\w\\\/])[A-Za-z]:[\\\/]
 ++
-    windows_path_segment ++ "*" ++
-    "(?:[\\\\\\/]" ++ windows_path_segment ++ "+)*" ++
+    "(?:" ++ windows_path_name ++ ")?" ++
+    "(?:[\\\\\\/]" ++ windows_path_name ++ ")*" ++
     "[\\\\\\/]?" ++
     no_trailing_punctuation;
 

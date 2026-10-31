@@ -39,7 +39,8 @@ pub fn decide(value: OpenUrl) Decision {
 /// link points to, written to `buf`: a `file:` URI without a host (or for
 /// localhost or WSL), a drive or WSL path, which is what Ghostty hands
 /// over for a clicked relative path, or a drive as Git Bash (/c/...) or
-/// WSL (/mnt/c/...) writes it. Null for anything else, which
+/// WSL (/mnt/c/...) writes it, decoding %20 and the like when an OSC 8 link
+/// carries the path. Null for anything else, which
 /// `decide` judges as an address. Like Windows Terminal, other computers'
 /// files are never opened: reaching them can send the user's credentials.
 pub fn localPath(value: OpenUrl, buf: []u8) ?[]const u8 {
@@ -50,10 +51,13 @@ pub fn localPath(value: OpenUrl, buf: []u8) ?[]const u8 {
     const url = value.url;
     const path = if (std.ascii.startsWithIgnoreCase(url, "file:"))
         fromFileUri(url, buf) orelse return null
-    else if (isDrivePath(url) or isWslPath(url))
-        copyInto(buf, 0, url) orelse return null
-    else
-        fromMountedDrive(url, buf) orelse return null;
+    else path: {
+        const written = if (isDrivePath(url) or isWslPath(url))
+            copyInto(buf, 0, url) orelse return null
+        else
+            fromMountedDrive(url, buf) orelse return null;
+        break :path if (value.kind == .osc8) std.Uri.percentDecodeInPlace(written) else written;
+    };
     std.mem.replaceScalar(u8, path, '/', '\\');
     if (!isDrivePath(path) and !isWslPath(path)) return null;
     if (hasHiddenText(path)) return null;
