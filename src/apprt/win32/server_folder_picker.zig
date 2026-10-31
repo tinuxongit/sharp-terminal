@@ -2,11 +2,10 @@ const std = @import("std");
 const w32 = @import("win32.zig");
 const wide_string = @import("wide_string.zig");
 const menu_theme = @import("menu_theme.zig");
-const command_line = @import("command_line.zig");
 const profiles = @import("profiles.zig");
 const servers = @import("servers.zig");
 const server_shell = @import("server_shell.zig");
-const HiddenCli = @import("HiddenCli.zig");
+const server_query = @import("server_query.zig");
 
 const text = profiles.data.sidebar.server_menu;
 const max_listed = 200;
@@ -76,17 +75,11 @@ fn list(alloc: std.mem.Allocator, destination: []const u8, dir: []const u8) ?Lis
     }
     script.writeAll("pwd; ls -1Ap") catch return null;
 
-    var command_buf: [script_buf.len * 2 + 256]u8 = undefined;
-    var command: std.Io.Writer = .fixed(&command_buf);
-    command.print("ssh.exe -o BatchMode=yes -o ConnectTimeout=5 {s} ", .{destination}) catch return null;
-    command_line.quote(&command, "", script.buffered()) catch return null;
-
-    const previous_cursor = w32.SetCursor(w32.LoadCursorW(null, w32.IDC_WAIT));
-    defer _ = w32.SetCursor(previous_cursor);
-    var cli = HiddenCli.startWithin(command.buffered(), 15_000) orelse return null;
-    defer cli.end();
     var listing: Listing = .{ .output = .empty, .here_end = 0 };
-    cli.readAll(alloc, &listing.output);
+    if (!server_query.run(alloc, destination, script.buffered(), &listing.output)) {
+        listing.deinit(alloc);
+        return null;
+    }
 
     const items = listing.output.items;
     const first_end = std.mem.indexOfScalar(u8, items, '\n') orelse items.len;

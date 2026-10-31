@@ -8,6 +8,7 @@ const Window = @import("Window.zig");
 const BrowserPanel = @import("BrowserPanel.zig");
 const browser_settings = @import("browser_settings.zig");
 const browser_chats = @import("browser_chats.zig");
+const server_tunnel = @import("server_tunnel.zig");
 
 const log = std.log.scoped(.win32);
 const alloc = std.heap.smp_allocator;
@@ -68,6 +69,7 @@ pub fn rememberPages(self: *Window, owner: browser_chats.Owner, urls: []const []
     if (!enabled(self)) return;
     for (urls) |url| {
         if (!std.ascii.startsWithIgnoreCase(url, "https://") and !std.ascii.startsWithIgnoreCase(url, "http://")) continue;
+        if (server_tunnel.ownsPage(url)) continue;
         const copy = alloc.dupe(u8, url) catch return;
         self.browser_pending.append(alloc, .{ .owner = owner, .url = copy }) catch {
             alloc.free(copy);

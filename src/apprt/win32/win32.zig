@@ -2027,3 +2027,23 @@ pub extern "ws2_32" fn FreeAddrInfoW(pAddrInfo: *ADDRINFOW) callconv(.winapi) vo
 pub extern "ws2_32" fn GetNameInfoW(pSockaddr: *const sockaddr_in, SockaddrLength: i32, pNodeBuffer: [*]u16, NodeBufferSize: u32, pServiceBuffer: ?[*]u16, ServiceBufferSize: u32, Flags: i32) callconv(.winapi) i32;
 pub extern "iphlpapi" fn GetIpAddrTable(pIpAddrTable: ?*anyopaque, pdwSize: *u32, bOrder: i32) callconv(.winapi) u32;
 pub extern "kernel32" fn GetSystemDirectoryW(lpBuffer: [*]u16, uSize: u32) callconv(.winapi) u32;
+pub extern "ws2_32" fn bind(s: SOCKET, name: *const sockaddr_in, namelen: i32) callconv(.winapi) i32;
+pub extern "ws2_32" fn getsockname(s: SOCKET, name: *sockaddr_in, namelen: *i32) callconv(.winapi) i32;
+pub const JobObjectExtendedLimitInformation: c_int = 9;
+pub const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x00002000;
+pub const JOBOBJECT_EXTENDED_LIMIT_INFORMATION = extern struct {
+    PerProcessUserTimeLimit: i64 = 0,
+    PerJobUserTimeLimit: i64 = 0,
+    LimitFlags: u32 = 0,
+    MinimumWorkingSetSize: usize = 0,
+    MaximumWorkingSetSize: usize = 0,
+    ActiveProcessLimit: u32 = 0,
+    Affinity: usize = 0,
+    PriorityClass: u32 = 0,
+    SchedulingClass: u32 = 0,
+    IoInfo: [6]u64 = @splat(0),
+    ProcessMemoryLimit: usize = 0,
+    JobMemoryLimit: usize = 0,
+    PeakProcessMemoryUsed: usize = 0,
+    PeakJobMemoryUsed: usize = 0,
+};

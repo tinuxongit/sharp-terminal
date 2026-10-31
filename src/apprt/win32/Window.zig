@@ -28,6 +28,7 @@ const canvas_mod = @import("canvas.zig");
 const SearchField = @import("SearchField.zig");
 const session = @import("session.zig");
 const servers = @import("servers.zig");
+const server_tunnel = @import("server_tunnel.zig");
 const configpkg = @import("../../config.zig");
 const workspace = @import("workspace.zig");
 const closed_tabs = @import("closed_tabs.zig");
@@ -440,6 +441,7 @@ pub fn deinit(self: *Window) void {
     self.tab_overview.deinit();
     // Close all tab surfaces.
     self.cleanupAllSurfaces();
+    server_tunnel.endFor(self);
     browser_dock.close(self);
 
     self.strip_fonts.deinit();

@@ -1,0 +1,69 @@
+// What Sharp runs on a server to browse its files and to show its
+// graphical programs as browser panel tabs, and the text it shows for them.
+// Both run as the user, listen only on Unix sockets in a folder only the
+// user can open, and are reached through an SSH tunnel that ends with the
+// panel tab (or with Sharp).
+.{
+    // The loopback address tunnels listen on. It is not 127.0.0.1, so the
+    // session leaves out their pages: a tunnel doesn't survive a restart.
+    .tunnel_address = "127.83.72.80",
+    // How long a tunnel may take to connect and start what it reaches.
+    .start_timeout_ms = 20_000,
+    // A tunnel ends once no panel tab has shown its page for this many
+    // 3-second polls.
+    .missed_polls_to_end = 2,
+    // The folder on the server, below the user's home, for sockets and logs.
+    .runtime_folder = ".cache/sharp",
+
+    // File Browser (filebrowser.org, Apache-2.0), downloaded by the server
+    // itself from GitHub and checked against these hashes, into
+    // ~/.local/share/sharp/filebrowser-<version>.
+    .files = .{
+        .version = "2.63.23",
+        .amd64_url = "https://github.com/filebrowser/filebrowser/releases/download/v2.63.23/linux-amd64-filebrowser.tar.gz",
+        .amd64_sha256 = "b14db2bb8033caa3f80205eb6578b2ed0744ebd9e716b790bc4a9703ce909e88",
+        .arm64_url = "https://github.com/filebrowser/filebrowser/releases/download/v2.63.23/linux-arm64-filebrowser.tar.gz",
+        .arm64_sha256 = "c55b3450b6ac07ef73b5b49f0b2955a8e755100b71af1df73f9e5d25b12fd27a",
+        .install_title = "Install File Browser on this server?",
+        .install_text = "Browsing a server's files uses File Browser (filebrowser.org, open source). A new tab downloads it into ~/.local/share/sharp on the server and checks it. No root needed.",
+        .installed = "Sharp: File Browser is installed. Choose Browse Files again.",
+        .unsupported = "Sharp: File Browser needs an x86_64 or ARM64 Linux server.",
+    },
+
+    // A graphical program runs on its own virtual screen (TigerVNC's Xvnc,
+    // 1920 x 1080 like the panel's pages), alone with a window manager that
+    // fills the screen with it, shown in the panel by noVNC through
+    // websockify. A desktop session (/usr/share/xsessions) runs without it.
+    .apps = .{
+        .packages = "tigervnc-standalone-server websockify novnc matchbox-window-manager xauth",
+        .install_title = "Install app tabs on this server?",
+        .install_text = "Showing a server's programs in tabs needs TigerVNC, websockify, noVNC and a small window manager. A new tab installs them with apt and sudo (Debian or Ubuntu).",
+        .installed = "Sharp: app tabs are installed. Choose Open App again.",
+        .screen = "1920x1080",
+        // The first X display number tried; the next free one is used.
+        .first_display = 50,
+        .page = "vnc.html?autoconnect=true&resize=remote&reconnect=true&path=websockify",
+        .none = "No programs found on this server",
+        // freedesktop.org's main categories, each a submenu; a program in
+        // none of them goes under `other`.
+        .categories = .{
+            .{ .key = "AudioVideo", .label = "Sound & Video" },
+            .{ .key = "Development", .label = "Development" },
+            .{ .key = "Education", .label = "Education" },
+            .{ .key = "Game", .label = "Games" },
+            .{ .key = "Graphics", .label = "Graphics" },
+            .{ .key = "Network", .label = "Internet" },
+            .{ .key = "Office", .label = "Office" },
+            .{ .key = "Science", .label = "Science" },
+            .{ .key = "Settings", .label = "Settings" },
+            .{ .key = "System", .label = "System" },
+            .{ .key = "Utility", .label = "Utilities" },
+        },
+        .other = "Other",
+    },
+
+    .browse_files = "Browse Files",
+    .open_app = "Open App...",
+    .failed_title = "Couldn't reach the server",
+    .failed_text = "The tunnel to the server didn't start. Sharp's log has what ssh said.",
+}

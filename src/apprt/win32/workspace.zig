@@ -25,6 +25,7 @@ const servers = @import("servers.zig");
 const server_shell = @import("server_shell.zig");
 const server_menu = @import("server_menu.zig");
 const nearby_servers = @import("nearby_servers.zig");
+const server_tunnel = @import("server_tunnel.zig");
 const configpkg = @import("../../config.zig");
 const log = std.log.scoped(.win32);
 const Window = @import("Window.zig");
@@ -456,6 +457,7 @@ pub fn openServerAfter(self: *Window, destination: []const u8, folder: ?[]const 
 /// Servers, and for a Claude Code conversation, so a reopened tab can
 /// resume it. One process snapshot serves every tab.
 pub fn pollTabs(self: *Window) void {
+    server_tunnel.prune(self);
     const procs = process_tree.Processes.take();
     var changed = false;
     for (0..self.tab_count) |i| {

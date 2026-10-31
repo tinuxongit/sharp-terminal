@@ -88,6 +88,14 @@ commands and conventions; this file covers what is specific to Sharp.
   the server (`server_folder_picker.zig`), remote desktop
   (`remote_desktop.zig`), signing in without a password
   (`server_sign_in.zig`) and remove. Their text is in `profiles.zon`.
+- `src/apprt/win32/server_files.zig`: Browse Files, File Browser on the
+  server shown in the panel; `server_apps.zig`: Open App, a server's
+  program (or desktop session) on its own virtual screen, shown in the
+  panel through noVNC. `server_tools.zon` holds their versions, hashes,
+  packages and text. `server_tunnel.zig` runs the ssh that starts each
+  one and forwards a local port to its Unix socket, and ends it with its
+  panel tab; `server_probe.zig` asks a server what it has installed, and
+  `server_query.zig` runs a command on it with no window.
 - `src/apprt/win32/nearby_servers.zig`: SSH servers on this PC's local
   networks, found on a background thread; `tcp_probe.zig` connects to
   many addresses at once and reads what they answer.
@@ -477,6 +485,31 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   first answer. Picking a found server asks only for the user, in the
   address box ("user for 192.168.1.185"). Scanning only on request keeps
   Sharp from sweeping a work network unasked.
+- **A server's files and programs open as browser panel tabs.** Browse
+  Files runs File Browser (filebrowser.org, Apache-2.0), and Open App runs
+  one program on its own Xvnc screen (TigerVNC) with a window manager that
+  fills it (matchbox), shown by noVNC (MPL-2.0) through websockify; a
+  desktop session from `/usr/share/xsessions` runs without the window
+  manager. Each program gets its own D-Bus session. Everything listens
+  only on Unix sockets in `~/.cache/sharp` (mode 700), never on TCP, so
+  other users of the server can't reach them, and File Browser runs with
+  `--noauth` behind that. One ssh per tab (`-T -L <loopback>:<port>:<socket>`)
+  starts what it reaches and prints a ready line; the remote script waits
+  on `read` and stops it all when the connection closes. The ssh is in a
+  job that ends with Sharp, and ends once its page has been gone from
+  every panel tab for two polls. Tunnels listen on 127.83.72.80, not
+  127.0.0.1, so the session leaves their pages out. With the browser
+  setting off the page opens in the default browser and its tunnel lasts
+  until its window closes. File Browser is downloaded by the server from
+  GitHub into `~/.local/share/sharp` and checked against the pinned
+  sha256, in a visible tab; the VNC pieces come from apt with sudo, also
+  in a tab. Both need a sign-in without a password. RDP was kept for the
+  whole desktop; noVNC was picked for single programs because RDP can't
+  show one window, and Xpra (which can) isn't packaged in Debian 13.
+  Checked 2026-10-31 against Debian 13: the probe, the program list (68
+  programs and Plasma) and a tunnel to a Unix socket, including its
+  cleanup on disconnect; the scripts pass `sh -n`. File Browser and the
+  VNC packages weren't installed for the check, so neither has run.
 - **The sidebar shows AI usage, read through each tool's CLI.** An AI
   section pinned at its foot shows a card per tool, with its logo: Claude's and Codex's plan windows ("5-hour
   limit", "71% left", a bar that empties, "Resets in 1h 18m" or "Resets

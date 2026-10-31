@@ -8,6 +8,9 @@ const server_shell = @import("server_shell.zig");
 const server_folder_picker = @import("server_folder_picker.zig");
 const server_sign_in = @import("server_sign_in.zig");
 const remote_desktop = @import("remote_desktop.zig");
+const server_files = @import("server_files.zig");
+const server_apps = @import("server_apps.zig");
+const tools = @import("server_tools.zig").data;
 const strip_mouse = @import("strip_mouse.zig");
 const workspace = @import("workspace.zig");
 const Window = @import("Window.zig");
@@ -19,12 +22,16 @@ pub const Command = enum(usize) {
     open_folder,
     sign_in,
     remote_desktop,
+    browse_files,
+    open_app,
     remove,
 };
 
 pub fn appendTo(menu: w32.HMENU, with_remove: bool) void {
     append(menu, .new_tab, text.new_tab);
     append(menu, .open_folder, text.open_folder);
+    append(menu, .browse_files, tools.browse_files);
+    append(menu, .open_app, tools.open_app);
     _ = w32.AppendMenuW(menu, w32.MF_SEPARATOR, 0, null);
     append(menu, .remote_desktop, text.remote_desktop);
     append(menu, .sign_in, text.sign_in);
@@ -58,8 +65,31 @@ fn run(self: *Window, first_tab: usize, command: Command, point: w32.POINT) void
                 _ = workspace.openServerAfter(self, host, null, text.install_desktop);
             },
         },
+        .browse_files => switch (server_files.open(self, host)) {
+            .opened => {},
+            .sign_in_needed => offerSignIn(self, host),
+            .missing => if (ask(self, tools.files.install_title, tools.files.install_text)) installThen(self, host, server_files.writeInstall),
+            .failed => tell(self, tools.failed_title, tools.failed_text),
+        },
+        .open_app => switch (server_apps.open(self, host, point)) {
+            .opened, .cancelled => {},
+            .sign_in_needed => offerSignIn(self, host),
+            .missing => if (ask(self, tools.apps.install_title, tools.apps.install_text)) installThen(self, host, server_apps.writeInstall),
+            .failed => tell(self, tools.failed_title, tools.failed_text),
+        },
         .remove => {},
     }
+}
+
+fn offerSignIn(self: *Window, host: []const u8) void {
+    if (ask(self, text.password_needed_title, text.password_needed_text)) server_sign_in.start(self, host);
+}
+
+fn installThen(self: *Window, host: []const u8, writeInstall: fn (*std.Io.Writer) std.Io.Writer.Error!void) void {
+    var script: std.Io.Writer.Allocating = .init(self.app.core_app.alloc);
+    defer script.deinit();
+    writeInstall(&script.writer) catch return;
+    _ = workspace.openServerAfter(self, host, null, script.written());
 }
 
 pub fn openFolder(self: *Window, host: []const u8, start: []const u8, point: w32.POINT) void {
@@ -68,7 +98,7 @@ pub fn openFolder(self: *Window, host: []const u8, start: []const u8, point: w32
     switch (server_folder_picker.pick(self.app.core_app.alloc, hwnd, point, host, start, &folder_buf, strip_mouse.menusDark(self))) {
         .cancelled => {},
         .folder => |folder| _ = workspace.openServer(self, host, folder),
-        .unreachable_without_password => if (ask(self, text.password_needed_title, text.password_needed_text)) server_sign_in.start(self, host),
+        .unreachable_without_password => offerSignIn(self, host),
     }
 }
 
@@ -85,9 +115,17 @@ fn append(menu: w32.HMENU, command: Command, label: []const u8) void {
 }
 
 fn ask(self: *Window, title: []const u8, body: []const u8) bool {
+    return box(self, title, body, w32.MB_YESNO | w32.MB_ICONQUESTION) == w32.IDYES;
+}
+
+fn tell(self: *Window, title: []const u8, body: []const u8) void {
+    _ = box(self, title, body, w32.MB_ICONINFORMATION);
+}
+
+fn box(self: *Window, title: []const u8, body: []const u8, kind: u32) i32 {
     var title_wide: [128:0]u16 = undefined;
     title_wide[wide_string.fromUtf8(&title_wide, title)] = 0;
     var body_wide: [512:0]u16 = undefined;
     body_wide[wide_string.fromUtf8(&body_wide, body)] = 0;
-    return w32.MessageBoxW(self.hwnd, &body_wide, &title_wide, w32.MB_YESNO | w32.MB_ICONQUESTION) == w32.IDYES;
+    return w32.MessageBoxW(self.hwnd, &body_wide, &title_wide, kind);
 }
