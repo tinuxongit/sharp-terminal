@@ -4669,7 +4669,9 @@ fn processLinks(self: *Surface, pos: apprt.CursorPos) !bool {
                 log.warn("failed to get URI for OSC8 hyperlink", .{});
                 return false;
             };
-            try self.openUrl(.{ .kind = .osc8, .url = uri });
+            const resolved_path = try self.resolvePathForOpening(uri);
+            defer if (resolved_path) |p| self.alloc.free(p);
+            try self.openUrl(.{ .kind = .osc8, .url = resolved_path orelse uri });
         },
     }
 

@@ -37,8 +37,9 @@ pub fn decide(value: OpenUrl) Decision {
 
 /// The Windows path of a file or folder on this computer or in WSL that a
 /// link points to, written to `buf`: a `file:` URI without a host (or for
-/// localhost or WSL), or a drive or WSL path, which is what Ghostty hands
-/// over for a clicked relative path. Null for anything else, which
+/// localhost or WSL), a drive or WSL path, which is what Ghostty hands
+/// over for a clicked relative path, or a drive as Git Bash (/c/...) or
+/// WSL (/mnt/c/...) writes it. Null for anything else, which
 /// `decide` judges as an address. Like Windows Terminal, other computers'
 /// files are never opened: reaching them can send the user's credentials.
 pub fn localPath(value: OpenUrl, buf: []u8) ?[]const u8 {
@@ -52,7 +53,7 @@ pub fn localPath(value: OpenUrl, buf: []u8) ?[]const u8 {
     else if (isDrivePath(url) or isWslPath(url))
         copyInto(buf, 0, url) orelse return null
     else
-        return null;
+        fromMountedDrive(url, buf) orelse return null;
     std.mem.replaceScalar(u8, path, '/', '\\');
     if (!isDrivePath(path) and !isWslPath(path)) return null;
     if (hasHiddenText(path)) return null;
@@ -76,6 +77,13 @@ fn fromFileUri(url: []const u8, buf: []u8) ?[]u8 {
     const prefix = copyInto(buf, 0, "\\\\") orelse return null;
     const named = copyInto(buf, prefix.len, host) orelse return null;
     return copyInto(buf, named.len, decoded);
+}
+
+fn fromMountedDrive(path: []const u8, buf: []u8) ?[]u8 {
+    const rest = if (std.mem.startsWith(u8, path, "/mnt/")) path["/mnt".len..] else path;
+    if (rest.len < 3 or rest[0] != '/' or !std.ascii.isAlphabetic(rest[1]) or rest[2] != '/') return null;
+    const drive = copyInto(buf, 0, &.{ std.ascii.toUpper(rest[1]), ':' }) orelse return null;
+    return copyInto(buf, drive.len, rest[2..]);
 }
 
 /// Copy `text` to `buf` at `at`, returning everything written so far.
