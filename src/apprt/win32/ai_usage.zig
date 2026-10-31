@@ -19,12 +19,9 @@
 const std = @import("std");
 const w32 = @import("win32.zig");
 const global = @import("../../global.zig");
-const internal_os = @import("../../os/main.zig");
 const profiles = @import("profiles.zig");
-const wide_string = @import("wide_string.zig");
+const HiddenCli = @import("HiddenCli.zig");
 
-const windows = internal_os.windows;
-const kernel32 = windows.exp.kernel32;
 const log = std.log.scoped(.ai_usage);
 
 /// A plan's usage window: how much is used and when it starts over.
@@ -181,7 +178,7 @@ fn poll(notify: w32.HWND, message: u32) void {
 /// previous windows stay.
 fn readClaude(alloc: std.mem.Allocator, into: *Plan) void {
     // The JSON's quotes are escaped: Windows strips bare ones from arguments.
-    var cli = Cli.start("claude.exe --output-format stream-json --verbose --input-format stream-json " ++
+    var cli = HiddenCli.start("claude.exe --output-format stream-json --verbose --input-format stream-json " ++
         "--settings \"{\\\"disableAllHooks\\\":true}\" --strict-mcp-config") orelse return;
     defer cli.end();
     cli.write("{\"type\":\"control_request\",\"request_id\":\"init\",\"request\":{\"subtype\":\"initialize\"}}\n");
@@ -234,7 +231,7 @@ fn claudeWindow(value: ?std.json.Value, minutes: u32, kind: Window.Kind) ?Window
 
 /// Codex's ChatGPT plan limits through its app-server's JSON-RPC.
 fn readCodex(alloc: std.mem.Allocator, into: *Plan) void {
-    var cli = Cli.start("codex.exe app-server") orelse return;
+    var cli = HiddenCli.start("codex.exe app-server") orelse return;
     defer cli.end();
     cli.write("{\"id\":0,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"sharp\",\"title\":\"Sharp\",\"version\":\"0.1.0\"}}}\n");
     var line_buf: std.ArrayList(u8) = .empty;
@@ -301,7 +298,7 @@ fn readOpenCode(alloc: std.mem.Allocator, days: u8) ?Spend {
     // --standalone runs a private server that ends with the command, rather
     // than leaving OpenCode's background service started behind.
     const command = std.fmt.bufPrint(&cmd, "cmd.exe /d /c opencode stats --standalone --json --cost --days {d}", .{days}) catch return null;
-    var cli = Cli.start(command) orelse return null;
+    var cli = HiddenCli.start(command) orelse return null;
     defer cli.end();
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(alloc);
@@ -368,104 +365,3 @@ pub fn parseIso8601(s: []const u8) ?i64 {
     }
     return t;
 }
-
-/// A CLI run with its output (and input) on pipes, never longer than
-/// `timeout_ms`, and with no console window.
-const Cli = struct {
-    process: windows.HANDLE,
-    stdin_w: windows.HANDLE,
-    stdout_r: windows.HANDLE,
-    started_ms: u64,
-
-    const timeout_ms = 30_000;
-
-    fn start(command_line: []const u8) ?Cli {
-        var sa: windows.SECURITY_ATTRIBUTES = .{ .nLength = @sizeOf(windows.SECURITY_ATTRIBUTES), .lpSecurityDescriptor = null, .bInheritHandle = windows.TRUE };
-        var out_r: windows.HANDLE = undefined;
-        var out_w: windows.HANDLE = undefined;
-        var in_r: windows.HANDLE = undefined;
-        var in_w: windows.HANDLE = undefined;
-        if (kernel32.CreatePipe(&out_r, &out_w, &sa, 0) == windows.FALSE) return null;
-        if (kernel32.CreatePipe(&in_r, &in_w, &sa, 0) == windows.FALSE) {
-            _ = kernel32.CloseHandle(out_r);
-            _ = kernel32.CloseHandle(out_w);
-            return null;
-        }
-        // Only the child's ends are inherited.
-        _ = kernel32.SetHandleInformation(out_r, windows.HANDLE_FLAG_INHERIT, 0);
-        _ = kernel32.SetHandleInformation(in_w, windows.HANDLE_FLAG_INHERIT, 0);
-        defer _ = kernel32.CloseHandle(out_w);
-        defer _ = kernel32.CloseHandle(in_r);
-
-        var wide: [512:0]u16 = undefined;
-        const len = wide_string.fromUtf8(&wide, command_line);
-        wide[len] = 0;
-        var startup: windows.STARTUPINFOW = std.mem.zeroes(windows.STARTUPINFOW);
-        startup.cb = @sizeOf(windows.STARTUPINFOW);
-        startup.dwFlags = windows.STARTF_USESTDHANDLES;
-        startup.hStdInput = in_r;
-        startup.hStdOutput = out_w;
-        startup.hStdError = out_w;
-        var info: windows.PROCESS_INFORMATION = undefined;
-        const create_no_window = 0x08000000;
-        if (kernel32.CreateProcessW(null, &wide, null, null, windows.TRUE, create_no_window, null, null, &startup, &info) == windows.FALSE) {
-            _ = kernel32.CloseHandle(out_r);
-            _ = kernel32.CloseHandle(in_w);
-            return null;
-        }
-        _ = kernel32.CloseHandle(info.hThread);
-        return .{ .process = info.hProcess, .stdin_w = in_w, .stdout_r = out_r, .started_ms = w32.GetTickCount64() };
-    }
-
-    fn write(self: *Cli, bytes: []const u8) void {
-        var written: windows.DWORD = 0;
-        _ = kernel32.WriteFile(self.stdin_w, bytes.ptr, @intCast(bytes.len), &written, null);
-    }
-
-    fn timedOut(self: *const Cli) bool {
-        return w32.GetTickCount64() - self.started_ms > timeout_ms;
-    }
-
-    /// Read what is waiting, without blocking; false once the output has
-    /// ended (or the time is up).
-    fn pump(self: *Cli, alloc: std.mem.Allocator, into: *std.ArrayList(u8)) bool {
-        if (self.timedOut()) return false;
-        var avail: windows.DWORD = 0;
-        if (kernel32.PeekNamedPipe(self.stdout_r, null, 0, null, &avail, null) == windows.FALSE) return false;
-        if (avail == 0) {
-            w32.Sleep(20);
-            return true;
-        }
-        var buf: [4096]u8 = undefined;
-        var got: windows.DWORD = 0;
-        if (kernel32.ReadFile(self.stdout_r, &buf, @min(buf.len, avail), &got, null) == windows.FALSE) return false;
-        into.appendSlice(alloc, buf[0..got]) catch return false;
-        return true;
-    }
-
-    /// The next line of output, which the caller frees, or null once the
-    /// output has ended. `buf` holds what was read past it.
-    fn readLine(self: *Cli, alloc: std.mem.Allocator, buf: *std.ArrayList(u8)) ?[]u8 {
-        while (true) {
-            if (std.mem.indexOfScalar(u8, buf.items, '\n')) |nl| {
-                const line = alloc.dupe(u8, buf.items[0..nl]) catch return null;
-                const rest = buf.items.len - nl - 1;
-                std.mem.copyForwards(u8, buf.items[0..rest], buf.items[nl + 1 ..]);
-                buf.shrinkRetainingCapacity(rest);
-                return line;
-            }
-            if (!self.pump(alloc, buf)) return null;
-        }
-    }
-
-    fn readAll(self: *Cli, alloc: std.mem.Allocator, into: *std.ArrayList(u8)) void {
-        while (self.pump(alloc, into)) {}
-    }
-
-    fn end(self: *Cli) void {
-        _ = kernel32.TerminateProcess(self.process, 0);
-        _ = kernel32.CloseHandle(self.process);
-        _ = kernel32.CloseHandle(self.stdin_w);
-        _ = kernel32.CloseHandle(self.stdout_r);
-    }
-};

@@ -100,6 +100,11 @@ commands and conventions; this file covers what is specific to Sharp.
 - `src/apprt/win32/ai_usage.zig`: reads Claude's and Codex's plan windows
   and OpenCode's spending through their CLIs, on a background thread, for
   the sidebar's AI section.
+- `src/apprt/win32/server_shell.zig`: the command a server tab runs:
+  ssh with Ghostty's terminfo installed on the server if missing, then
+  the shell in the tab's server folder.
+- `src/apprt/win32/HiddenCli.zig`: runs a command line with no window,
+  its output on a pipe, within a time limit.
 - `src/apprt/win32/servers.zig`: the servers the sidebar offers (hosts in
   `~/.ssh/config` and recent ones), and which addresses ssh may be given.
 - `src/apprt/win32/BrowserPanel.zig`: the browser panel, a child window
@@ -424,6 +429,18 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   as Windows Terminal's SSH profiles do, so it ends with the connection.
   Addresses are checked before reaching ssh, since a leading `-` would be
   read as an option.
+- **Server tabs bring Ghostty's terminfo with them.** Sharp sets
+  `TERM=xterm-ghostty`, which servers don't know, so vim, htop and less
+  failed. Ghostty fixes that through its shell integration's ssh wrapper,
+  which Windows shells don't have, so a server tab runs `ssh -t` with a
+  script that compiles the terminfo into `~/.terminfo` with `tic` when
+  `infocmp` doesn't know it (falling back to `xterm-256color`), `cd`s to
+  the tab's server folder and execs the login shell. One connection, so
+  one password. The script is POSIX: a fish login shell won't run it.
+  Its command line is too long for the 3-second poll to read, so a tab
+  opened on a server keeps its server (`opened_on_server`). Session
+  lines keep the server folder in `folder`. Checked 2026-10-31 against
+  Debian 13. An ssh typed in a local shell still sends `xterm-ghostty`.
 - **The sidebar shows AI usage, read through each tool's CLI.** An AI
   section pinned at its foot shows a card per tool, with its logo: Claude's and Codex's plan windows ("5-hour
   limit", "71% left", a bar that empties, "Resets in 1h 18m" or "Resets

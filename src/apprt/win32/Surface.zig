@@ -22,6 +22,7 @@ const w32 = @import("win32.zig");
 const profiles = @import("profiles.zig");
 const brand = @import("brand.zig");
 const servers = @import("servers.zig");
+const server_shell = @import("server_shell.zig");
 const claude_session = @import("claude_session.zig");
 const frame_log = @import("frame_log.zig");
 const FramePacer = @import("frame_pacer.zig");
@@ -85,6 +86,9 @@ folder_len: u16 = 0,
 /// The SSH server this pane is connected to, found by Window's polling.
 ssh_host: [128]u8 = undefined,
 ssh_host_len: u8 = 0,
+server_folder: [server_shell.max_folder_len]u8 = undefined,
+server_folder_len: u16 = 0,
+opened_on_server: bool = false,
 /// The Claude Code conversation running here, found the same way.
 claude: ?claude_session.Session = null,
 opened_ms: u64 = 0,
@@ -838,6 +842,16 @@ pub fn setSshHost(self: *Surface, detected: []const u8) bool {
     @memcpy(self.ssh_host[0..n], host[0..n]);
     self.ssh_host_len = n;
     return true;
+}
+
+pub fn serverFolder(self: *const Surface) []const u8 {
+    return self.server_folder[0..self.server_folder_len];
+}
+
+pub fn setServerFolder(self: *Surface, path: []const u8) void {
+    const n = if (server_shell.validFolder(path)) path.len else 0;
+    @memcpy(self.server_folder[0..n], path[0..n]);
+    self.server_folder_len = @intCast(n);
 }
 
 fn setHomeFolder(self: *Surface) void {

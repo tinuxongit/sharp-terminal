@@ -22,6 +22,7 @@ const termio = @import("../../termio.zig");
 const claude_session = @import("claude_session.zig");
 const session = @import("session.zig");
 const servers = @import("servers.zig");
+const server_shell = @import("server_shell.zig");
 const configpkg = @import("../../config.zig");
 const log = std.log.scoped(.win32);
 const Window = @import("Window.zig");
@@ -361,7 +362,7 @@ pub fn sessionTab(surface: *const Surface, arena: ?std.mem.Allocator) session.Ta
     return .{
         .profile = surface.profileName(),
         // A conversation resumes only from the folder Claude Code ran in.
-        .folder = if (claude != null and claude.?.folder().len > 0) claude.?.folder() else surface.folderPath(),
+        .folder = if (surface.sshHost().len > 0) surface.serverFolder() else if (claude != null and claude.?.folder().len > 0) claude.?.folder() else surface.folderPath(),
         .server = surface.sshHost(),
         .claude = if (claude) |c| &c.id else "",
         .pages = if (arena) |a| browser_dock.pagesOf(surface.parent_window, surface.pane_id, a) else &.{},
@@ -372,11 +373,11 @@ pub fn sessionTab(surface: *const Surface, arena: ?std.mem.Allocator) session.Ta
 /// that shell is gone) in its folder (or the usual one, if the folder is
 /// gone).
 pub fn openSavedTab(self: *Window, tab: session.Tab) void {
-    const folder = if (profiles.programExists(tab.folder)) tab.folder else null;
     if (tab.server.len > 0) {
-        const surface = openServer(self, tab.server, folder) orelse return;
+        const surface = openServer(self, tab.server, if (server_shell.validFolder(tab.folder)) tab.folder else null) orelse return;
         return browser_dock.rememberPages(self, surface.pane_id, tab.pages);
     }
+    const folder = if (profiles.programExists(tab.folder)) tab.folder else null;
     const list = profiles.detect();
     const index = for (0..list.len) |i| {
         if (std.mem.eql(u8, list.name(i), tab.profile)) break i;
@@ -394,21 +395,23 @@ pub fn openSavedTab(self: *Window, tab: session.Tab) void {
     surface.core_surface.io.queueMessage(msg, .unlocked);
 }
 
-/// A new tab running ssh to `destination`, from `folder` when given.
 pub fn openServer(self: *Window, destination: []const u8, folder: ?[]const u8) ?*Surface {
+    return openServerAfter(self, destination, folder, "");
+}
+
+pub fn openServerAfter(self: *Window, destination: []const u8, folder: ?[]const u8, before: []const u8) ?*Surface {
     // The address may come from a file or a process, and must not be
     // read by ssh as an option.
     if (!servers.valid(destination)) {
         log.warn("not an ssh destination: {s}", .{destination});
         return null;
     }
-    var buf: [servers.max_len + 16]u8 = undefined;
-    const text = std.fmt.bufPrintSentinel(&buf, "ssh.exe {s}", .{destination}, 0) catch return null;
-    const command: configpkg.Command = .{ .shell = text };
+    const argv = self.app.core_app.alloc.create(server_shell.Argv) catch return null;
+    defer self.app.core_app.alloc.destroy(argv);
+    const command: configpkg.Command = .{ .direct = (server_shell.build(argv, destination, folder, before) orelse return null).slice() };
     const surface = self.addTabWithOptions(.{
         .context = .tab,
         .command = &command,
-        .working_directory = folder,
         .icon = self.app.profile_icons.get("ssh.exe", self.tabIconSize()),
         .profile_name = "SSH",
     }) catch |err| {
@@ -417,6 +420,8 @@ pub fn openServer(self: *Window, destination: []const u8, folder: ?[]const u8) ?
     };
     // File it under Servers now, not at the next poll.
     _ = surface.setSshHost(destination);
+    surface.opened_on_server = true;
+    surface.setServerFolder(folder orelse "");
     if (self.app.recent_servers.add(destination)) self.app.saveSession();
     self.invalidateTabBar();
     return surface;
@@ -433,6 +438,7 @@ pub fn pollTabs(self: *Window) void {
         if (!surface.core_surface_ready) continue;
         const pid = surface.core_surface.io.processId() orelse continue;
         if (surface.setClaudeSession(claude_session.find(&procs, pid))) changed = true;
+        if (surface.opened_on_server) continue;
         var buf: [128]u8 = undefined;
         const host = ssh.host(&procs, pid, &buf) orelse "";
         if (!surface.setSshHost(host)) continue;
