@@ -82,6 +82,9 @@ commands and conventions; this file covers what is specific to Sharp.
   "+", with icons and shortcuts.
 - `src/apprt/win32/tab_sidebar.zig`: tabs as a list beside the terminal,
   grouped by where the shell runs and by folder; layout and painting.
+- `src/apprt/win32/sidebar_group_menu.zig`: the right-click menu on a
+  sidebar folder or server (new tab there, open in Explorer, remove,
+  which closes its tabs); its text is in `profiles.zon`.
 - `src/apprt/win32/sidebar_usage.zig`: the sidebar's AI section, a card
   per tool with its plan windows or spending.
 - `src/apprt/win32/logos.zon`: the tools' logos as outlines, made by
@@ -340,7 +343,9 @@ zig build -Dapp-runtime=win32 -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast
   resizes the sidebar. The strip has no "+" in this mode: each
   folder, and the Local and WSL titles, show "+" (default shell) and an
   arrow (shell menu) on hover. On a title they ask for the folder first,
-  with Windows' own picker.
+  with Windows' own picker. Right-clicking a folder opens a tab there, opens it
+  in Explorer, or removes it, closing its tabs (asking first if a command
+  runs); a server offers only removing.
 - **`sharp +new-tab` and `+new-window` open in the running Sharp**, as
   `wt -w 0 nt` does. Ghostty's CLI actions call `performIpc`; on Windows
   the command sends its arguments (`-e`, `--command`,

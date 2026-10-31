@@ -12,6 +12,7 @@ const splits = @import("splits.zig");
 const log = std.log.scoped(.win32);
 const Window = @import("Window.zig");
 const strip_mouse = @import("strip_mouse.zig");
+const sidebar_group_menu = @import("sidebar_group_menu.zig");
 const BrowserPanel = @import("BrowserPanel.zig");
 const browser_dock = @import("browser_dock.zig");
 
@@ -433,7 +434,11 @@ pub fn windowWndProc(
                     strip_mouse.showTabMenu(window, i, x, y);
                     return 0;
                 },
-                .none, .search, .resize, .group, .group_new, .group_menu, .section, .section_new, .section_menu, .server_field, .usage_title => {},
+                .group, .group_new, .group_menu => |i| {
+                    sidebar_group_menu.show(window, i, x, y);
+                    return 0;
+                },
+                .none, .search, .resize, .section, .section_new, .section_menu, .server_field, .usage_title => {},
             }
             return w32.DefWindowProcW(hwnd, msg, wparam, lparam);
         },

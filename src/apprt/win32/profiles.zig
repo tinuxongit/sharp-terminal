@@ -52,6 +52,13 @@ pub const AiUsage = struct {
     checking: []const u8,
 };
 
+pub const GroupMenu = struct {
+    new_tab: []const u8,
+    open_folder: []const u8,
+    remove_folder: []const u8,
+    remove_server: []const u8,
+};
+
 pub const Sidebar = struct {
     search_placeholder: []const u8,
     local: []const u8,
@@ -63,6 +70,7 @@ pub const Sidebar = struct {
     server_placeholder: []const u8,
     /// The Servers menu when there is nothing to list.
     no_servers: []const u8,
+    group_menu: GroupMenu,
     ai: AiUsage,
 };
 

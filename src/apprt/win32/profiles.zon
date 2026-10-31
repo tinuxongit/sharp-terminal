@@ -70,6 +70,14 @@
         .pick_folder = "Open a tab in folder",
         .server_placeholder = "user@host",
         .no_servers = "No servers in ~/.ssh/config yet",
+        // The menu a right-click on a folder's or server's title opens.
+        // Removing closes every tab in it, asking first if a command runs.
+        .group_menu = .{
+            .new_tab = "New Tab Here",
+            .open_folder = "Open in File Explorer",
+            .remove_folder = "Remove Folder",
+            .remove_server = "Remove Server",
+        },
         // The AI section at the foot of the sidebar: Claude Code's plan
         // windows and OpenCode's spending, read through their CLIs.
         .ai = .{
